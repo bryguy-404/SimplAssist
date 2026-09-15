@@ -14,7 +14,7 @@ Implementation is on `codex/voice-pilot`, based on `origin/main` at `4853daf`. T
 | 4 | `f915046` | Admin review, recordings, retention, cost controls and recovery |
 | 5 | `eea428c` | Readiness script, saved worker settings and acceptance runbook; activation pending |
 
-**A passing local harness does not make the pilot callable.** Production migrations are applied and verified. The application and voice worker are deployed, the dedicated OpenAI key passes model access, and one approved tester is saved. The private pilot is enabled for the approved tester. Actual inbound calls and audio-quality acceptance remain outstanding; infrastructure readiness is not evidence that a caller has heard a correct answer. Record actual deployment and acceptance results below; do not infer them from simulated audio or model availability.
+**A passing local harness does not make the pilot callable.** Production migrations are applied and verified. The application and voice worker are deployed, the dedicated OpenAI key passes model access, and one approved tester is saved. The private pilot is enabled for the approved tester. The first inbound tester call completed and Bryan gave positive naturalness feedback. The remaining structured calls and full accuracy/audio-quality acceptance are outstanding; infrastructure readiness alone is not evidence that a caller has heard a correct answer. Record actual deployment and acceptance results below; do not infer them from simulated audio or model availability.
 
 ## Verified implementation checks
 
@@ -23,7 +23,7 @@ Implementation is on `codex/voice-pilot`, based on `origin/main` at `4853daf`. T
 - TypeScript, ESLint, production build and the dedicated worker TypeScript build passed. Build used disposable local credentials and a dummy email key; it did not exercise paid providers.
 - Browser verification: protected admin login, tester settings saved and audited in the database, feedback saved, read-only call transcript/usage review, desktop and 390-pixel phone layouts, no page overflow or browser errors. Unauthenticated settings mutation returned 404.
 - Both PCM16/16 kHz and PCMU/8 kHz bridge profiles passed the injected-socket audio harness. Tests include a two-second provider startup, corrections, duplicate and reordered events, missing final usage, operational stops, and failures.
-- Voice naturalness, actual playback latency, live Telnyx recording URLs and real provider sessions are **not yet accepted**.
+- Bryan approved the naturalness of the first live call. Its metadata confirms a normal caller hangup, 75 seconds of confirmed voice usage, acknowledged playback, and one recording. The full acceptance set, measured playback latency, and recording-content review remain outstanding.
 
 The database suite ran in a separately initialized disposable `SimplAssistVoice` Supabase stack at local ports 55321/55322. This preserved the original checkout's local database. A temporary copy of the guarded database harness used that project name and ports; copied concurrency-test dblink hosts were changed to `supabase_db_SimplAssistVoice`. No production DB URL was passed to that harness. For routine verification on the repository's own disposable stack, use `npm run test:db:local` and retain its local-only guards.
 
@@ -185,7 +185,7 @@ These stages are recorded commitments for the later product; Stage 1 approval do
 - First real call: Bryan reported that the assistant sounded amazing and that he liked its attention to detail. His requested follow-up is a natural business-name greeting in the same voice. This is positive user feedback, not completion of the 20-call acceptance set or a verification of every call record.
 
 
-## Natural greeting follow-up (September 15, prepared locally)
+## Natural greeting follow-up (September 15, deployed)
 
 Requested greeting: “Hi, this is [business name]. How are you doing today?”
 The worker loads the called business's saved name and asks Marin to speak this
@@ -206,7 +206,27 @@ non-tester text/voicemail flow remain as before. Calls without the Polly notice
 no longer include its estimated speech cost. The admin call page distinguishes
 prior acknowledgment from a played notice.
 
-Production migration/activation is pending. Apply 073, verify the columns and
-service-only RPCs, deploy the worker and application, then record only the
-existing informed tester's acknowledgment and verify it before testing. Do not
-expand this private-test behavior to public callers as part of this change.
+Bryan explicitly approved applying migration 073, recording his existing
+acknowledgment, and deploying this change. Production read-back matched all five
+function bodies and their fixed search paths/service-only permissions; all three
+new columns and migration history are verified. Only the existing owner tester
+has a prior acknowledgment, with an audit entry. Pilot revision 3, 12,000 seconds,
+two concurrent calls, and 600 seconds per call remain unchanged.
+
+- Source commit: `21c92e9918d769fef7938f65b99571379a7352ac`.
+- Migration SHA-256: `5b960e51d367d88ba61694c4e7bb8096f4795c11951cf45d37c426c4a5f63b63`.
+- Railway worker: `c59990d8-909d-4fb8-85b2-f8d452a2f6fd`, SUCCESS.
+- Railway app: `9e5d1da7-b2f2-4567-8eef-2b633bb8933d`, SUCCESS.
+- Checks: 388 targeted unit/integration tests, 61 SQL files / 2,763 assertions,
+  Next build, worker TypeScript, ESLint, local REST recovery filter, production
+  read-only preflight, authenticated maintenance/worker readiness all pass.
+  Unauthenticated worker readiness returns 404.
+- The new greeting still needs Bryan's next real inbound call to verify how it
+  sounds. The earlier successful call used the previous opening.
+
+The migration and greeting are deployed; do not expand this private-test behavior
+to public callers as part of this change. To restore the spoken announcement for
+a tester, clear that tester's prior acknowledgment or remove and re-add the tester.
+Keep call history intact. The short greeting remains in Marin after any notice.
+The application is still a feature-source upload; a future deployment of the old
+main branch would replace this pilot version.

@@ -230,3 +230,57 @@ a tester, clear that tester's prior acknowledgment or remove and re-add the test
 Keep call history intact. The short greeting remains in Marin after any notice.
 The application is still a feature-source upload; a future deployment of the old
 main branch would replace this pilot version.
+
+## Opening silence follow-up (September 15)
+
+Bryan's second call confirmed the natural greeting, but exposed dead air between
+the last ring and the greeting. The previous routing waited for the 11.2-second
+ringback file to finish before requesting media; live connection startup followed
+that. The outgoing channel of the saved test recording began with approximately
+4.86 seconds below -50 dBFS. Recording begins after the ringing callback, so this
+does not include the entire gap from the last ring heard on the handset. The old
+first-audio timestamp could also represent silence rather than speech.
+
+Source `e3baab79487fd4c81db5894369528ec0d89013f5` queues a bounded continuation of
+the same ringback while the original ring is still playing. The original ending
+still triggers media setup. For the direct greeting path, the worker waits for
+audible output, retains 100 ms of preceding audio, stops/clears the provider's
+ringback queue, and only then sends the buffered opening. There is a two-second
+handoff deadline, a 12-second greeting-audio deadline after session activation,
+and the normal fallback/cleanup if startup fails. The temporary startup queue
+returns to the normal 1.5-second bound after draining. Timing logs contain only
+session IDs, phases, and elapsed milliseconds; they do not prove handset playback.
+
+After its opening instruction is acknowledged, GPT-Live receives one explicit
+request to begin that greeting, following the official greeting guidance. The
+greeting wording, Marin voice, business knowledge, tester eligibility, disclosure
+rules, minute budget, and business Q&A scope are unchanged. Other pilot testers
+hear the existing notice after the continuation is stopped. Non-testers retain
+the original text/voicemail path. No database migration or settings change is
+needed. This covers the wait with ringing; it does not promise instant AI setup.
+
+Verification: 401 targeted tests across 17 files (400-test regression run plus
+the added post-handoff buffer regression), worker TypeScript, ESLint, Next build,
+and diff checks pass. Coverage includes both audio codecs, silent output packets,
+preservation of the first audio samples, slow/failed ring-stop, duplicate webhook
+commands, hangup during handoff, greeting timeout, and normal notice routing.
+
+Deploy the worker before the application. The new worker accepts existing media
+connections unchanged; the updated app opts into the handoff with
+`opening_ringback=v1` on the authenticated media connection, and the stored prior
+acknowledgment is still required. For rollback, restore the app first, then drain
+calls before restoring the worker. Keep the pilot private. The real-call retest
+must check the extra rings, the transition into a complete “Hi,” interruption,
+hangup, recording, usage, and no duplicate missed-call text. Do not claim acoustic
+acceptance from mock audio or an HTTP health check.
+
+Deployed and verified: worker `dc220fa5-eec5-493f-9a87-94202dbc21da` and app
+`bd53b224-e40c-476f-a53b-e41791430dec` both SUCCESS, from the clean source archive
+SHA-256 `852b5cc7d5552f4eff37d3a082381c74e6f77297f958ffd57437a92db8904428`.
+Application health and authenticated worker readiness returned 200; unauthorized
+readiness returned 404 and an invalid stream credential with the new handoff
+flag returned 401. Full read-only schema/provider/callback/tester preflight
+passed. Zero active/nonfinal sessions at verification. Pilot revision 3 remains
+enabled with 12,000 seconds, two simultaneous calls, and 600 seconds per call.
+The scan worker and all database settings were untouched. Bryan's next inbound
+call is still needed for acoustic verification of the ring-to-greeting handoff.

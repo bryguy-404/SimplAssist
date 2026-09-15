@@ -45,8 +45,8 @@ export default function ContactStats({ contacts }: ContactStatsProps) {
       color: "text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]",
     },
     {
-      label: "SMS / Web Chat",
-      value: `${smsCount} / ${webChatCount}`,
+      label: contacts.some(c => c.source_channel === "voice") ? "SMS / Web Chat / Voice" : "SMS / Web Chat",
+      value: `${smsCount} / ${webChatCount}` + (contacts.some(c => c.source_channel === "voice") ? ` / ${contacts.filter(c => c.source_channel === "voice").length}` : ""),
       icon: Phone,
       secondIcon: MessageCircle,
       color: "text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]",

@@ -265,7 +265,9 @@ export default function ContactsTable({
                     {contact.email || "\u2014"}
                   </td>
                   <td className="px-6 py-4">
-                    {contact.source_channel === "sms" ? (
+                    {contact.source_channel === "voice" ? (
+                  <Phone aria-label="Voice call" className="h-4 w-4" />
+                ) : contact.source_channel === "sms" ? (
                       <Phone className="h-4 w-4 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
                     ) : (
                       <MessageCircle className="h-4 w-4 text-stone-500 dark:text-[#bdbdbf]" />

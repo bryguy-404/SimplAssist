@@ -257,12 +257,14 @@ export default function ContactDetail({
                 Channel
               </label>
               <p className={`mt-1 flex items-center gap-1.5 text-sm ${ink}`}>
-                {contact.source_channel === "sms" ? (
+                {contact.source_channel === "voice" ? (
+                  <Phone aria-label="Voice call" className="h-4 w-4" />
+                ) : contact.source_channel === "sms" ? (
                   <Phone className="h-4 w-4 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
                 ) : (
                   <MessageCircle className="h-4 w-4 text-stone-500 dark:text-[#bdbdbf]" />
                 )}
-                {contact.source_channel === "sms" ? "SMS" : "Web Chat"}
+                {contact.source_channel === "voice" ? "Voice" : contact.source_channel === "sms" ? "SMS" : "Web Chat"}
               </p>
             </div>
             <div>
@@ -335,7 +337,7 @@ export default function ContactDetail({
                       )}
                       <div>
                         <p className={`text-sm font-medium ${ink}`}>
-                          {conv.channel === "sms" ? "SMS" : "Web Chat"}
+                          {conv.channel === "voice" ? "Voice" : conv.channel === "sms" ? "SMS" : "Web Chat"}
                         </p>
                         <p className={`text-xs ${body}`}>
                           {relativeTime(conv.last_message_at)}

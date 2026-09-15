@@ -69,7 +69,7 @@ export function formatTimesAsked(occurrenceCount: number): string {
 }
 
 export function formatKnowledgeGapChannel(channel: Channel): string {
-  return channel === "sms" ? "SMS" : "Web Chat";
+  return channel === "voice" ? "Voice" : channel === "sms" ? "SMS" : "Web Chat";
 }
 
 export function formatKnowledgeGapLastSeen(

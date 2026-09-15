@@ -150,6 +150,7 @@ export function MessageThread({
 
   async function handleSend() {
     if (
+      conversation.channel === "voice" ||
       !input.trim() ||
       sending ||
       effectiveIsAiHandling ||
@@ -279,7 +280,7 @@ export function MessageThread({
       <div className="flex items-center justify-between border-b border-[#ece4d8] dark:border-white/[0.10] px-4 py-3">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-stone-100 dark:bg-white/[0.06]">
-            {conversation.channel === "sms" ? (
+            {conversation.channel === "sms" || conversation.channel === "voice" ? (
               <Phone className="h-5 w-5 text-stone-500 dark:text-[#bdbdbf]" />
             ) : (
               <MessageCircle className="h-5 w-5 text-stone-500 dark:text-[#bdbdbf]" />
@@ -295,7 +296,7 @@ export function MessageThread({
                 <span>· {conversation.contact.email}</span>
               )}
               <span>
-                · {conversation.channel === "sms" ? "SMS" : "Web Chat"}
+                · {conversation.channel === "voice" ? "Voice" : conversation.channel === "sms" ? "SMS" : "Web Chat"}
               </span>
               <span
                 className={cn(
@@ -354,7 +355,7 @@ export function MessageThread({
               ? "Plan inactive"
               : conversation.channel === "web_chat"
               ? "AI chat"
-              : "Manual replies"}
+              : conversation.channel === "voice" ? "Call transcript" : "Manual replies"}
           </span>
         )}
       </div>
@@ -461,7 +462,9 @@ export function MessageThread({
             {sendError}
           </div>
         )}
-        {webChatLocked ? (
+        {conversation.channel === "voice" ? (
+          <p className="px-4 py-3 text-sm text-stone-500">This voice transcript is read-only. Text sending and live takeover are unavailable.</p>
+        ) : webChatLocked ? (
           <div className={cn("flex items-start gap-3 rounded-lg px-4 py-3 text-sm", statusWarning)}>
             <Lock className="mt-0.5 h-4 w-4 shrink-0" />
             <div>

@@ -28,7 +28,7 @@ export type BookingMode = "collect_info" | "schedule_direct";
 
 export type PrimaryGoal = "book" | "signup" | "quote" | "callback";
 
-export type Channel = "sms" | "web_chat";
+export type Channel = "sms" | "web_chat" | "voice";
 
 export type OperationalService = "ai_replies" | "texting" | "bookings";
 

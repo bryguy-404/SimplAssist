@@ -1,3 +1,4 @@
+import { loadBusinessContextResults } from "./businessContext";
 import { createHash, randomUUID } from "node:crypto";
 import { meteredAnthropic as anthropic } from "@/lib/anthropic/client";
 import {
@@ -1055,6 +1056,9 @@ export async function processIncomingMessageDetailed(
   sessionId: string | null = null,
   options: ProcessIncomingMessageOptions = {}
 ): Promise<ProcessIncomingMessageResult> {
+  if (channel === "voice") {
+    throw new AIProcessingStateError("Voice must use the call-scoped Q&A engine.");
+  }
   let activeReplyReservation: ActiveAIReplyReservation | null = null;
   let replyFinalized = false;
   const providerRequestInstanceId = randomUUID();
@@ -1340,61 +1344,7 @@ export async function processIncomingMessageDetailed(
 
     let stateResults;
     try {
-      stateResults = await Promise.all([
-        supabaseAdmin
-          .from("businesses")
-          .select("*")
-          .eq("id", businessId)
-          .single(),
-        supabaseAdmin
-          .from("ai_settings")
-          .select("*")
-          .eq("business_id", businessId)
-          .single(),
-        supabaseAdmin
-          .from("services")
-          .select("*")
-          .eq("business_id", businessId)
-          .eq("is_active", true),
-        supabaseAdmin
-          .from("faqs")
-          .select("*")
-          .eq("business_id", businessId)
-          .eq("is_active", true),
-        supabaseAdmin
-          .from("business_hours")
-          .select("*")
-          .eq("business_id", businessId),
-        supabaseAdmin
-          .from("business_knowledge_items")
-          .select(
-            "id,business_id,kind,category,title,content,source,is_active,sort_order,verified_at,created_at,updated_at"
-          )
-          .eq("business_id", businessId)
-          .eq("is_active", true)
-          .eq("kind", "overview")
-          .order("sort_order", { ascending: true })
-          .order("verified_at", { ascending: false })
-          .order("id", { ascending: true })
-          .limit(1),
-        supabaseAdmin
-          .from("business_knowledge_items")
-          .select(
-            "id,business_id,kind,category,title,content,source,is_active,sort_order,verified_at,created_at,updated_at"
-          )
-          .eq("business_id", businessId)
-          .eq("is_active", true)
-          .in("kind", ["fact", "policy"])
-          .order("sort_order", { ascending: true })
-          .order("verified_at", { ascending: false })
-          .order("id", { ascending: true })
-          .limit(24),
-        supabaseAdmin
-          .from("google_calendar_tokens")
-          .select("id")
-          .eq("business_id", businessId)
-          .maybeSingle(),
-      ]);
+      stateResults = await loadBusinessContextResults(supabaseAdmin, businessId);
     } catch (error) {
       throw new AIProcessingStateError(
         `Could not load AI context for business ${businessId}.`,

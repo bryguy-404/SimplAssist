@@ -18,6 +18,7 @@ export async function getOrCreateConversation(
   // A handed-off conversation is still the live customer thread. Reusing it
   // is essential: creating a fresh `active` row would silently turn AI back
   // on after a human agent took over.
+  if (channel === "voice") throw new Error("Voice conversations are created once per admitted call.");
   const existing = await findOpenConversation(businessId, contactId, channel);
 
   if (existing) return existing as Conversation;

@@ -25,6 +25,9 @@ export function getConversationAccessState(args: {
   canUseAiSms: boolean;
   canUseWebChat: boolean;
 }): ConversationAccessState {
+  if (args.channel === "voice") {
+    return { webChatLocked: false, smsPlanLocked: false, effectiveIsAiHandling: false, canToggleAi: false, canWrite: false };
+  }
   const webChatLocked = args.channel === "web_chat" && !args.canUseWebChat;
   const smsPlanLocked = args.channel === "sms" && !args.canUseManualSms;
   // Web chat has no agent-to-visitor transport today, so an entitled widget

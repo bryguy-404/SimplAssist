@@ -5,6 +5,9 @@ import {
 } from "./accessState";
 
 describe("getConversationAccessState", () => {
+  it("keeps voice read-only even when all text permissions and the stored AI flag are enabled", () => {
+    expect(getConversationAccessState({ channel: "voice", storedIsAiHandling: true, canUseManualSms: true, canUseAiSms: true, canUseWebChat: true })).toMatchObject({ canWrite: false, canToggleAi: false });
+  });
   it("forces Starter SMS into writable Human mode despite a tampered AI flag", () => {
     expect(
       getConversationAccessState({

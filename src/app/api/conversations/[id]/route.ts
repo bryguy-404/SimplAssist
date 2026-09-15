@@ -40,6 +40,10 @@ export async function DELETE(
     );
   }
 
+  if (conversation.channel === "voice") {
+    return NextResponse.json({ error: "Voice call history is read-only" }, { status: 403 });
+  }
+
   try {
     const entitlements = await resolveBusinessEntitlements(business.id);
     const access = decideFeatureAccess(

@@ -69,7 +69,7 @@ async function findExistingContact(
   channel: Channel,
   sessionId: string | null
 ): Promise<Contact | null> {
-  if (channel === "sms" && phone) {
+  if ((channel === "sms" || channel === "voice") && phone) {
     return queryContactByIdentity(businessId, "phone_number", phone);
   }
 

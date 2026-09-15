@@ -34,7 +34,7 @@ function timeAgo(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString();
 }
 
-type FilterTab = "all" | "sms" | "web_chat";
+type FilterTab = "all" | "sms" | "web_chat" | "voice";
 
 export function ConversationList({
   conversations,
@@ -91,6 +91,7 @@ export function ConversationList({
     { label: "All", value: "all" },
     { label: "SMS", value: "sms" },
     { label: "Web Chat", value: "web_chat" },
+    ...(conversations.some(c => c.channel === "voice") ? [{ label: "Voice", value: "voice" as const }] : []),
   ];
 
   return (
@@ -170,7 +171,9 @@ export function ConversationList({
               >
                 {/* Channel icon */}
                 <div className="mt-0.5 flex-shrink-0">
-                  {conv.channel === "sms" ? (
+                  {conv.channel === "voice" ? (
+                    <Phone aria-label="Voice call" className="h-4 w-4" />
+                  ) : conv.channel === "sms" ? (
                     <Phone className="h-5 w-5 text-stone-400 dark:text-[#bdbdbf]" />
                   ) : (
                     <MessageCircle className="h-5 w-5 text-stone-400 dark:text-[#bdbdbf]" />
@@ -202,7 +205,9 @@ export function ConversationList({
                           : statusWarning
                       )}
                     >
-                      {webChatLocked || smsLocked ? (
+                      {conv.channel === "voice" ? (
+                        <><Phone className="h-3 w-3" /> Voice call</>
+                      ) : webChatLocked || smsLocked ? (
                         <>
                           <Lock className="h-3 w-3" /> {smsLocked ? "Paused" : "Locked"}
                         </>
@@ -227,10 +232,10 @@ export function ConversationList({
 
                 {/* Delete + Unread indicator */}
                 <div className="mt-1 flex flex-col items-center gap-1 flex-shrink-0">
-                  {conv.status !== "closed" && !webChatLocked && !smsLocked && !aiHandling && (
+                  {conv.channel !== "voice" && conv.status !== "closed" && !webChatLocked && !smsLocked && !aiHandling && (
                     <div className="h-2.5 w-2.5 rounded-full bg-[var(--brand-primary)] dark:bg-[var(--brand-primary-dark)]" />
                   )}
-                  {!webChatLocked && !smsLocked && (
+                  {conv.channel !== "voice" && !webChatLocked && !smsLocked && (
                     <button
                       type="button"
                       onClick={(e) => {

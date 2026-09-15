@@ -228,7 +228,7 @@ export default function DashboardOverview({
                           ? statusInfo
                           : statusSuccess
                       }`}>
-                        {conv.channel === 'sms' ? 'SMS' : 'Web'}
+                        {conv.channel === 'voice' ? 'Voice' : conv.channel === 'sms' ? 'SMS' : 'Web'}
                       </span>
                       {conv.lastMessage && (
                         <p className={`text-xs truncate ${body}`}>{conv.lastMessage}</p>

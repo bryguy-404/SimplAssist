@@ -3,7 +3,24 @@
 Decision record for SimplAssist's initial pricing, tier positioning, feature
 entitlements, and post-launch validation plan.
 
-Last updated: August 18, 2026
+Last updated: September 14, 2026
+
+## Voice product decision — September 14, 2026
+
+Live AI phone answering is planned exclusively for Pro / Full Suite. Growth at
+$45 retains its existing text and web-chat capabilities. Build and test voice
+on SimplAssist's existing internal account and number first, then complete
+voice contact collection and calendar booking, and prepare the customer rollout.
+
+Before general release, add top-tier server-side access control, a choice of
+text follow-up or AI voice as the primary missed-call response, a monthly voice
+minute allowance, usage visibility, and limit handling. Set the allowance and
+any opted-in extra-usage price using measured pilot costs. Existing subscription
+prices are unchanged by this decision; no voice allowance quantity is set yet.
+
+The [voice implementation blueprint](voice-ai-implementation-blueprint.md)
+records the phases, duplicate-response prevention, proposed text fallback, and
+commercial launch requirements. These are roadmap decisions, not shipped features.
 
 ## Current decision
 

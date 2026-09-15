@@ -77,7 +77,7 @@ Do not change the scan worker's source or start command. Do not change the publi
 
 | Variable | Value / source |
 | --- | --- |
-| `OPENAI_API_KEY` | API-project key with GPT-Live-1 access; configure securely, never in chat or Git |
+| `OPENAI_API_KEY` | API-project key with GPT-Live-1 access and `api.model.read` for readiness checks; configure securely, never in chat or Git |
 | `ANTHROPIC_API_KEY` | Existing approved answering-provider access |
 | `TELNYX_API_KEY` | Existing SimplAssist phone-provider access |
 | `NEXT_PUBLIC_SUPABASE_URL` | Same database as the application |
@@ -178,8 +178,8 @@ These stages are recorded commitments for the later product; Stage 1 approval do
 
 - Production migrations: awaiting Bryan's application and read-only verification.
 - Railway login: verified through official CLI.
-- OpenAI access: key location/access still to be confirmed; not present in the inspected local environment or SimplAssist Railway service variables.
-- Voice worker: empty service and HTTPS endpoint created; build/runtime settings and variable references read back successfully from Railway. No deployment ID; OpenAI key still missing.
+- OpenAI setup (September 15): the key identified by Bryan in ADA-Calendar was securely copied to the voice worker with deployments skipped and its value verified without display. OpenAI model reads return HTTP 403: missing `api.model.read`. Enable that key permission in OpenAI, then recheck GPT-Live access. This denial does not establish whether the key has voice-session access.
+- Voice worker: empty service and HTTPS endpoint created; build/runtime settings and variable references read back successfully from Railway. No deployment ID; OpenAI key is now installed, with its model-read permission still pending.
 - Application deployment: pending prerequisites; default-off voice variables and random stream/internal secrets staged with deployments skipped. Existing successful app deployment `f13e6da5-ec79-4c18-96e9-7a8299439779` and scan-worker deployment `12c2582a-2263-4055-92a8-1f4eaf27c642` remain running.
 - Approved testers: pending entry through protected controls.
 - Real calls and voice approval: not yet performed.

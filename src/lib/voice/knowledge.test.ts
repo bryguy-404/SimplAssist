@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildBusinessFacts, buildSystemPrompt } from "../ai/prompt";
-import {
-  buildVoiceAnswerPrompt,
-  buildLiveInstructions,
-  LIVE_INSTRUCTIONS,
-} from "./knowledge";
+import { buildVoiceAnswerPrompt } from "./knowledge";
+import { buildLiveInstructions, LIVE_INSTRUCTIONS } from "./conversationStyle";
 import type {
   Business,
   AISettings,

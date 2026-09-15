@@ -10,7 +10,7 @@ import {
   type AudioProfileName,
 } from "./audio";
 import { CallTranscript } from "./transcript";
-import { buildLiveGreeting, buildLiveInstructions } from "./knowledge";
+import { buildLiveGreeting, buildLiveInstructions } from "./conversationStyle";
 import { VOICE_MODEL, type VoiceSession } from "./types";
 import type { VoiceStore } from "./store";
 

@@ -158,14 +158,27 @@ server.on("upgrade", (req, socket, head) => {
   }
   pendingUpgrades++;
   void consumeStreamToken(db, token)
-    .then((session) => {
+    .then(async (session) => {
       if (!session || draining || socket.destroyed) {
         socket.end("HTTP/1.1 401 Unauthorized\r\n\r\n");
         return;
       }
+      const { data: business, error: businessError } = await db
+        .from("businesses")
+        .select("name")
+        .eq("id", session.business_id)
+        .single();
+      if (
+        businessError ||
+        !business?.name?.trim() ||
+        draining ||
+        socket.destroyed
+      )
+        throw new Error("voice_business_identity_unavailable");
       wss.handleUpgrade(req, socket, head, (phone) => {
         const call = new LiveCall({
           session,
+          businessName: business.name.trim(),
           phone,
           openaiKey,
           profile,

@@ -62,6 +62,7 @@ function harness(profile: "pcm16" | "pcmu8" = "pcm16") {
   const hangup = vi.fn().mockResolvedValue(undefined);
   const call = new LiveCall({
     session,
+    businessName: "Lakeview Plumbing",
     phone: phone.asWebSocket(),
     openaiKey: "test-key",
     profile,
@@ -71,7 +72,7 @@ function harness(profile: "pcm16" | "pcmu8" = "pcm16") {
     onClosed: vi.fn(),
     connectOpenAI: () => live.asWebSocket(),
   });
-  async function start(delayAudio = false) {
+  async function start(delayAudio = false, acknowledgeGreeting = true) {
     const p = AUDIO_PROFILES[profile];
     phone.event({
       event: "start",
@@ -109,6 +110,15 @@ function harness(profile: "pcm16" | "pcmu8" = "pcm16") {
       session: { id: "openai-session", audio: { format: p.format } },
     });
     await vi.advanceTimersByTimeAsync(1);
+    if (acknowledgeGreeting) {
+      const greeting = live.sent.find(
+        (e) => e.type === "session.instructions.append",
+      );
+      live.event({
+        type: "session.instructions.appended",
+        client_event_id: greeting?.event_id,
+      });
+    }
   }
   async function finish(reason = "caller_hangup") {
     const pending = call.close(reason, false);
@@ -121,6 +131,40 @@ function harness(profile: "pcm16" | "pcmu8" = "pcm16") {
 describe("continuous phone bridge", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
+  it("opens once in Marin with the assigned business name and a single natural question", async () => {
+    const h = harness();
+    await h.start();
+    const instructions = (h.live.sent[0].session as { instructions: string })
+      .instructions;
+    expect(instructions).toContain('"Lakeview Plumbing"');
+    expect(instructions).toContain("Never pretend to be human");
+    const openings = h.live.sent.filter(
+      (e) => e.type === "session.instructions.append",
+    );
+    expect(openings).toHaveLength(1);
+    expect(openings[0].content).toContain(
+      "Hi, this is Lakeview Plumbing. How are you doing today?",
+    );
+    await vi.advanceTimersByTimeAsync(8100);
+    expect(h.hangup).not.toHaveBeenCalled();
+    await h.finish();
+  });
+  it("requires acknowledgment of the actual opening instruction", async () => {
+    const h = harness();
+    await h.start(false, false);
+    h.live.event({
+      type: "session.instructions.appended",
+      client_event_id: "unrelated",
+    });
+    await vi.advanceTimersByTimeAsync(8100);
+    h.live.event({ type: "session.closed", usage: { seconds: 8 } });
+    await h.call.done;
+    expect(h.store.finish).toHaveBeenCalledWith(
+      "greeting_instruction_timeout",
+      "greeting_instruction_timeout",
+      true,
+    );
+  });
   it.each(["pcm16", "pcmu8"] as const)(
     "carries %s audio in both directions using the stable client-delegation API",
     async (profile) => {

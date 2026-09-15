@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { buildBusinessFacts, buildSystemPrompt } from "../ai/prompt";
-import { buildVoiceAnswerPrompt, LIVE_INSTRUCTIONS } from "./knowledge";
+import {
+  buildVoiceAnswerPrompt,
+  buildLiveInstructions,
+  LIVE_INSTRUCTIONS,
+} from "./knowledge";
 import type {
   Business,
   AISettings,
@@ -39,6 +43,17 @@ const knowledge = [
 ] as BusinessKnowledgeItem[];
 
 describe("shared voice knowledge", () => {
+  it("distinguishes prior tester acknowledgment from a notice played on this call", () => {
+    expect(buildLiveInstructions("Lakeview Plumbing", true)).toContain(
+      "previously acknowledged",
+    );
+    expect(buildLiveInstructions("Lakeview Plumbing", true)).not.toContain(
+      "already heard",
+    );
+    expect(buildLiveInstructions("Lakeview Plumbing", false)).toContain(
+      "already heard",
+    );
+  });
   it("uses the same approved fact renderer as text, with structured precedence", () => {
     const voice = buildVoiceAnswerPrompt(
       business,

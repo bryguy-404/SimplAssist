@@ -23,6 +23,8 @@ export interface VoiceSession {
   started_at: string | null;
   ended_at: string | null;
   notice_completed_at: string | null;
+  prior_disclosure_acknowledged_at: string | null;
+  media_start_requested_at: string | null;
   heartbeat_at: string;
   created_at: string;
   fallback_pending: boolean;

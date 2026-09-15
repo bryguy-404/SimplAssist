@@ -228,7 +228,9 @@ export async function handlePilotEvent(
     } else if (
       eventType === "call.playback.ended" &&
       state.voicePilotPhase === "ringing" &&
-      ["ringing", "notice"].includes(session.status)
+      (["ringing", "notice"].includes(session.status) ||
+        (session.status === "starting" &&
+          session.prior_disclosure_acknowledged_at))
     ) {
       if (
         ["call_hangup", "cancelled", "cancelled_amd"].includes(
@@ -238,6 +240,28 @@ export async function handlePilotEvent(
         return true;
       if (payload.status !== "completed")
         throw new Error("voice_ringback_failed");
+      if (
+        session.status === "ringing" ||
+        session.prior_disclosure_acknowledged_at
+      ) {
+        if (!(await deps.workerReady()))
+          throw new Error("voice_worker_unavailable");
+        const { data: prepared, error: preparationError } = await deps.db.rpc(
+          "prepare_preinformed_voice_session",
+          { p_session_id: session.id },
+        );
+        if (preparationError)
+          throw new Error("voice_prior_disclosure_lookup_failed");
+        if (prepared?.id) {
+          // Keep the call's actual notice timestamp empty: no announcement played.
+          // The DB records the tester's previous acknowledgment separately.
+          Object.assign(session, prepared);
+          await startMedia(deps, session);
+          return true;
+        }
+        if (session.prior_disclosure_acknowledged_at)
+          throw new Error("voice_prior_disclosure_revoked");
+      }
       await transition(deps, session, ["ringing", "notice"], {
         status: "notice",
       });
@@ -265,43 +289,10 @@ export async function handlePilotEvent(
         status: "starting",
         notice_completed_at:
           session.notice_completed_at ?? new Date().toISOString(),
+        media_start_requested_at:
+          session.media_start_requested_at ?? new Date().toISOString(),
       });
-      const token = await issueStreamToken(deps.db, session, deps.streamSecret);
-      const url = new URL("/media", deps.workerUrl);
-      if (url.protocol !== "https:")
-        throw new Error("voice_worker_url_invalid");
-      url.protocol = "wss:";
-      url.searchParams.set("token", token);
-      // Recording starts only after the completed notice event. Store only the
-      // provider recording ID when its later callback arrives.
-      await deps.telnyx.calls.actions.startRecording(
-        session.call_control_id,
-        {
-          channels: "dual",
-          format: "mp3",
-          recording_track: "both",
-          max_length: session.reserved_seconds + 30,
-          play_beep: false,
-          command_id: `voice-record-${session.id}`,
-          client_state: pilotClientState(session, "conversation"),
-        },
-        VOICE_PROVIDER_OPTIONS,
-      );
-      await deps.telnyx.calls.actions.startStreaming(
-        session.call_control_id,
-        {
-          stream_url: url.toString(),
-          stream_track: "inbound_track",
-          stream_codec: deps.profile === "pcm16" ? "L16" : "PCMU",
-          stream_bidirectional_mode: "rtp",
-          stream_bidirectional_codec: deps.profile === "pcm16" ? "L16" : "PCMU",
-          stream_bidirectional_sampling_rate:
-            deps.profile === "pcm16" ? 16000 : 8000,
-          command_id: `voice-stream-${session.id}`,
-          client_state: pilotClientState(session, "conversation"),
-        },
-        VOICE_PROVIDER_OPTIONS,
-      );
+      await startMedia(deps, session);
     } else if (
       eventType === "call.streaming.failed" ||
       eventType === "call.recording.error"
@@ -333,6 +324,47 @@ export async function handlePilotEvent(
     await drainFallback(deps, session.id);
   }
   return true;
+}
+
+async function startMedia(
+  deps: PilotRoutingDependencies,
+  session: VoiceSession,
+) {
+  const token = await issueStreamToken(deps.db, session, deps.streamSecret);
+  const url = new URL("/media", deps.workerUrl);
+  if (url.protocol !== "https:") throw new Error("voice_worker_url_invalid");
+  url.protocol = "wss:";
+  url.searchParams.set("token", token);
+  // Recording starts after the notice or verified prior tester acknowledgment.
+  // Store only the provider recording ID when its callback arrives.
+  await deps.telnyx.calls.actions.startRecording(
+    session.call_control_id,
+    {
+      channels: "dual",
+      format: "mp3",
+      recording_track: "both",
+      max_length: session.reserved_seconds + 30,
+      play_beep: false,
+      command_id: `voice-record-${session.id}`,
+      client_state: pilotClientState(session, "conversation"),
+    },
+    VOICE_PROVIDER_OPTIONS,
+  );
+  await deps.telnyx.calls.actions.startStreaming(
+    session.call_control_id,
+    {
+      stream_url: url.toString(),
+      stream_track: "inbound_track",
+      stream_codec: deps.profile === "pcm16" ? "L16" : "PCMU",
+      stream_bidirectional_mode: "rtp",
+      stream_bidirectional_codec: deps.profile === "pcm16" ? "L16" : "PCMU",
+      stream_bidirectional_sampling_rate:
+        deps.profile === "pcm16" ? 16000 : 8000,
+      command_id: `voice-stream-${session.id}`,
+      client_state: pilotClientState(session, "conversation"),
+    },
+    VOICE_PROVIDER_OPTIONS,
+  );
 }
 
 async function transition(

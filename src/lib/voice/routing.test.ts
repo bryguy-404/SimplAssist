@@ -67,6 +67,8 @@ function fixture(status: VoiceSession["status"] = "ringing") {
     return q;
   }
   const rpc = vi.fn(async (_name: string, args: Record<string, unknown>) => {
+    if (_name === "prepare_preinformed_voice_session")
+      return { data: null, error: null };
     if (session.status !== "closed") {
       session.status = "closed";
       session.outcome = args.p_outcome as string;
@@ -101,6 +103,44 @@ function fixture(status: VoiceSession["status"] = "ringing") {
 }
 
 describe("existing-number voice routing", () => {
+  it("starts the live voice directly for a previously informed tester without inventing a spoken notice", async () => {
+    const f = fixture();
+    const prepared = {
+      ...f.session,
+      status: "starting",
+      prior_disclosure_acknowledged_at: "2026-09-13T12:00:00Z",
+      media_start_requested_at: "2026-09-14T12:00:11Z",
+    } as VoiceSession;
+    f.rpc.mockImplementation(async () => {
+      Object.assign(f.session, prepared);
+      return { data: prepared as never, error: null };
+    });
+    const payload = f.payload("ringing", { status: "completed" });
+    await handlePilotEvent(f.deps, "call.playback.ended", payload, true);
+    await handlePilotEvent(f.deps, "call.playback.ended", payload, true);
+    expect(f.actions.speak).not.toHaveBeenCalled();
+    expect(f.session.notice_completed_at).toBeFalsy();
+    expect(f.actions.startRecording).toHaveBeenCalledTimes(2);
+    expect(f.actions.startStreaming.mock.calls[0]).toEqual(
+      f.actions.startStreaming.mock.calls[1],
+    );
+    expect(f.actions.startRecording.mock.calls[0]).toEqual(
+      f.actions.startRecording.mock.calls[1],
+    );
+  });
+  it("fails closed when prior-disclosure lookup fails", async () => {
+    const f = fixture();
+    f.rpc.mockResolvedValueOnce({ error: { message: "unavailable" } } as never);
+    await handlePilotEvent(
+      f.deps,
+      "call.playback.ended",
+      f.payload("ringing", { status: "completed" }),
+      true,
+    );
+    expect(f.actions.startRecording).not.toHaveBeenCalled();
+    expect(f.actions.startStreaming).not.toHaveBeenCalled();
+    expect(f.deps.sendFallback).toHaveBeenCalledOnce();
+  });
   it("preserves ringback, completes the notice, then records and streams", async () => {
     const f = fixture();
     await handlePilotEvent(f.deps, "call.answered", f.payload("initial"), true);

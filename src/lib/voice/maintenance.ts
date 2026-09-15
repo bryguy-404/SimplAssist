@@ -89,11 +89,10 @@ export async function maintainVoicePilot(
     .eq("business_id", PILOT_BUSINESS_ID)
     .eq("response_mode", "voice")
     .eq("status", "closed")
-    .not("notice_completed_at", "is", null)
-    .lt("ended_at", new Date(now - 30000).toISOString())
     .or(
-      `recording_checked_at.is.null,recording_checked_at.lt.${new Date(now - 3600_000).toISOString()}`,
+      `and(notice_completed_at.not.is.null,or(recording_checked_at.is.null,recording_checked_at.lt.${new Date(now - 3600_000).toISOString()})),and(prior_disclosure_acknowledged_at.not.is.null,or(recording_checked_at.is.null,recording_checked_at.lt.${new Date(now - 3600_000).toISOString()}))`,
     )
+    .lt("ended_at", new Date(now - 30000).toISOString())
     .limit(4);
   if (uncheckedError)
     throw new Error("voice_recording_reconciliation_lookup_failed");

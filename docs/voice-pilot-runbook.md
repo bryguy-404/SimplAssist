@@ -182,4 +182,31 @@ These stages are recorded commitments for the later product; Stage 1 approval do
 - Voice worker (September 15): Railway deployment `c8d19e49-dfe7-4a46-92fa-99d0bb3eaa8b` is `SUCCESS`, using committed source `0821aa1`. The upload excludes the app and scan-worker Railway TOML files so the saved voice-service settings control the build and start command. `/health` and authenticated `/ready` return 200 with `ready: true`, `gpt-live-1`, `pcm16` and zero active calls. Missing/invalid readiness credentials return 404; missing/invalid WebSocket media credentials return 401. Full read-only provider/schema/tester preflight passes, including authenticated durable maintenance. No real caller session had been opened at the readiness check; actual call acceptance is still pending.
 - Application deployment (September 15): final Railway deployment `b65a3fe2-ebd9-43ef-863b-be5647ff7685` is `SUCCESS`, replacing the default-off deployment `e48d43f8-6340-4c65-b03e-35e3d0050118`. Both use a clean Git archive of `0821aa1` (archive SHA-256 `562d0b8695368e599cd497a0df8358a4ea9b96970214ce8c09f8185b58ef7c6b`), excluding local environments, dependencies and build artifacts. Application rollout is now `true`, after the worker and full preflight passed. Apex and www health checks returned 200. The protected admin page showed Service Ready and allowed pilot enablement. Subsequent admin page requests returned HTTP 200 in Railway logs. A stable post-save browser observation was interrupted by concurrent browser activity; activation itself was confirmed by separate DB read-back. The app's GitHub source remains `main`; this was a one-off feature-branch upload, so a subsequent main deployment would replace this build. The scan worker was not redeployed or reconfigured.
 - Pilot activation (September 15, 14:33 UTC): enabled through the authenticated production `/admin/voice` controls after service readiness passed. Separate DB read-back confirmed settings revision 3, enabled=true, exactly the one caller number explicitly supplied by Bryan, 12,000 seconds, max two simultaneous calls and 600 seconds per call. Account operational checks and the active `sms_and_chat` subscription passed before activation. Usage, active calls and unconfirmed calls were zero at activation. Keep private caller numbers in pilot storage, not this document.
-- Real calls and voice approval: not yet performed.
+- First real call: Bryan reported that the assistant sounded amazing and that he liked its attention to detail. His requested follow-up is a natural business-name greeting in the same voice. This is positive user feedback, not completion of the 20-call acceptance set or a verification of every call record.
+
+
+## Natural greeting follow-up (September 15, prepared locally)
+
+Requested greeting: “Hi, this is [business name]. How are you doing today?”
+The worker loads the called business's saved name and asks Marin to speak this
+once, then listen. GPT-Live may vary wording or be interrupted; acknowledgment
+of the instruction is not proof of exact audible playback.
+
+Migration 073 separates prior tester disclosure acknowledgment from a notice
+actually played on a call. Only a currently approved tester with a recorded
+prior acknowledgment can skip the separate Polly announcement. That prior
+acknowledgment must cover AI use, audio recording/30-day retention, and saved
+transcripts, and must predate the call. Tester membership, an Indiana business
+address, or a phone area code never substitutes for acknowledgment. No tester is
+acknowledged by the migration itself. New/re-added testers default to the existing
+notice. Ordinary label/budget edits preserve acknowledgment for retained testers.
+
+Recording, transcript retention, the 11-second ring, routing limits, and the
+non-tester text/voicemail flow remain as before. Calls without the Polly notice
+no longer include its estimated speech cost. The admin call page distinguishes
+prior acknowledgment from a played notice.
+
+Production migration/activation is pending. Apply 073, verify the columns and
+service-only RPCs, deploy the worker and application, then record only the
+existing informed tester's acknowledgment and verify it before testing. Do not
+expand this private-test behavior to public callers as part of this change.

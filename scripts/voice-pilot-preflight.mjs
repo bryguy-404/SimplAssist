@@ -34,8 +34,8 @@ const db = createClient(url, serviceKey, { auth: { persistSession: false, autoRe
 } });
 const tables = {
   voice_pilot_settings: 'business_id,enabled,budget_seconds,revision',
-  voice_pilot_testers: 'business_id,phone_number',
-  voice_sessions: 'id,response_mode,reserved_seconds,usage_confirmed,phone_ended_at,recording_checked_at,provider_hangup_confirmed_at',
+  voice_pilot_testers: 'business_id,phone_number,prior_disclosure_acknowledged_at',
+  voice_sessions: 'id,response_mode,reserved_seconds,usage_confirmed,phone_ended_at,recording_checked_at,provider_hangup_confirmed_at,prior_disclosure_acknowledged_at,media_start_requested_at',
   voice_stream_credentials: 'token_hash,consumed_at,expires_at',
   voice_transcript_fragments: 'session_id,event_id,start_ms,end_ms',
   voice_provider_usage: 'session_id,provider_request_id,estimated_cost_usd',
@@ -45,12 +45,12 @@ const tables = {
 };
 for (const [table, fields] of Object.entries(tables)) await check(`Schema: ${table}`, async () => {
   const { error } = await db.from(table).select(fields).limit(0);
-  requireValue(!error, 'Apply and verify migrations 069–072');
+  requireValue(!error, 'Apply and verify migrations 069–073');
 });
 await check('Required voice RPCs are deployed', async () => {
   const response = await request(new URL('/rest/v1/', url), { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, Accept: 'application/openapi+json' });
   const api = await response.json();
-  for (const name of ['admit_voice_pilot','consume_voice_stream','record_voice_fragment','update_voice_usage','activate_voice_session','finalize_voice_session','configure_voice_pilot','stop_voice_pilot','reconcile_voice_usage','claim_voice_recording_cleanup','finish_voice_recording_cleanup','reconcile_unstarted_voice_sessions','estimate_voice_telnyx_usage']) {
+  for (const name of ['admit_voice_pilot','prepare_preinformed_voice_session','consume_voice_stream','record_voice_fragment','update_voice_usage','activate_voice_session','finalize_voice_session','configure_voice_pilot','stop_voice_pilot','reconcile_voice_usage','claim_voice_recording_cleanup','finish_voice_recording_cleanup','reconcile_unstarted_voice_sessions','estimate_voice_telnyx_usage']) {
     requireValue(api.paths?.[`/rpc/${name}`], `Missing RPC: ${name}`);
   }
 });

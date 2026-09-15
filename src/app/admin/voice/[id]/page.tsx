@@ -64,6 +64,13 @@ export default async function VoiceCallPage({
       ) : null}
       <section>
         <h2 className="text-xl font-semibold">Recording</h2>
+        <p className="mt-2 text-sm text-stone-500">
+          {session.prior_disclosure_acknowledged_at
+            ? "This private tester previously acknowledged AI use, audio recording and transcript storage. The call opened directly with the live assistant."
+            : session.notice_completed_at
+              ? "The AI and recording notice played before recording began."
+              : "No completed notice or prior tester acknowledgment is recorded for this call."}
+        </p>
         {recordings.length === 0 ? (
           <p className="mt-3 text-sm text-stone-500">
             Recording is not yet available. Provider callbacks and recovery

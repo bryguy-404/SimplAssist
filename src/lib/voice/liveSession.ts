@@ -9,12 +9,13 @@ import {
   type AudioProfileName,
 } from "./audio";
 import { CallTranscript } from "./transcript";
-import { LIVE_INSTRUCTIONS } from "./knowledge";
+import { buildLiveGreeting, buildLiveInstructions } from "./knowledge";
 import { VOICE_MODEL, type VoiceSession } from "./types";
 import type { VoiceStore } from "./store";
 
 export interface LiveSessionOptions {
   session: VoiceSession;
+  businessName: string;
   phone: WebSocket;
   openaiKey: string;
   profile: AudioProfileName;
@@ -40,6 +41,8 @@ export class LiveCall {
   private openai: WebSocket | null = null;
   private streamId: string | null = null;
   private ready = false;
+  private greetingEventId: string | null = null;
+  private greetingAcknowledged = false;
   private closing = false;
   private closed = false;
   private openedAt = Date.now();
@@ -185,7 +188,10 @@ export class LiveCall {
         type: "session.start",
         session: {
           model: VOICE_MODEL,
-          instructions: LIVE_INSTRUCTIONS,
+          instructions: buildLiveInstructions(
+            this.options.businessName,
+            Boolean(this.options.session.prior_disclosure_acknowledged_at),
+          ),
           audio: {
             format: AUDIO_PROFILES[this.options.profile].format,
             output: { voice: "marin" },
@@ -230,15 +236,24 @@ export class LiveCall {
                 type: "session.input_audio.append",
                 audio: earlyAudio.toString("base64"),
               });
+            this.greetingEventId = randomUUID();
             this.sendLive({
               type: "session.instructions.append",
+              event_id: this.greetingEventId,
               delegation_id: null,
-              content:
-                "Begin the conversation now: greet the caller briefly and ask how you can help with business questions, then listen.",
+              content: buildLiveGreeting(this.options.businessName),
             });
+            this.later(() => {
+              if (!this.greetingAcknowledged && !this.closing)
+                void this.close("greeting_instruction_timeout", true);
+            }, 8000);
           });
           break;
         }
+        case "session.instructions.appended":
+          if (event.client_event_id === this.greetingEventId)
+            this.greetingAcknowledged = true;
+          break;
         case "session.output_audio.delta":
           if (!this.closing)
             this.output.append(decodeAudio(event.delta, this.options.profile));

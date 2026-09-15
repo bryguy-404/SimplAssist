@@ -30,5 +30,8 @@ SELECT public.update_voice_usage('40000000-0000-4000-a070-000000000001',10,false
 SELECT is((SELECT status FROM public.voice_provider_usage WHERE provider='openai'),'confirmed','late partial events cannot unconfirm final usage');
 SELECT is((SELECT seconds FROM public.voice_provider_usage WHERE provider='openai'),15::numeric,'late events cannot undercount final usage');
 SELECT is((SELECT status FROM public.conversations LIMIT 1),'closed','finalization closes transcript conversation');
+SELECT public.finalize_voice_session('40000000-0000-4000-a070-000000000001','technical_failure','late_error',true,false);
+SELECT is((SELECT fallback_pending FROM public.voice_sessions LIMIT 1),false,'late failure cannot replace a normally completed voice response with SMS');
+SELECT ok(NOT has_table_privilege('authenticated','public.voice_recordings','SELECT'),'recording provider identifiers require a protected server route');
 SELECT * FROM finish();
 ROLLBACK;

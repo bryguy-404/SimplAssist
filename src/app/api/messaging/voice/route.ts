@@ -19,6 +19,8 @@ import {
 } from "@/lib/billing/entitlements";
 import { resolveBusinessOperationalControls } from "@/lib/account/operationalControls.server";
 import type { Language } from "@/types/database";
+import { admitPilot, handlePilotEvent } from "@/lib/voice/routing";
+import { pilotRoutingDependencies } from "@/lib/voice/routing.server";
 
 // Telnyx Voice API delivers all call lifecycle events to the same URL.
 // We act on a small subset to drive forwarding and the missed-call voicemail flow:
@@ -80,6 +82,7 @@ interface VoiceState {
   forwardingAttemptId?: string;
   outboundCallControlId?: string | null;
   voicePhase?: VoicePhase;
+  voicePilotSessionId?: string;
 }
 
 interface ForwardingAttempt {
@@ -149,6 +152,13 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    try {
+      if (await handlePilotEvent(pilotRoutingDependencies(), eventType ?? "", payload, process.env.VOICE_PILOT_ROLLOUT === "true")) {
+        return new NextResponse("OK", { status: 200 });
+      }
+    } catch (error) {
+      throw new RetryableWebhookError("Voice pilot callback needs retry", { cause: error });
+    }
     switch (eventType) {
       case "call.initiated":
         await handleCallInitiated(payload);
@@ -282,6 +292,19 @@ async function handleCallInitiated(payload: Record<string, unknown>) {
     : business.ai_settings;
   const language = (aiSettings?.language ?? "en") as Language;
 
+  let pilotSessionId: string | undefined;
+  if (process.env.VOICE_PILOT_ROLLOUT === "true") {
+    try {
+      const session = await admitPilot(pilotRoutingDependencies(), {
+        businessId, called: to, caller: from, callControlId,
+        callSessionId: typeof payload.call_session_id === "string" ? payload.call_session_id : callControlId,
+      });
+      if (session?.response_mode === "voice") pilotSessionId = session.id;
+    } catch (error) {
+      throw new RetryableWebhookError("Voice pilot admission needs retry", { cause: error });
+    }
+  }
+
   const state = encodeState({
     callControlId,
     businessId,
@@ -294,6 +317,7 @@ async function handleCallInitiated(payload: Record<string, unknown>) {
     telnyxVoiceApplicationId: business?.telnyx_voice_application_id ?? null,
     callForwardingEnabled: business?.call_forwarding_enabled ?? false,
     forwardToNumber: business?.forward_to_number ?? null,
+    ...(pilotSessionId ? { voicePilotSessionId: pilotSessionId } : {}),
   });
   console.log(
     `[messaging:voice] Answering call for businessId=${businessId} (name='${businessName}')`

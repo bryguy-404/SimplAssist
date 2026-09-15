@@ -284,3 +284,57 @@ passed. Zero active/nonfinal sessions at verification. Pilot revision 3 remains
 enabled with 12,000 seconds, two simultaneous calls, and 600 seconds per call.
 The scan worker and all database settings were untouched. Bryan's next inbound
 call is still needed for acoustic verification of the ring-to-greeting handoff.
+
+## Conversational style follow-up (September 15)
+
+Source `e2f915fd484706a745d72a8427e2d969097a07e8` adds the active voice-only guide
+at `src/lib/voice/conversationStyle.ts`. The live session imports its role, tone,
+greeting, interruption, delegation and closing instructions. The Claude business
+answer prompt uses its short spoken-answer guidance, so the assistant's factual
+answers and conversational delivery follow the same style. This is prompting,
+not new model training or a separate business knowledge dataset.
+
+The intended style is a warm, relaxed business receptionist: everyday words,
+natural contractions, concise answers, and one clarification at a time. Use
+“How can I help?” for small-talk transitions, avoid “What's on your mind?” and
+repetitive enthusiasm, and do not attach a follow-up question to every answer.
+A standalone thank-you should receive a brief acknowledgment. A clear goodbye
+should receive one friendly closing using the called business's name. These are
+guidelines with example wording, not guaranteed verbatim scripts or new hangup
+actions. Keep business facts, qualifications, unknown information, AI identity,
+prior disclosure checks and Q&A-only permissions intact.
+
+The existing 401 targeted tests across 17 files, worker TypeScript, ESLint and
+diff checks pass. They verify wiring and existing call/knowledge behavior;
+naturalness still requires listening. Only the voice worker needs deployment.
+The app retains the already deployed ringback handoff. Preparing the AI during
+the original ringing has **not** been implemented by this style change and
+remains a separate startup improvement.
+
+One combined retest can cover both changes:
+
+1. Listen from the initial rings through the complete greeting; note any silence,
+   overlapping ringback, or clipped first word.
+2. Answer the greeting and ask a known business question. Expect a direct,
+   natural answer without “What's on your mind?” or an extra introduction.
+3. Say “Thank you,” pause, then ask a follow-up. Expect a brief acknowledgment,
+   not a premature goodbye or a repeated offer of help.
+4. Correct a question. Expect the current approved facts and a brief response to
+   the correction, not a replay of the obsolete answer.
+5. Say “That's all I needed. Goodbye.” Expect one friendly closing without
+   another question. Hang up and review the recording, transcript and outcome.
+
+Record actual wording and caller feedback before marking style acceptance.
+
+Deployment verified: worker `5294bb1a-951f-4a79-9b39-78f87d6067f7` SUCCESS from
+source archive SHA-256
+`b57a76b8b797a72ab6d61cfced88f03bc9f0aaeb127860b5a77d6cf4415c776c`.
+App remains on the successful opening-handoff deployment
+`bd53b224-e40c-476f-a53b-e41791430dec`. App health and authenticated worker
+readiness returned 200; unauthorized readiness returned 404 and invalid media
+credentials returned 401. Full read-only provider/schema/callback/tester checks
+passed. Zero active/nonfinal sessions at verification. Pilot revision 3 remains
+enabled with the existing 12,000-second budget, two-call concurrency and
+600-second call limit. No production data or configuration changed. The next
+real call should evaluate the deployed ringing handoff and conversation style
+together; neither has yet received acoustic acceptance after these updates.

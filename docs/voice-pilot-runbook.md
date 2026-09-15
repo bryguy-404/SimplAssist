@@ -12,9 +12,9 @@ Implementation is on `codex/voice-pilot`, based on `origin/main` at `4853daf`. T
 | 2 | `6fff819` | Persistent Telnyx/GPT-Live audio bridge and call-scoped delegation |
 | 3 | `80160b2` | Existing-number routing, ringing, recording notice and one-response handling |
 | 4 | `f915046` | Admin review, recordings, retention, cost controls and recovery |
-| 5 | Deployment preparation commit | Readiness script, saved worker settings and acceptance runbook; activation pending |
+| 5 | `eea428c` | Readiness script, saved worker settings and acceptance runbook; activation pending |
 
-**A passing local harness does not make the pilot callable.** Production migration verification, configured OpenAI access, application/worker deployment, tester setup, and actual calls remain activation gates. Record actual deployment and acceptance results below; do not infer them from simulated audio or model availability.
+**A passing local harness does not make the pilot callable.** Production migrations are applied and verified. Configured OpenAI access, application/worker deployment, tester setup, and actual calls remain activation gates. Record actual deployment and acceptance results below; do not infer them from simulated audio or model availability.
 
 ## Verified implementation checks
 
@@ -27,11 +27,11 @@ Implementation is on `codex/voice-pilot`, based on `origin/main` at `4853daf`. T
 
 The database suite ran in a separately initialized disposable `SimplAssistVoice` Supabase stack at local ports 55321/55322. This preserved the original checkout's local database. A temporary copy of the guarded database harness used that project name and ports; copied concurrency-test dblink hosts were changed to `supabase_db_SimplAssistVoice`. No production DB URL was passed to that harness. For routine verification on the repository's own disposable stack, use `npm run test:db:local` and retain its local-only guards.
 
-## 1. Database deployment — Bryan applies
+## 1. Database deployment — applied and verified September 15
 
-Follow [the production migration workflow](PROJECT_LOG.md#2-working-agreements): prepare and test locally, Bryan applies production SQL, then verify it read-only. Do not run a remote `supabase db push` from this task.
+The usual [production migration workflow](PROJECT_LOG.md#2-working-agreements) remains in place. For this update, Bryan explicitly approved the agent applying the prepared migrations and verifying them afterward ("Yes please" in response to the request to apply these migrations to the live SimplAssist database). This is a one-time exception, not a change to the general production rule.
 
-Apply these files **in order**. Each has its own transaction:
+These files were applied **in order**, with each file in its own transaction:
 
 1. `supabase/migrations/069_voice_pilot_foundation.sql`
 2. `supabase/migrations/070_voice_session_lifecycle.sql`
@@ -93,7 +93,7 @@ The worker calls authenticated application maintenance every 15 seconds. A succe
 
 ## 3. Deployment order and readiness
 
-1. Bryan applies migrations; verify production schema while voice remains disabled.
+1. Apply and verify production migrations while voice remains disabled. Completed September 15 under Bryan's explicit one-time authorization.
 2. Configure application variables with rollout `false` and deploy the application code. Confirm the existing health endpoint and exact Telnyx callback host remain reachable.
 3. Configure and deploy the dedicated worker. The application must already contain `/api/internal/voice/maintenance` for the worker to become ready.
 4. Verify `/health` and authenticated `/ready`; verify missing/bad auth is rejected on `/ready` and `/media`. The latter consumes only a stored, unexpired, one-use credential tied to the call, business, completed notice and starting phase. Never invent a production call to bypass admission.
@@ -176,7 +176,7 @@ These stages are recorded commitments for the later product; Stage 1 approval do
 
 ## Deployment / acceptance record
 
-- Production migrations: awaiting Bryan's application and read-only verification.
+- Production migrations (September 15): applied the exact reviewed bundle for 069–072 to project `inmgpkurctttsofpywuz` using the authenticated Supabase CLI. Separate read-only catalog verification matched all 16 function definitions to the tested SQL and verified RLS, service-only callable RPCs, validated foreign keys, triggers and voice-channel constraints. Application API schema preflight passed. Supabase migration history was then repaired for only 069–072 and read back. The pilot remains disabled with 12,000 seconds, two simultaneous calls, a 600-second call limit, no testers and no sessions. Existing contacts/conversations/messages counts and the active `sms_and_chat` subscription were unchanged.
 - Railway login: verified through official CLI.
 - OpenAI setup (September 15): the key identified by Bryan in ADA-Calendar was securely copied to the voice worker with deployments skipped and its value verified without display. OpenAI model reads return HTTP 403: missing `api.model.read`. Enable that key permission in OpenAI, then recheck GPT-Live access. This denial does not establish whether the key has voice-session access.
 - Voice worker: empty service and HTTPS endpoint created; build/runtime settings and variable references read back successfully from Railway. No deployment ID; OpenAI key is now installed, with its model-read permission still pending.

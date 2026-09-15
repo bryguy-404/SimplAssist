@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["scripts/voice-worker.ts"],
+  "exclude": ["node_modules"]
+}

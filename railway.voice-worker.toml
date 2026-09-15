@@ -1,9 +1,0 @@
-[build]
-builder = "NIXPACKS"
-
-[deploy]
-startCommand = "npm run start:voice-worker"
-healthcheckPath = "/health"
-healthcheckTimeout = 120
-restartPolicyType = "ALWAYS"
-numReplicas = 1

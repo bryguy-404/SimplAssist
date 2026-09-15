@@ -330,7 +330,7 @@ export default function ContactDetail({
                     className="flex w-full items-center justify-between rounded-lg border border-[#ece4d8] dark:border-white/[0.10] px-4 py-3 text-left transition hover:border-[rgb(var(--brand-primary-rgb)/.40)] dark:hover:border-[rgb(var(--brand-primary-dark-rgb)/.40)] hover:bg-[var(--brand-accent-soft)] dark:hover:bg-[rgb(var(--brand-primary-dark-rgb)/.08)]"
                   >
                     <div className="flex items-center gap-3">
-                      {conv.channel === "sms" ? (
+                      {conv.channel === "sms" || conv.channel === "voice" ? (
                         <Phone className="h-4 w-4 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
                       ) : (
                         <MessageCircle className="h-4 w-4 text-stone-500 dark:text-[#bdbdbf]" />

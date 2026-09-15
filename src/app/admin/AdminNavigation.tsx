@@ -10,6 +10,7 @@ import AdminSignOutButton from "./AdminSignOutButton";
 const ADMIN_SECTIONS = [
   { href: "/admin/clients", label: "Clients" },
   { href: "/admin/metrics", label: "Metrics" },
+  { href: "/admin/voice", label: "Voice pilot" },
   { href: "/admin/partners", label: "Partners" },
   { href: "/admin/tickets", label: "Tickets" },
   { href: "/admin/waitlist", label: "Waitlist" },

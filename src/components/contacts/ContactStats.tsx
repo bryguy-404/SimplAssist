@@ -21,6 +21,7 @@ export default function ContactStats({ contacts }: ContactStatsProps) {
   const hotLeads = contacts.filter((c) => c.lead_status === "hot").length;
 
   const smsCount = contacts.filter((c) => c.source_channel === "sms").length;
+  const voiceCount = contacts.filter(c => c.source_channel === "voice").length;
   const webChatCount = contacts.filter(
     (c) => c.source_channel === "web_chat"
   ).length;
@@ -45,8 +46,8 @@ export default function ContactStats({ contacts }: ContactStatsProps) {
       color: "text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]",
     },
     {
-      label: contacts.some(c => c.source_channel === "voice") ? "SMS / Web Chat / Voice" : "SMS / Web Chat",
-      value: `${smsCount} / ${webChatCount}` + (contacts.some(c => c.source_channel === "voice") ? ` / ${contacts.filter(c => c.source_channel === "voice").length}` : ""),
+      label: voiceCount > 0 ? "SMS / Web Chat / Voice" : "SMS / Web Chat",
+      value: `${smsCount} / ${webChatCount}` + (voiceCount > 0 ? ` / ${voiceCount}` : ""),
       icon: Phone,
       secondIcon: MessageCircle,
       color: "text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]",

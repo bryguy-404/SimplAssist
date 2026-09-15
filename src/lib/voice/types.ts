@@ -2,7 +2,8 @@ export const PILOT_BUSINESS_ID = "ea848911-ef72-44a6-8cf3-c47b3959be26";
 export const PILOT_PHONE = "+15742638634";
 export const VOICE_MODEL = "gpt-live-1";
 export const ANSWERING_MODEL = "claude-haiku-4-5-20251001";
-export const RECORDING_NOTICE = "You’re speaking with SimplAssist’s AI assistant. This test call will be recorded to help us improve the service. If you don’t want to be recorded, please hang up now. Otherwise, please stay on the line.";
+export const RECORDING_NOTICE =
+  "You’re speaking with SimplAssist’s AI assistant. This test call will be recorded to help us improve the service. If you don’t want to be recorded, please hang up now. Otherwise, please stay on the line.";
 
 export interface VoiceSession {
   id: string;

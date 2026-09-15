@@ -20,7 +20,7 @@ import {
   statusNeutral,
 } from "@/lib/theme-v2/theme";
 
-type Filter = "all" | "sms" | "web_chat" | "hot";
+type Filter = "all" | "sms" | "web_chat" | "voice" | "hot";
 type Sort = "recent" | "status" | "name";
 type LeadStatus = Contact["lead_status"];
 
@@ -109,6 +109,7 @@ export default function ContactsTable({
     // Filter
     if (filter === "sms") result = result.filter((c) => c.source_channel === "sms");
     if (filter === "web_chat") result = result.filter((c) => c.source_channel === "web_chat");
+    if (filter === "voice") result = result.filter((c) => c.source_channel === "voice");
     if (filter === "hot") result = result.filter((c) => c.lead_status === "hot");
 
     // Sort
@@ -163,6 +164,7 @@ export default function ContactsTable({
     { key: "all", label: "All" },
     { key: "sms", label: "SMS" },
     { key: "web_chat", label: "Web Chat" },
+    ...(contacts.some(c => c.source_channel === "voice") ? [{ key: "voice" as const, label: "Voice" }] : []),
     { key: "hot", label: "Hot Leads" },
   ];
 

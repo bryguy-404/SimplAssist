@@ -1,13 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /** Shared, uncached business reads. The caller decides how to handle partial failures. */
-export function loadBusinessContextResults(supabaseAdmin: SupabaseClient, businessId: string) {
+export function loadBusinessContextResults(
+  supabaseAdmin: SupabaseClient,
+  businessId: string,
+) {
   return Promise.all([
-    supabaseAdmin
-      .from("businesses")
-      .select("*")
-      .eq("id", businessId)
-      .single(),
+    supabaseAdmin.from("businesses").select("*").eq("id", businessId).single(),
     supabaseAdmin
       .from("ai_settings")
       .select("*")
@@ -30,7 +29,7 @@ export function loadBusinessContextResults(supabaseAdmin: SupabaseClient, busine
     supabaseAdmin
       .from("business_knowledge_items")
       .select(
-        "id,business_id,kind,category,title,content,source,is_active,sort_order,verified_at,created_at,updated_at"
+        "id,business_id,kind,category,title,content,source,is_active,sort_order,verified_at,created_at,updated_at",
       )
       .eq("business_id", businessId)
       .eq("is_active", true)
@@ -42,7 +41,7 @@ export function loadBusinessContextResults(supabaseAdmin: SupabaseClient, busine
     supabaseAdmin
       .from("business_knowledge_items")
       .select(
-        "id,business_id,kind,category,title,content,source,is_active,sort_order,verified_at,created_at,updated_at"
+        "id,business_id,kind,category,title,content,source,is_active,sort_order,verified_at,created_at,updated_at",
       )
       .eq("business_id", businessId)
       .eq("is_active", true)

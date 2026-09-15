@@ -1,0 +1,45 @@
+BEGIN;
+CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
+SET LOCAL search_path = public, extensions;
+SELECT no_plan();
+INSERT INTO auth.users(id,email) VALUES ('00000000-0000-4000-a072-000000000001','voice-ops@example.test');
+INSERT INTO public.businesses(id,owner_id,name,business_type,slug) VALUES ('ea848911-ef72-44a6-8cf3-c47b3959be26','00000000-0000-4000-a072-000000000001','Voice','general','voice-072');
+INSERT INTO public.voice_pilot_settings(business_id,enabled) VALUES ('ea848911-ef72-44a6-8cf3-c47b3959be26',true);
+INSERT INTO public.subscriptions(business_id,stripe_customer_id,stripe_subscription_id,plan,status) VALUES ('ea848911-ef72-44a6-8cf3-c47b3959be26','cus_voice','sub_voice','sms_and_chat','active');
+INSERT INTO public.contacts(id,business_id,phone_number,source_channel) VALUES ('20000000-0000-4000-a072-000000000001','ea848911-ef72-44a6-8cf3-c47b3959be26','+15555550101','voice');
+INSERT INTO public.conversations(id,business_id,contact_id,channel) VALUES ('30000000-0000-4000-a072-000000000001','ea848911-ef72-44a6-8cf3-c47b3959be26','20000000-0000-4000-a072-000000000001','voice');
+INSERT INTO public.voice_sessions(id,business_id,conversation_id,call_control_id,call_session_id,caller_phone,called_phone,response_mode,status,reserved_seconds) VALUES ('40000000-0000-4000-a072-000000000001','ea848911-ef72-44a6-8cf3-c47b3959be26','30000000-0000-4000-a072-000000000001','control','session','+15555550101','+15742638634','voice','starting',600);
+INSERT INTO public.voice_stream_credentials(session_id,token_hash,expires_at) VALUES ('40000000-0000-4000-a072-000000000001',repeat('a',64),now()+interval '1 minute');
+
+SELECT ok(NOT has_function_privilege('authenticated','public.configure_voice_pilot(integer,boolean,integer,jsonb,uuid)','EXECUTE'),'settings mutation is admin-server only');
+SELECT public.configure_voice_pilot(1,false,12000,'[{"phone":"+15555550101","label":"Test"}]','00000000-0000-4000-a072-000000000001');
+SELECT throws_ok($$SELECT public.configure_voice_pilot(1,true,12000,'[{"phone":"+15555550101"}]','00000000-0000-4000-a072-000000000001')$$,'40001','Pilot settings changed; reload','stale admin changes fail atomically');
+SELECT public.stop_voice_pilot('00000000-0000-4000-a072-000000000001');
+SELECT is((SELECT enabled FROM public.voice_pilot_settings),false,'stop switch disables admission');
+SELECT is((SELECT count(*)::integer FROM public.voice_pilot_audit),2,'budget/settings changes and stop have admin audit records');
+INSERT INTO public.voice_recordings(recording_id,session_id,business_id,delete_after) VALUES
+ ('expired','40000000-0000-4000-a072-000000000001','ea848911-ef72-44a6-8cf3-c47b3959be26',now()-interval '1 minute'),
+ ('current','40000000-0000-4000-a072-000000000001','ea848911-ef72-44a6-8cf3-c47b3959be26',now()+interval '30 days');
+CREATE TEMP TABLE claimed AS SELECT * FROM public.claim_voice_recording_cleanup(10);
+SELECT is((SELECT count(*)::integer FROM claimed),1,'only expired audio is claimed');
+SELECT is((SELECT count(*)::integer FROM public.claim_voice_recording_cleanup(10)),0,'concurrent cleanup cannot claim a live lease');
+SELECT public.finish_voice_recording_cleanup('expired',lease_token,false,'provider_unavailable') FROM claimed;
+SELECT ok((SELECT deleted_at IS NULL AND next_attempt_at>now() AND attempts=1 FROM public.voice_recordings WHERE recording_id='expired'),'failed deletion retains a durable retry');
+UPDATE public.voice_recordings SET next_attempt_at=now() WHERE recording_id='expired';
+DELETE FROM claimed; INSERT INTO claimed SELECT * FROM public.claim_voice_recording_cleanup(10);
+SELECT public.finish_voice_recording_cleanup('expired',lease_token,true,NULL) FROM claimed;
+SELECT ok((SELECT deleted_at IS NOT NULL FROM public.voice_recordings WHERE recording_id='expired'),'successful provider deletion completes retention');
+UPDATE public.voice_sessions SET status='closed',ended_at=now(),used_seconds=12;
+SELECT throws_ok($$SELECT public.reconcile_voice_usage('40000000-0000-4000-a072-000000000001',10,'provider support evidence','00000000-0000-4000-a072-000000000001')$$,'P0001','Usage cannot be reconciled with these values','reconciliation cannot undercount observed usage');
+SELECT public.reconcile_voice_usage('40000000-0000-4000-a072-000000000001',15,'provider support evidence','00000000-0000-4000-a072-000000000001');
+SELECT ok((SELECT usage_confirmed AND reserved_seconds=0 AND used_seconds=15 FROM public.voice_sessions),'verified evidence releases remaining reservation');
+SELECT public.record_voice_fragment('40000000-0000-4000-a072-000000000001','old','customer','Private words',0,100);
+UPDATE public.businesses SET owner_id=NULL WHERE id='ea848911-ef72-44a6-8cf3-c47b3959be26';
+SELECT is((SELECT content FROM public.voice_transcript_fragments),'[deleted]','account cleanup scrubs timestamped transcript content');
+SELECT is((SELECT caller_phone FROM public.voice_sessions),'','account cleanup removes caller identity');
+SELECT ok((SELECT delete_after<=now() FROM public.voice_recordings WHERE recording_id='current'),'account cleanup schedules remaining audio deletion');
+SELECT public.record_voice_fragment('40000000-0000-4000-a072-000000000001','late','customer','Late private words',100,200);
+SELECT is((SELECT count(*)::integer FROM public.voice_transcript_fragments),1,'late transcript callbacks cannot restore deleted private data');
+SELECT is((SELECT count(*)::integer FROM public.voice_pilot_testers),0,'account cleanup removes tester phone numbers');
+SELECT * FROM finish();
+ROLLBACK;

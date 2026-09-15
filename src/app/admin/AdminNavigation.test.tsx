@@ -54,6 +54,7 @@ describe("AdminNavigation", () => {
     expect(links.map(({ label }) => label)).toEqual([
       "Clients",
       "Metrics",
+      "Voice pilot",
       "Partners",
       "Tickets",
       "Waitlist",
@@ -86,6 +87,8 @@ describe("AdminNavigation", () => {
     ["/admin/metrics", "Metrics"],
     ["/admin/metrics/settings", "Metrics"],
     ["/admin/metrics/business-1", "Metrics"],
+    ["/admin/voice", "Voice pilot"],
+    ["/admin/voice/call-1", "Voice pilot"],
     ["/admin/partners", "Partners"],
     ["/admin/partners/partner-1", "Partners"],
     ["/admin/tickets", "Tickets"],

@@ -7,6 +7,7 @@ import {
   AudioQueue,
   InboundReorderBuffer,
   validateMediaFormat,
+  hasAudibleAudio,
 } from "./audio";
 import { CallTranscript } from "./transcript";
 import type { VoiceSession } from "./types";
@@ -44,7 +45,10 @@ const session = {
   reserved_seconds: 600,
 } as VoiceSession;
 
-function harness(profile: "pcm16" | "pcmu8" = "pcm16") {
+function harness(
+  profile: "pcm16" | "pcmu8" = "pcm16",
+  connectingRingback = false,
+) {
   const phone = new Socket();
   const live = new Socket();
   const store = {
@@ -60,6 +64,8 @@ function harness(profile: "pcm16" | "pcmu8" = "pcm16") {
     .fn()
     .mockResolvedValue("The consultation costs fifty dollars.");
   const hangup = vi.fn().mockResolvedValue(undefined);
+  const stopConnectingRingback = vi.fn().mockResolvedValue(undefined);
+  const onStartupTiming = vi.fn();
   const call = new LiveCall({
     session,
     businessName: "Lakeview Plumbing",
@@ -70,6 +76,10 @@ function harness(profile: "pcm16" | "pcmu8" = "pcm16") {
     answer,
     hangup,
     onClosed: vi.fn(),
+    stopConnectingRingback: connectingRingback
+      ? stopConnectingRingback
+      : undefined,
+    onStartupTiming,
     connectOpenAI: () => live.asWebSocket(),
   });
   async function start(delayAudio = false, acknowledgeGreeting = true) {
@@ -125,7 +135,18 @@ function harness(profile: "pcm16" | "pcmu8" = "pcm16") {
     live.event({ type: "session.closed", usage: { seconds: 3 } });
     await pending;
   }
-  return { phone, live, store, answer, hangup, call, start, finish };
+  return {
+    phone,
+    live,
+    store,
+    answer,
+    hangup,
+    call,
+    start,
+    finish,
+    stopConnectingRingback,
+    onStartupTiming,
+  };
 }
 
 describe("continuous phone bridge", () => {
@@ -164,6 +185,165 @@ describe("continuous phone bridge", () => {
       "greeting_instruction_timeout",
       true,
     );
+  });
+  it("nudges the greeting once, only after its instruction is acknowledged", async () => {
+    const h = harness();
+    await h.start(false, false);
+    expect(
+      h.live.sent.filter((e) => e.type === "session.commentary.append"),
+    ).toEqual([]);
+    const instruction = h.live.sent.find(
+      (e) => e.type === "session.instructions.append",
+    )!;
+    for (let i = 0; i < 2; i++)
+      h.live.event({
+        type: "session.instructions.appended",
+        client_event_id: instruction.event_id,
+      });
+    expect(
+      h.live.sent.filter((e) => e.type === "session.commentary.append"),
+    ).toHaveLength(1);
+    await h.finish();
+  });
+  it.each(["pcm16", "pcmu8"] as const)(
+    "keeps ringing through %s silence and preserves the opening while ring-stop is pending",
+    async (profile) => {
+      const h = harness(profile, true);
+      await h.start();
+      const bytes = new AudioQueue(profile).frameBytes;
+      const silence = Buffer.alloc(bytes, AUDIO_PROFILES[profile].silence);
+      const speech = Buffer.alloc(bytes, 17);
+      const emit = (b: Buffer) =>
+        h.live.event({
+          type: "session.output_audio.delta",
+          delta: b.toString("base64"),
+        });
+      for (let i = 0; i < 150; i++) {
+        emit(silence);
+        await vi.advanceTimersByTimeAsync(20);
+      }
+      expect(h.stopConnectingRingback).not.toHaveBeenCalled();
+      expect(h.phone.sent.filter((e) => e.event === "media")).toEqual([]);
+      expect(h.store.audioSent).not.toHaveBeenCalled();
+      let release!: () => void;
+      h.stopConnectingRingback.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+      );
+      emit(speech);
+      await vi.advanceTimersByTimeAsync(20);
+      for (let i = 0; i < 30; i++) {
+        emit(speech);
+        await vi.advanceTimersByTimeAsync(20);
+      }
+      expect(h.stopConnectingRingback).toHaveBeenCalledOnce();
+      expect(h.phone.sent.filter((e) => e.event === "media")).toEqual([]);
+      release();
+      await vi.advanceTimersByTimeAsync(800);
+      const sent = h.phone.sent
+        .filter((e) => e.event === "media")
+        .map((e) =>
+          Buffer.from(
+            String((e.media as { payload: string }).payload),
+            "base64",
+          ),
+        );
+      expect(Buffer.concat(sent)).toEqual(
+        Buffer.concat([...Array(5).fill(silence), ...Array(31).fill(speech)]),
+      );
+      expect(h.store.audioSent).toHaveBeenCalledOnce();
+      expect(h.onStartupTiming.mock.calls.map((c) => c[0])).toEqual(
+        expect.arrayContaining([
+          "audible_opening_buffered",
+          "ringback_stop_acknowledged",
+          "first_audio_sent",
+        ]),
+      );
+      await h.finish();
+    },
+  );
+  it("does not replay late greeting audio after the caller hangs up during handoff", async () => {
+    const h = harness("pcm16", true);
+    await h.start();
+    let release!: () => void;
+    h.stopConnectingRingback.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    h.live.event({
+      type: "session.output_audio.delta",
+      delta: Buffer.alloc(640, 17).toString("base64"),
+    });
+    await vi.advanceTimersByTimeAsync(20);
+    const closed = h.finish();
+    release();
+    await closed;
+    await vi.advanceTimersByTimeAsync(100);
+    expect(h.phone.sent.filter((e) => e.event === "media")).toEqual([]);
+  });
+  it("restores the shallow playback buffer after the opening handoff", async () => {
+    const h = harness("pcm16", true);
+    await h.start();
+    h.live.event({
+      type: "session.output_audio.delta",
+      delta: Buffer.alloc(640, 17).toString("base64"),
+    });
+    await vi.advanceTimersByTimeAsync(40);
+    expect(h.store.audioSent).toHaveBeenCalledOnce();
+    h.live.event({
+      type: "session.output_audio.delta",
+      delta: Buffer.alloc(640 * 80, 17).toString("base64"),
+    });
+    h.live.event({ type: "session.closed", usage: { seconds: 1 } });
+    await h.call.done;
+    expect(h.store.finish).toHaveBeenCalledWith(
+      "audio_backpressure",
+      "audio_backpressure",
+      true,
+    );
+  });
+  it.each(["failure", "timeout"])(
+    "falls back on ring-stop %s without speaking over ringing",
+    async (kind) => {
+      const h = harness("pcm16", true);
+      await h.start();
+      if (kind === "failure")
+        h.stopConnectingRingback.mockRejectedValueOnce(
+          new Error("unavailable"),
+        );
+      else
+        h.stopConnectingRingback.mockImplementationOnce(
+          () => new Promise(() => {}),
+        );
+      h.live.event({
+        type: "session.output_audio.delta",
+        delta: Buffer.alloc(640, 17).toString("base64"),
+      });
+      await vi.advanceTimersByTimeAsync(2100);
+      h.live.event({ type: "session.closed", usage: { seconds: 3 } });
+      await h.call.done;
+      const code =
+        kind === "failure" ? "ringback_stop_failed" : "ringback_stop_timeout";
+      expect(h.store.finish).toHaveBeenCalledWith(code, code, true);
+      expect(h.phone.sent.filter((e) => e.event === "media")).toEqual([]);
+    },
+  );
+  it("ends a silent provider startup even if the greeting instruction was acknowledged", async () => {
+    const h = harness("pcm16", true);
+    await h.start();
+    await vi.advanceTimersByTimeAsync(12001);
+    h.live.event({ type: "session.closed", usage: { seconds: 12 } });
+    await h.call.done;
+    expect(h.store.finish).toHaveBeenCalledWith(
+      "greeting_audio_timeout",
+      "greeting_audio_timeout",
+      true,
+    );
+    expect(h.stopConnectingRingback).not.toHaveBeenCalled();
   });
   it.each(["pcm16", "pcmu8"] as const)(
     "carries %s audio in both directions using the stable client-delegation API",
@@ -378,6 +558,15 @@ describe("continuous phone bridge", () => {
 });
 
 describe("audio and transcript ordering", () => {
+  it("distinguishes PCM and both PCMU silence encodings from quiet speech", () => {
+    expect(hasAudibleAudio(Buffer.alloc(640), "pcm16")).toBe(false);
+    expect(hasAudibleAudio(Buffer.alloc(160, 255), "pcmu8")).toBe(false);
+    expect(hasAudibleAudio(Buffer.alloc(160, 127), "pcmu8")).toBe(false);
+    const quiet = Buffer.alloc(640);
+    for (let i = 0; i < 640; i += 2) quiet.writeInt16LE(40, i);
+    expect(hasAudibleAudio(quiet, "pcm16")).toBe(true);
+    expect(hasAudibleAudio(Buffer.alloc(160, 200), "pcmu8")).toBe(true);
+  });
   it("reorders packets, drops duplicates and advances after a lost packet", () => {
     const q = new InboundReorderBuffer();
     q.add(2, Buffer.from([2]), 0);

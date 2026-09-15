@@ -225,6 +225,26 @@ export async function handlePilotEvent(
         },
         VOICE_PROVIDER_OPTIONS,
       );
+      // Queue this while the first ringback is still playing. Starting it only
+      // from playback.ended would leave another webhook/API gap of dead air.
+      // The original completion still triggers setup; the worker stops this
+      // continuation only when it has audible greeting audio buffered.
+      await deps.telnyx.calls.actions.startPlayback(
+        session.call_control_id,
+        {
+          audio_url: new URL(
+            "/audio/voicemail-ringback-11s-v1.wav",
+            deps.appUrl,
+          ).toString(),
+          audio_type: "wav",
+          cache_audio: true,
+          target_legs: "self",
+          loop: 3,
+          command_id: `voice-connecting-ring-${session.id}`,
+          client_state: pilotClientState(session, "ringing"),
+        },
+        VOICE_PROVIDER_OPTIONS,
+      );
     } else if (
       eventType === "call.playback.ended" &&
       state.voicePilotPhase === "ringing" &&
@@ -265,6 +285,17 @@ export async function handlePilotEvent(
       await transition(deps, session, ["ringing", "notice"], {
         status: "notice",
       });
+      // Testers who still need the spoken notice hear it without ringback
+      // underneath. Recording remains gated by notice completion as before.
+      await deps.telnyx.calls.actions.stopPlayback(
+        session.call_control_id,
+        {
+          stop: "all",
+          command_id: `voice-notice-ring-stop-${session.id}`,
+          client_state: pilotClientState(session, "notice"),
+        },
+        VOICE_PROVIDER_OPTIONS,
+      );
       await deps.telnyx.calls.actions.speak(
         session.call_control_id,
         {
@@ -335,6 +366,8 @@ async function startMedia(
   if (url.protocol !== "https:") throw new Error("voice_worker_url_invalid");
   url.protocol = "wss:";
   url.searchParams.set("token", token);
+  if (session.prior_disclosure_acknowledged_at)
+    url.searchParams.set("opening_ringback", "v1");
   // Recording starts after the notice or verified prior tester acknowledgment.
   // Store only the provider recording ID when its callback arrives.
   await deps.telnyx.calls.actions.startRecording(

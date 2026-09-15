@@ -78,6 +78,7 @@ function fixture(status: VoiceSession["status"] = "ringing") {
   });
   const actions = {
     startPlayback: vi.fn().mockResolvedValue({}),
+    stopPlayback: vi.fn().mockResolvedValue({}),
     speak: vi.fn().mockResolvedValue({}),
     startRecording: vi.fn().mockResolvedValue({}),
     startStreaming: vi.fn().mockResolvedValue({}),
@@ -119,6 +120,12 @@ describe("existing-number voice routing", () => {
     await handlePilotEvent(f.deps, "call.playback.ended", payload, true);
     await handlePilotEvent(f.deps, "call.playback.ended", payload, true);
     expect(f.actions.speak).not.toHaveBeenCalled();
+    expect(f.actions.stopPlayback).not.toHaveBeenCalled();
+    expect(
+      new URL(
+        f.actions.startStreaming.mock.calls[0][1].stream_url,
+      ).searchParams.get("opening_ringback"),
+    ).toBe("v1");
     expect(f.session.notice_completed_at).toBeFalsy();
     expect(f.actions.startRecording).toHaveBeenCalledTimes(2);
     expect(f.actions.startStreaming.mock.calls[0]).toEqual(
@@ -147,6 +154,10 @@ describe("existing-number voice routing", () => {
     expect(f.actions.startPlayback.mock.calls[0][1].audio_url).toContain(
       "voicemail-ringback-11s-v1.wav",
     );
+    expect(f.actions.startPlayback.mock.calls[1][1]).toMatchObject({
+      loop: 3,
+      command_id: "voice-connecting-ring-voice-call",
+    });
     expect(f.actions.startRecording).not.toHaveBeenCalled();
     await handlePilotEvent(
       f.deps,
@@ -155,6 +166,10 @@ describe("existing-number voice routing", () => {
       true,
     );
     expect(f.actions.speak.mock.calls[0][1].payload).toContain("AI assistant");
+    expect(f.actions.stopPlayback).toHaveBeenCalledOnce();
+    expect(f.actions.stopPlayback.mock.invocationCallOrder[0]).toBeLessThan(
+      f.actions.speak.mock.invocationCallOrder[0],
+    );
     expect(f.actions.startRecording).not.toHaveBeenCalled();
     await handlePilotEvent(
       f.deps,
@@ -169,9 +184,50 @@ describe("existing-number voice routing", () => {
       stream_bidirectional_sampling_rate: 16000,
       stream_track: "inbound_track",
     });
+    expect(
+      new URL(
+        f.actions.startStreaming.mock.calls[0][1].stream_url,
+      ).searchParams.has("opening_ringback"),
+    ).toBe(false);
     expect(f.actions.startRecording.mock.invocationCallOrder[0]).toBeLessThan(
       f.actions.startStreaming.mock.invocationCallOrder[0],
     );
+  });
+  it("queues a bounded continuation before the first ring ends with stable retry IDs", async () => {
+    const f = fixture();
+    await handlePilotEvent(f.deps, "call.answered", f.payload("initial"), true);
+    await handlePilotEvent(f.deps, "call.answered", f.payload("initial"), true);
+    expect(f.actions.startPlayback.mock.calls[0]).toEqual(
+      f.actions.startPlayback.mock.calls[2],
+    );
+    expect(f.actions.startPlayback.mock.calls[1]).toEqual(
+      f.actions.startPlayback.mock.calls[3],
+    );
+    expect(f.actions.startPlayback.mock.calls[0][1].loop).toBeUndefined();
+    expect(f.actions.startPlayback.mock.calls[1][1].loop).toBe(3);
+    expect(f.actions.startStreaming).not.toHaveBeenCalled();
+  });
+  it("ignores the cancelled ringback callback after a live greeting handoff", async () => {
+    const f = fixture("active");
+    await handlePilotEvent(
+      f.deps,
+      "call.playback.ended",
+      f.payload("ringing", { status: "cancelled" }),
+      true,
+    );
+    expect(f.actions.startStreaming).not.toHaveBeenCalled();
+    expect(f.actions.speak).not.toHaveBeenCalled();
+    expect(f.deps.sendFallback).not.toHaveBeenCalled();
+  });
+  it("fails safely if continuation ringback cannot be queued", async () => {
+    const f = fixture();
+    f.actions.startPlayback
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error("provider_failure"));
+    await handlePilotEvent(f.deps, "call.answered", f.payload("initial"), true);
+    expect(f.actions.startStreaming).not.toHaveBeenCalled();
+    expect(f.actions.hangup).toHaveBeenCalledOnce();
+    expect(f.deps.sendFallback).toHaveBeenCalledOnce();
   });
   it("uses stable command IDs and credentials across webhook retries", async () => {
     const f = fixture("notice");

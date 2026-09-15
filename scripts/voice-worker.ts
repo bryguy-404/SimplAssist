@@ -147,10 +147,12 @@ server.on("upgrade", (req, socket, head) => {
     return;
   }
   let token: string | null;
+  let openingRingback = false;
   try {
     const url = new URL(req.url ?? "/", "http://voice.local");
     if (url.pathname !== "/media") throw new Error("invalid_path");
     token = url.searchParams.get("token");
+    openingRingback = url.searchParams.get("opening_ringback") === "v1";
     if (!token) throw new Error("missing_token");
   } catch {
     socket.end("HTTP/1.1 401 Unauthorized\r\n\r\n");
@@ -184,6 +186,25 @@ server.on("upgrade", (req, socket, head) => {
           profile,
           store: createVoiceStore(db, session),
           answer,
+          stopConnectingRingback:
+            openingRingback && session.prior_disclosure_acknowledged_at
+              ? async () => {
+                  await telnyx.calls.actions.stopPlayback(
+                    session.call_control_id,
+                    {
+                      stop: "all",
+                      command_id: `voice-greeting-ring-stop-${session.id}`,
+                    },
+                    { timeout: 1800, maxRetries: 0 },
+                  );
+                }
+              : undefined,
+          onStartupTiming: (phase, elapsedMs) =>
+            console.info("[voice] startup", {
+              sessionId: session.id,
+              phase,
+              elapsedMs,
+            }),
           hangup: async () => {
             await telnyx.calls.actions.hangup(session.call_control_id, {
               command_id: `voice-end-${session.id}`,

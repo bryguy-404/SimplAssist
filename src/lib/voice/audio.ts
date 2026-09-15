@@ -47,13 +47,36 @@ export function decodeAudio(value: unknown, profile: AudioProfileName): Buffer {
   return bytes;
 }
 
+/** Detect output energy, not merely a received packet (Live also emits silence).
+ * A low -60 dBFS RMS threshold preserves quiet opening consonants. This is only
+ * a startup playback gate, never a caller speech/turn detector.
+ */
+export function hasAudibleAudio(
+  bytes: Buffer,
+  profile: AudioProfileName,
+): boolean {
+  const stride = AUDIO_PROFILES[profile].bytesPerSample;
+  let squares = 0;
+  for (let i = 0; i < bytes.length; i += stride) {
+    let sample: number;
+    if (profile === "pcm16") sample = bytes.readInt16LE(i);
+    else {
+      const value = ~bytes[i] & 255;
+      const magnitude = (((value & 15) << 3) + 132) << ((value >> 4) & 7);
+      sample = (value & 128 ? -1 : 1) * (magnitude - 132);
+    }
+    squares += sample * sample;
+  }
+  return bytes.length > 0 && squares / (bytes.length / stride) >= 32 * 32;
+}
+
 /** A shallow, paced queue: provider bursts cannot create seconds of stale speech. */
 export class AudioQueue {
   private bytes: Buffer = Buffer.alloc(0);
   readonly frameBytes: number;
   constructor(
     readonly profile: AudioProfileName,
-    private readonly maxMs = 1500,
+    private maxMs = 1500,
   ) {
     const f = AUDIO_PROFILES[profile];
     this.frameBytes = (f.rate * f.bytesPerSample) / 50;
@@ -84,6 +107,9 @@ export class AudioQueue {
   }
   get pendingMs() {
     return (this.bytes.length / this.frameBytes) * 20;
+  }
+  restrictToNormalBuffer() {
+    if (this.pendingMs <= 1500) this.maxMs = 1500;
   }
 }
 

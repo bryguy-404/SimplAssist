@@ -5,6 +5,7 @@ import {
   AudioQueue,
   InboundReorderBuffer,
   decodeAudio,
+  hasAudibleAudio,
   validateMediaFormat,
   type AudioProfileName,
 } from "./audio";
@@ -28,6 +29,8 @@ export interface LiveSessionOptions {
   ) => Promise<string>;
   hangup: () => Promise<void>;
   onClosed: () => void;
+  stopConnectingRingback?: () => Promise<void>;
+  onStartupTiming?: (phase: string, elapsedMs: number) => void;
   // Injected sockets/timing make the actual bridge testable without paid calls.
   connectOpenAI?: () => WebSocket;
 }
@@ -41,6 +44,10 @@ export class LiveCall {
   private openai: WebSocket | null = null;
   private streamId: string | null = null;
   private ready = false;
+  private readonly connectedAt = Date.now();
+  private openingReleased: boolean;
+  private openingSwitching = false;
+  private openingPreroll: Buffer[] = [];
   private greetingEventId: string | null = null;
   private greetingAcknowledged = false;
   private closing = false;
@@ -73,7 +80,13 @@ export class LiveCall {
     // Retain early caller speech during the bounded startup handshake.
     // Flush it in order once the provider accepts audio; normal input is paced.
     this.input = new AudioQueue(options.profile, 12000);
-    this.output = new AudioQueue(options.profile);
+    this.openingReleased = !options.stopConnectingRingback;
+    // At most two seconds of speech can wait for the bounded ring-stop command.
+    // Return to the normal shallow queue as soon as that startup buffer drains.
+    this.output = new AudioQueue(
+      options.profile,
+      this.openingReleased ? 1500 : 3000,
+    );
     options.phone.on("message", (data) => this.phoneEvent(data.toString()));
     options.phone.on(
       "error",
@@ -88,6 +101,10 @@ export class LiveCall {
     }, 12000);
     this.tick();
     this.heartbeat();
+  }
+
+  private startupTiming(phase: string) {
+    this.options.onStartupTiming?.(phase, Date.now() - this.connectedAt);
   }
 
   private later(fn: () => void, ms: number) {
@@ -136,6 +153,7 @@ export class LiveCall {
           throw new Error("stream_identity_mismatch");
         validateMediaFormat(this.options.profile, start.media_format);
         this.streamId = event.stream_id;
+        this.startupTiming("phone_stream_started");
         this.startOpenAI();
       } else if (event.event === "media" && !this.closing) {
         if (!this.streamId || event.stream_id !== this.streamId)
@@ -184,6 +202,7 @@ export class LiveCall {
         return;
       }
       this.openedAt = Date.now();
+      this.startupTiming("openai_socket_open");
       this.sendLive({
         type: "session.start",
         session: {
@@ -226,10 +245,12 @@ export class LiveCall {
           )
             throw new Error("openai_audio_format_mismatch");
           const id = event.session.id as string;
+          this.startupTiming("openai_session_started");
           this.persist(async () => {
             await this.options.store.activate(id);
             if (this.closing) return;
             this.ready = true;
+            this.startupTiming("session_activated");
             const earlyAudio = this.input.takeBuffered();
             if (earlyAudio.length)
               this.sendLive({
@@ -247,12 +268,29 @@ export class LiveCall {
               if (!this.greetingAcknowledged && !this.closing)
                 void this.close("greeting_instruction_timeout", true);
             }, 8000);
+            this.later(() => {
+              if (!this.openingReleased && !this.closing)
+                void this.close("greeting_audio_timeout", true);
+            }, 12000);
           });
           break;
         }
         case "session.instructions.appended":
-          if (event.client_event_id === this.greetingEventId)
+          if (
+            event.client_event_id === this.greetingEventId &&
+            !this.greetingAcknowledged &&
+            !this.closing
+          ) {
             this.greetingAcknowledged = true;
+            // Explicitly prompt the already configured greeting to begin; an
+            // instruction acknowledgment alone is not evidence of speech.
+            this.sendLive({
+              type: "session.commentary.append",
+              delegation_id: null,
+              content:
+                "Begin the conversation now, following the opening instructions provided.",
+            });
+          }
           break;
         case "session.output_audio.delta":
           if (!this.closing)
@@ -413,7 +451,8 @@ export class LiveCall {
           type: "session.input_audio.append",
           audio: this.input.take(true)!.toString("base64"),
         });
-        const frame = this.output.take();
+        if (!this.openingReleased) this.prepareOpeningPlayback();
+        const frame = this.openingReleased ? this.output.take() : null;
         if (frame) {
           this.sendPhone({
             event: "media",
@@ -421,8 +460,10 @@ export class LiveCall {
           });
           if (!this.audioSent) {
             this.audioSent = true;
+            this.startupTiming("first_audio_sent");
             this.persist(() => this.options.store.audioSent());
           }
+          this.output.restrictToNormalBuffer();
           if (++this.outputFrames % 25 === 0) {
             const name = `played-${this.playbackGeneration}-${this.outputFrames}`;
             this.pendingMarks.add(name);
@@ -462,6 +503,38 @@ export class LiveCall {
     this.later(() => this.tick(), 20);
   }
 
+  private prepareOpeningPlayback() {
+    if (this.openingSwitching) return;
+    let frame: Buffer | null;
+    while ((frame = this.output.take())) {
+      if (!hasAudibleAudio(frame, this.options.profile)) {
+        this.openingPreroll.push(frame);
+        if (this.openingPreroll.length > 5) this.openingPreroll.shift();
+        continue;
+      }
+      // Retain 100 ms before detected speech so the beginning is not clipped.
+      const remaining = this.output.takeBuffered();
+      this.output.append(
+        Buffer.concat([...this.openingPreroll, frame, remaining]),
+      );
+      this.openingPreroll = [];
+      this.openingSwitching = true;
+      this.startupTiming("audible_opening_buffered");
+      this.later(() => {
+        if (!this.openingReleased && !this.closing)
+          void this.close("ringback_stop_timeout", true);
+      }, 2000);
+      void this.options.stopConnectingRingback!()
+        .then(() => {
+          if (this.closing) return;
+          this.startupTiming("ringback_stop_acknowledged");
+          this.openingReleased = true;
+        })
+        .catch(() => void this.close("ringback_stop_failed", true));
+      break;
+    }
+  }
+
   private heartbeat() {
     if (this.closed) return;
     if (!this.heartbeatBusy && !this.closing) {
@@ -487,6 +560,7 @@ export class LiveCall {
     this.finishError = fallback ? reason : null;
     this.delegationAbort?.abort();
     this.output.clear();
+    this.openingPreroll = [];
     this.input.clear();
     this.playbackGeneration++;
     this.pendingMarks.clear();

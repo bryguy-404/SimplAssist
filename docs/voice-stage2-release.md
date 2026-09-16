@@ -64,3 +64,7 @@ Disable action capabilities to return voice to Q&A. Disable preparation to retur
 - `10e9725`: delegated decisions, playback acknowledgments and optional provider preparation during ringing.
 
 The goal-change SQL was executed against the isolated local fixture and rolled back; it produced Signup + the intended URL. The schema bundle consists of the tested canonical migration bodies inside one transaction. Production migration application, read-only schema verification, private deployments, capability activation and real calls are still pending. The currently deployed Q&A pilot has not been changed by this implementation.
+
+## Production database update — September 15, 2026
+
+Bryan explicitly authorized Codex to apply the Supabase steps in this task, overriding the default manual migration handoff for this update. Applied migrations 074–076, their history entries, and the approved Signup goal in one transaction using the authenticated Supabase CLI for project `inmgpkurctttsofpywuz`. A separate read-only query verified all three history entries, both new tables with RLS, eight server-only functions, blocked client writes, the Signup URL, one existing approved tester, and unchanged 200-minute/two-call/ten-minute limits. All new capability switches remain off. Existing app and voice health checks pass; no active calls were present. No application deployment or live action acceptance is included in this database verification.

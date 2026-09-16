@@ -1,3 +1,4 @@
+import { VoiceActionControls } from "./VoiceActionControls";
 import Link from "next/link";
 import { requireAdminUser } from "@/lib/admin/auth";
 import { loadVoicePilotDashboard } from "@/lib/voice/admin.server";
@@ -82,6 +83,13 @@ export default async function VoicePilotPage({
           Their remaining reservations stay held until usage is confirmed.
         </p>
       ) : null}
+      <VoiceActionControls
+        revision={settings.revision}
+        contacts={Boolean(settings.contacts_enabled)}
+        signup={Boolean(settings.signup_enabled)}
+        preparation={Boolean(settings.preparation_enabled)}
+        ready={process.env.VOICE_ACTIONS_ROLLOUT === "true" && workerReady}
+      />
       <VoicePilotControls
         key={settings.revision}
         revision={settings.revision}
@@ -151,9 +159,9 @@ export default async function VoicePilotPage({
         </div>
       </section>
       <p className="text-sm text-stone-500">
-        Pilot access is an internal exception for this account. Contact
-        collection, booking, and top-tier customer availability come after this
-        Q&A pilot passes.
+        Pilot access is an internal exception for this account. Confirmed
+        contact capture and signup texts can be enabled above. Booking and
+        top-tier customer availability remain separate release steps.
       </p>
     </main>
   );

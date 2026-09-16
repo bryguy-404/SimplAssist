@@ -115,3 +115,46 @@ describe("admin-only pilot controls", () => {
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 });
+
+describe("signup pilot capability controls", () => {
+  it("does not let the signup test enable booking or retarget a business", async () => {
+    vi.stubEnv("VOICE_ACTIONS_ROLLOUT", "true");
+    const response = await POST(
+      request({
+        action: "capabilities",
+        revision: 1,
+        contacts: true,
+        signup: false,
+        preparation: false,
+        booking: true,
+        demoBusinessId: "other",
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+  it("keeps calendar and demo disabled when saving signup capabilities", async () => {
+    vi.stubEnv("VOICE_ACTIONS_ROLLOUT", "true");
+    expect(
+      (
+        await POST(
+          request({
+            action: "capabilities",
+            revision: 1,
+            contacts: true,
+            signup: false,
+            preparation: false,
+          }),
+        )
+      ).status,
+    ).toBe(200);
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "configure_voice_actions",
+      expect.objectContaining({
+        p_booking: false,
+        p_demo_business_id: null,
+        p_tester_modes: [],
+      }),
+    );
+  });
+});

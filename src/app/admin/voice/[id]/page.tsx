@@ -13,7 +13,7 @@ export default async function VoiceCallPage({
   await requireAdminUser();
   const details = await loadVoiceCallDetails(params.id);
   if (!details) notFound();
-  const { session, usage, recordings, fragments } = details;
+  const { session, usage, recordings, fragments, actions } = details;
   const cost = usage.reduce(
     (sum, row) => sum + Number(row.estimated_cost_usd || 0),
     0,
@@ -99,6 +99,62 @@ export default async function VoiceCallPage({
                 </>
               )}
             </div>
+          ))
+        )}
+      </section>
+      <section>
+        <h2 className="text-xl font-semibold">Actions and confirmed details</h2>
+        <p className="mt-2 text-sm text-stone-500">
+          A sent link is not a completed signup. Pending and uncertain actions
+          must be reviewed before attempting them again.
+        </p>
+        {actions.length === 0 ? (
+          <p className="mt-3 text-sm">No actions recorded for this call.</p>
+        ) : (
+          actions.map((action) => (
+            <article key={action.id} className="mt-3 rounded-lg border p-4">
+              <h3 className="font-semibold">
+                {action.kind.replaceAll("_", " ")} ·{" "}
+                {action.status.replaceAll("_", " ")}
+              </h3>
+              <dl className="mt-2 space-y-1 text-sm">
+                {Object.entries(action.payload as Record<string, unknown>)
+                  .filter(([key]) => key !== "kind")
+                  .map(([key, value]) => (
+                    <div key={key}>
+                      <dt className="inline font-medium">{key}: </dt>
+                      <dd className="inline break-all">{String(value)}</dd>
+                    </div>
+                  ))}
+              </dl>
+              {action.result?.summary && (
+                <p className="mt-2 text-sm">{String(action.result.summary)}</p>
+              )}
+              {action.result?.deliveryStatus && (
+                <p className="mt-2 text-sm">
+                  Text delivery: {String(action.result.deliveryStatus)}
+                </p>
+              )}
+              {Array.isArray(action.result?.conflicts) &&
+                action.result.conflicts.length > 0 && (
+                  <p className="mt-2 text-sm text-amber-700">
+                    Contact review needed: existing{" "}
+                    {action.result.conflicts.join(", ")} retained. Confirmed
+                    call details are shown above.
+                  </p>
+                )}
+              {action.error_code && (
+                <p className="mt-2 text-sm text-amber-700">
+                  Needs review: {action.error_code}
+                </p>
+              )}
+              <p className="mt-2 text-xs text-stone-500">
+                {action.confirmed_at
+                  ? `Confirmed ${new Date(action.confirmed_at).toLocaleString()}`
+                  : "No confirmed submission"}{" "}
+                · updated {new Date(action.updated_at).toLocaleString()}
+              </p>
+            </article>
           ))
         )}
       </section>

@@ -25,6 +25,15 @@ const schema = z.discriminatedUnion("action", [
       .max(50),
   }),
   z.object({ action: z.literal("stop") }),
+  z
+    .object({
+      action: z.literal("capabilities"),
+      revision: z.number().int().positive(),
+      contacts: z.boolean(),
+      signup: z.boolean(),
+      preparation: z.boolean(),
+    })
+    .strict(),
   z.object({
     action: z.literal("feedback"),
     sessionId: z.string().uuid(),
@@ -75,6 +84,41 @@ export async function POST(request: NextRequest) {
       p_enabled: input.enabled,
       p_budget_seconds: input.budgetMinutes * 60,
       p_testers: input.testers,
+      p_admin: auth.admin.id,
+    });
+  } else if (input.action === "capabilities") {
+    if (
+      process.env.VOICE_ACTIONS_ROLLOUT !== "true" ||
+      !(await pilotRoutingDependencies().workerReady())
+    )
+      return adminMutationJson(
+        { error: "Voice action deployment checks must pass first." },
+        { status: 409 },
+      );
+    if (input.signup) {
+      const { data: b, error } = await supabaseAdmin
+        .from("businesses")
+        .select("primary_goal,goal_url")
+        .eq("id", PILOT_BUSINESS_ID)
+        .single();
+      if (error || b?.primary_goal !== "signup" || !b.goal_url)
+        return adminMutationJson(
+          {
+            error:
+              "Choose Signup and save the approved link in the business goal settings first.",
+          },
+          { status: 409 },
+        );
+    }
+    result = await supabaseAdmin.rpc("configure_voice_actions", {
+      p_revision: input.revision,
+      p_contacts: input.contacts,
+      p_booking: false,
+      p_signup: input.signup,
+      p_preparation: input.preparation,
+      p_demo_business_id: null,
+      p_demo_calendar_id: null,
+      p_tester_modes: [],
       p_admin: auth.admin.id,
     });
   } else if (input.action === "stop") {

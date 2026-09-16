@@ -89,7 +89,19 @@ export async function loadVoiceCallDetails(id: string) {
     fragments.push(...(data ?? []));
     if (!data || data.length < 500) break;
   }
+  const actionsResult =
+    process.env.VOICE_ACTIONS_ROLLOUT === "true"
+      ? await supabaseAdmin
+          .from("voice_actions")
+          .select(
+            "id,kind,status,payload,result,error_code,created_at,confirmed_at,updated_at,source_message_id",
+          )
+          .eq("session_id", id)
+          .order("revision")
+      : { data: [], error: null };
+  if (actionsResult.error) throw new Error("voice_action_review_unavailable");
   return {
+    actions: actionsResult.data || [],
     session,
     usage: usage.data ?? [],
     recordings: recordings.data ?? [],

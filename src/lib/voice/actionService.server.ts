@@ -131,7 +131,8 @@ async function completedActionAnswer(
       },
     );
     if (error) throw new Error("voice_signup_continuation_failed");
-    if (!next) return { text: summary };
+    // PostgREST represents a NULL composite as an object of null fields.
+    if (!next?.id) return { text: summary };
     if (
       next.session_id !== sessionId ||
       next.kind !== "signup" ||

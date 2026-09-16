@@ -833,26 +833,29 @@ describe("saved-contact signup continuation", () => {
     warn.mockRestore();
   });
 
-  it("honors an atomic guard refusal when a newer action appeared", async () => {
-    const original = m.rpc.getMockImplementation()!;
-    m.rpc.mockImplementation(async (name, args) => {
-      if (name === "prepare_voice_signup_after_contact") {
-        tables.voice_actions.push({
-          id: "newer-correction",
-          session_id: sid,
-          kind: "contact",
-          status: "awaiting_confirmation",
-          revision: 2,
-        });
-        return { data: null, error: null };
-      }
-      return original(name, args);
-    });
-    const result = await saveContact();
-    expect(result.confirmationActionId).toBeUndefined();
-    expect(tables.voice_actions[0].status).toBe("succeeded");
-    expect(tables.voice_actions[1].status).toBe("awaiting_confirmation");
-    expect(tables.voice_actions.some((a) => a.kind === "signup")).toBe(false);
-    expect(m.send).not.toHaveBeenCalled();
-  });
+  it.each([null, { id: null, session_id: null, kind: null, status: null }])(
+    "honors an atomic guard refusal (%j) when a newer action appeared",
+    async (emptyResult) => {
+      const original = m.rpc.getMockImplementation()!;
+      m.rpc.mockImplementation(async (name, args) => {
+        if (name === "prepare_voice_signup_after_contact") {
+          tables.voice_actions.push({
+            id: "newer-correction",
+            session_id: sid,
+            kind: "contact",
+            status: "awaiting_confirmation",
+            revision: 2,
+          });
+          return { data: emptyResult, error: null };
+        }
+        return original(name, args);
+      });
+      const result = await saveContact();
+      expect(result.confirmationActionId).toBeUndefined();
+      expect(tables.voice_actions[0].status).toBe("succeeded");
+      expect(tables.voice_actions[1].status).toBe("awaiting_confirmation");
+      expect(tables.voice_actions.some((a) => a.kind === "signup")).toBe(false);
+      expect(m.send).not.toHaveBeenCalled();
+    },
+  );
 });

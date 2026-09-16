@@ -11,7 +11,7 @@ import {
   validateMediaFormat,
   type AudioProfileName,
 } from "./audio";
-import { CallTranscript } from "./transcript";
+import { CallTranscript, type VoiceTranscriptSnapshot } from "./transcript";
 import { buildLiveGreeting, buildLiveInstructions } from "./conversationStyle";
 import { VOICE_MODEL, type VoiceSession } from "./types";
 import type { VoiceStore } from "./store";
@@ -26,7 +26,7 @@ export interface LiveSessionOptions {
   answer: (
     session: VoiceSession,
     delegationId: string,
-    transcript: string,
+    transcript: VoiceTranscriptSnapshot,
     signal: AbortSignal,
   ) => Promise<string | VoiceAnswer>;
   prepared?: PreparedLiveConnection;
@@ -500,7 +500,7 @@ export class LiveCall {
           this.options.answer(
             this.options.session,
             id,
-            this.transcript.snapshot(),
+            this.transcript.capture(),
             abort.signal,
           ),
         )

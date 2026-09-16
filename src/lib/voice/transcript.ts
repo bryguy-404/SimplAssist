@@ -1,5 +1,10 @@
 import type { TranscriptFragment } from "./types";
 
+export interface VoiceTranscriptSnapshot {
+  text: string;
+  fragments: readonly TranscriptFragment[];
+}
+
 export class CallTranscript {
   private fragments = new Map<string, TranscriptFragment>();
   latestCallerEndMs = 0;
@@ -36,6 +41,12 @@ export class CallTranscript {
       )
       .join("\n")
       .slice(-24000);
+  }
+  capture(): VoiceTranscriptSnapshot {
+    return {
+      text: this.snapshot(),
+      fragments: Array.from(this.fragments.values(), (f) => ({ ...f })),
+    };
   }
   get hasCallerText() {
     return Array.from(this.fragments.values()).some(

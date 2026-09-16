@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { APIConnectionTimeoutError } from "@anthropic-ai/sdk/core/error";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { VoiceSession } from "./types";
+import { CallTranscript } from "./transcript";
 const m = vi.hoisted(() => ({ create: vi.fn(), knowledge: vi.fn() }));
 vi.mock("@anthropic-ai/sdk", () => ({
   default: class {
@@ -14,6 +15,17 @@ const session = {
   id: "test-call",
   business_id: "test-business",
 } as VoiceSession;
+function snapshot(text = "Test Caller, test@example.test") {
+  const t = new CallTranscript();
+  t.add({
+    eventId: "event_test",
+    role: "customer",
+    text,
+    startMs: 0,
+    endMs: 1000,
+  });
+  return t.capture();
+}
 function fixture() {
   const updates: unknown[] = [];
   const q = {
@@ -66,7 +78,7 @@ beforeEach(() => {
               phone: "+15555550101",
               email: "test@example.test",
             },
-            requestEventIds: ["event_test"],
+            requestSegments: [1],
           },
         },
       },
@@ -79,7 +91,7 @@ describe("delegated voice decisions", () => {
     const result = await f.answer(
       session,
       "d",
-      "synthetic call",
+      snapshot(),
       new AbortController().signal,
     );
     expect(f.actions.decision).toHaveBeenCalledWith(
@@ -92,10 +104,42 @@ describe("delegated voice decisions", () => {
     );
     expect(result).toHaveProperty("confirmationActionId", "stored-action");
   });
+  it.each([[[999]], [[1, 1]], [[0]], [[1.5]]])(
+    "rejects invalid segment references %j before the action API",
+    async (reference) => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const f = fixture();
+      const response = await m.create();
+      response.content[0].input.decision.requestSegments = Array.isArray(
+        reference,
+      )
+        ? reference
+        : [reference];
+      m.create.mockResolvedValue(response);
+      await expect(
+        f.answer(session, "d", snapshot(), new AbortController().signal),
+      ).rejects.toThrow();
+      expect(f.actions.decision).not.toHaveBeenCalled();
+      warn.mockRestore();
+    },
+  );
+  it("sends compact speech and the new segment contract without raw provider IDs", async () => {
+    const f = fixture();
+    await f.answer(session, "d", snapshot(), new AbortController().signal);
+    const request = m.create.mock.calls[0][0];
+    expect(request.messages[0].content).toContain("[segment 1]");
+    expect(JSON.stringify(request)).not.toContain("event_test");
+    expect(JSON.stringify(request.tools[0].input_schema)).toContain(
+      "requestSegments",
+    );
+    expect(JSON.stringify(request.tools[0].input_schema)).not.toContain(
+      "requestEventIds",
+    );
+  });
   it("keeps an action request bounded and propagates its cancellation signal", async () => {
     const f = fixture();
     const abort = new AbortController();
-    await f.answer(session, "d", "synthetic call", abort.signal);
+    await f.answer(session, "d", snapshot(), abort.signal);
     expect(m.create.mock.calls[0][1]).toEqual({
       signal: abort.signal,
       timeout: 12000,
@@ -106,7 +150,7 @@ describe("delegated voice decisions", () => {
     const response = await m.create();
     m.create.mockResolvedValue({ ...response, stop_reason: "max_tokens" });
     await expect(
-      f.answer(session, "d", "synthetic call", new AbortController().signal),
+      f.answer(session, "d", snapshot(), new AbortController().signal),
     ).rejects.toThrow("backend_output_incomplete");
     expect(f.actions.decision).not.toHaveBeenCalled();
     expect(f.updates[0]).toMatchObject({ status: "confirmed" });
@@ -116,7 +160,7 @@ describe("delegated voice decisions", () => {
     const f = fixture();
     m.create.mockRejectedValue(new APIConnectionTimeoutError());
     await expect(
-      f.answer(session, "d", "synthetic call", new AbortController().signal),
+      f.answer(session, "d", snapshot(), new AbortController().signal),
     ).rejects.toThrow();
     expect(warn).toHaveBeenCalledWith(
       "[voice-answer] request_failed",
@@ -133,12 +177,12 @@ describe("delegated voice decisions", () => {
       content: [
         {
           type: "tool_use",
+          name: "voice_decision",
           input: {
             decision: {
               intent: "confirm",
               actionId: "invented",
-              readbackEventIds: ["r"],
-              confirmationEventIds: ["c"],
+              confirmationSegments: [1],
             },
           },
         },
@@ -148,7 +192,7 @@ describe("delegated voice decisions", () => {
       f.answer(
         session,
         "d",
-        "private transcript",
+        snapshot("private transcript"),
         new AbortController().signal,
       ),
     ).rejects.toThrow();
@@ -176,7 +220,7 @@ describe("delegated voice decisions", () => {
       f.answer(
         session,
         "d",
-        "private transcript",
+        snapshot("private transcript"),
         new AbortController().signal,
       ),
     ).rejects.toThrow();

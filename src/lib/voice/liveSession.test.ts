@@ -552,7 +552,7 @@ describe("continuous phone bridge", () => {
     h.live.event(delegation);
     await vi.advanceTimersByTimeAsync(251);
     expect(h.answer).toHaveBeenCalledOnce();
-    expect(h.answer.mock.calls[0][2]).toContain(
+    expect(h.answer.mock.calls[0][2].text).toContain(
       "What does a consultation cost?",
     );
     expect(h.store.fragment).toHaveBeenCalledOnce();

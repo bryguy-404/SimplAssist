@@ -25,3 +25,13 @@ describe("voice action boundaries", () => {
     expect(buildActionReadback({kind:"booking_request",name:"Bryan",phone:"+15555550100",service:"Inspection",requestedTime:"next week"},"+15555550100","America/Indiana/Indianapolis")).toContain("not a confirmed appointment");
   });
 });
+
+
+describe("natural spoken confirmations", () => {
+  it.each(["Yes, please", "Yes, that works", "Yes, go ahead.", "Yes, that’s correct.", "Yeah, please", "Sure.", "That works!"])("accepts standalone assent %s", (text) => {
+    expect(safeConfirmation(text)).toBe(true);
+  });
+  it.each(["Yes, but not now", "Yes, if it's free", "Yes, please?", "No, yes", "yes no", "Yes, to a different number", "Don't send it", '"yes"', "He said yes", "That works, but tomorrow", "Yesterday"])("rejects qualified or unclear assent %s", (text) => {
+    expect(safeConfirmation(text)).toBe(false);
+  });
+});

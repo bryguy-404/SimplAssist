@@ -272,3 +272,39 @@ describe("voice signup execution", () => {
     expect(m.send).not.toHaveBeenCalled();
   });
 });
+
+describe("spoken signup permission", () => {
+  it.each([
+    [" Yes", ", that", " works"],
+    [" Yes", ", please"],
+    [" Ye", "s,", " please"],
+  ])(
+    "sends once after a clear fragmented spoken confirmation: %j",
+    async (...parts) => {
+      await runVoiceDecision(sid, propose);
+      tables.voice_transcript_fragments = parts.map((content, i) => ({
+        session_id: sid,
+        event_id: `yes-${i}`,
+        content,
+        role: "customer",
+        start_ms: 500 + i * 200,
+      }));
+      const decision: ActionDecision = {
+        ...confirm,
+        confirmationEventIds: parts.map((_, i) => `yes-${i}`),
+      };
+      const result = await runVoiceDecision(sid, decision);
+      expect(result.text).toContain("accepted for sending");
+      await runVoiceDecision(sid, decision);
+      expect(m.send).toHaveBeenCalledOnce();
+    },
+  );
+  it("rearms playback tracking when genuine ambiguity needs a new permission question", async () => {
+    await runVoiceDecision(sid, propose);
+    tables.voice_transcript_fragments[0].content = "Yes, but to another number";
+    const result = await runVoiceDecision(sid, confirm);
+    expect(result.confirmationActionId).toBe(aid);
+    expect(result.text).toContain("ending in 0101");
+    expect(m.send).not.toHaveBeenCalled();
+  });
+});

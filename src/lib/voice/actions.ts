@@ -55,7 +55,10 @@ export function buildActionReadback(payload: VoiceActionPayload, callerPhone: st
   return `May I book ${payload.service} on ${payload.startTime.replace("T", " at ")} (${timezone}) for ${details}?`;
 }
 export function safeConfirmation(text: string): boolean {
-  // Only a clear, standalone assent can authorize a pending action. Changes,
-  // questions, conditional answers and quoted instructions require a new readback.
-  return /^(yes|yeah|yep|correct|that's correct|that is correct|that's right|that is right|sounds good|go ahead|please do|okay|ok|yes please|yes that's correct|yes that is correct|yes go ahead)[.! ,]*$/i.test(text.trim());
+  // Speech transcripts include punctuation inside phrases and may use curly
+  // apostrophes. Normalize only that presentation, never remove qualifying words
+  // or question marks. Keep a whole-utterance allowlist, not a search for "yes".
+  const normalized = text.toLowerCase().replace(/[’‘]/g, "'")
+    .replace(/[.,!]/g, " ").replace(/\s+/g, " ").trim();
+  return /^(yes|yeah|yep|correct|that's correct|that is correct|that's right|that is right|sounds good|go ahead|please do|okay|ok|sure|that works|yes please|yeah please|yes that's correct|yes that is correct|yes that's right|yes that is right|yes go ahead|yes that works)$/.test(normalized);
 }

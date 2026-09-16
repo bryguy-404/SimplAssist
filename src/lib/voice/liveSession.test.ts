@@ -232,6 +232,48 @@ describe("continuous phone bridge", () => {
     h.phone.event({ event: "mark", mark: mark?.mark });
     await vi.advanceTimersByTimeAsync(1);
     expect(acknowledged).toHaveBeenCalledWith("action-id", "readback", 400);
+    // An unclear answer may legitimately require a new readback. It must
+    // replace the playback evidence instead of remaining tied to the old one.
+    h.live.event({
+      type: "session.input_transcript.delta",
+      event_id: "unclear",
+      delta: "Maybe",
+      start_ms: 1000,
+      end_ms: 1200,
+    });
+    h.live.event({
+      type: "session.delegation.created",
+      offset_ms: 1200,
+      delegation: { id: "repeat-permission", target: "client" },
+    });
+    await vi.advanceTimersByTimeAsync(300);
+    h.live.event({
+      type: "session.output_transcript.delta",
+      event_id: "new-readback",
+      delta: "May I text the signup link?",
+      start_ms: 1500,
+      end_ms: 1900,
+    });
+    h.live.event({
+      type: "session.output_audio.delta",
+      delta: Buffer.alloc(640, 17).toString("base64"),
+    });
+    await vi.advanceTimersByTimeAsync(240);
+    const newMark = h.phone.sent
+      .filter(
+        (e) =>
+          e.event === "mark" &&
+          String((e.mark as { name: string }).name).startsWith("action-"),
+      )
+      .at(-1);
+    expect(newMark?.mark).not.toEqual(mark?.mark);
+    h.phone.event({ event: "mark", mark: newMark?.mark });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(acknowledged).toHaveBeenLastCalledWith(
+      "action-id",
+      "new-readback",
+      1200,
+    );
     await h.finish();
   });
   it("opens once in Marin with the assigned business name and a single natural question", async () => {

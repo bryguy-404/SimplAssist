@@ -228,22 +228,42 @@ export async function runVoiceDecision(
   if (
     ee ||
     !evidence?.length ||
-    !safeConfirmation(evidence.map((f) => f.content).join(" "))
-  )
+    !safeConfirmation(evidence.map((f) => f.content).join(""))
+  ) {
+    console.warn("[voice-actions] confirmation_rejected", {
+      sessionId,
+      category: ee ? "evidence_unavailable" : "assent_not_clear",
+    });
     return {
-      text: "The response was not an unambiguous confirmation. Clarify any correction and ask for confirmation of the current details again.",
+      text: `The response was not an unambiguous confirmation. Clarify any correction first; propose updated details if anything changed. Otherwise ask the current confirmation again: ${a.readback}`,
+      confirmationActionId: a.id,
     };
+  }
   const { data: claimed, error } = await db.rpc("claim_voice_action", {
     p_session_id: sessionId,
     p_action_id: a.id,
     p_readback_ids: decision.readbackEventIds,
     p_confirmation_ids: decision.confirmationEventIds,
   });
-  if (error || !claimed)
+  if (error || !claimed) {
+    const reasons = [
+      "voice action not confirmable",
+      "readback evidence missing",
+      "confirmation evidence out of order",
+      "confirmation superseded",
+    ];
+    console.warn("[voice-actions] confirmation_rejected", {
+      sessionId,
+      category:
+        error && reasons.includes(error.message)
+          ? error.message
+          : "confirmation_unavailable",
+    });
     return {
       text: `Please read the pending details back and ask for a clear confirmation again. No action was submitted. ${a.readback}`,
       confirmationActionId: a.id,
     };
+  }
   // Only the request that changed the row may execute it. Claim tokens below
   // provide ownership independent of a repeated HTTP request/delegation.
   return executeVoiceAction(ctx, claimed);

@@ -582,7 +582,7 @@ describe("continuous phone bridge", () => {
       true,
     );
   });
-  it("closes on bounded backend waits and does not replay a failed question", async () => {
+  it("keeps listening after bounded backend waits without replaying a failed request", async () => {
     const h = harness();
     await h.start();
     h.answer.mockImplementation(() => new Promise(() => {}));
@@ -599,15 +599,85 @@ describe("continuous phone bridge", () => {
       delegation: { id: "d", target: "client" },
     });
     await vi.advanceTimersByTimeAsync(9251);
-    expect(h.live.sent.some((e) => e.type === "session.close")).toBe(true);
-    h.live.event({ type: "session.closed", usage: { seconds: 10 } });
-    await h.call.done;
-    expect(h.store.finish).toHaveBeenCalledWith(
-      "backend_timeout",
-      "backend_timeout",
-      true,
+    expect(h.live.sent.some((e) => e.type === "session.close")).toBe(false);
+    expect(h.live.sent).toContainEqual(
+      expect.objectContaining({
+        delegation_id: "d",
+        content: expect.stringContaining("did not return a verified result"),
+      }),
     );
+    expect(h.hangup).not.toHaveBeenCalled();
     expect(h.answer).toHaveBeenCalledOnce();
+    await h.finish();
+  });
+  it("recovers from action failures on a caller-requested retry without hanging up", async () => {
+    const h = harness("pcm16", false, { actionsEnabled: true });
+    await h.start();
+    h.answer.mockRejectedValueOnce(new Error("invalid decision"));
+    for (const [n, text] of [
+      [1, "Correct"],
+      [2, "Please check again"],
+    ] as const) {
+      h.live.event({
+        type: "session.input_transcript.delta",
+        event_id: `f${n}`,
+        delta: text,
+        start_ms: n * 1000,
+        end_ms: n * 1000 + 500,
+      });
+      h.live.event({
+        type: "session.delegation.created",
+        offset_ms: n * 1000 + 500,
+        delegation: { id: `d${n}`, target: "client" },
+      });
+      await vi.advanceTimersByTimeAsync(251);
+    }
+    expect(h.answer).toHaveBeenCalledTimes(2);
+    expect(h.hangup).not.toHaveBeenCalled();
+    expect(h.live.sent).toContainEqual(
+      expect.objectContaining({
+        delegation_id: "d1",
+        content: expect.stringContaining(
+          "Do not repeat the operation automatically",
+        ),
+      }),
+    );
+    expect(h.live.sent).toContainEqual(
+      expect.objectContaining({
+        delegation_id: "d2",
+        content: "The consultation costs fifty dollars.",
+      }),
+    );
+    await h.finish();
+  });
+  it("bounds repeated backend failures without an automatic send or abrupt hangup", async () => {
+    const h = harness("pcm16", false, { actionsEnabled: true });
+    await h.start();
+    h.answer.mockRejectedValue(new Error("unavailable"));
+    for (let n = 1; n <= 4; n++) {
+      h.live.event({
+        type: "session.input_transcript.delta",
+        event_id: `f${n}`,
+        delta: "Please check again",
+        start_ms: n * 1000,
+        end_ms: n * 1000 + 500,
+      });
+      h.live.event({
+        type: "session.delegation.created",
+        offset_ms: n * 1000 + 500,
+        delegation: { id: `d${n}`, target: "client" },
+      });
+      await vi.advanceTimersByTimeAsync(251);
+    }
+    expect(h.answer).toHaveBeenCalledTimes(3);
+    expect(h.hangup).not.toHaveBeenCalled();
+    expect(h.live.sent).toContainEqual(
+      expect.objectContaining({
+        delegation_id: "d4",
+        content: expect.stringContaining("unavailable for this call"),
+      }),
+    );
+    await h.finish();
   });
   it("rejects media for a different stored call before connecting OpenAI", async () => {
     const h = harness();

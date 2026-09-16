@@ -72,6 +72,7 @@ export class LiveCall {
   private playbackGeneration = 0;
   private pendingMarks = new Set<string>();
   private delegationGeneration = 0;
+  private backendFailures = 0;
   private seenDelegations = new Set<string>();
   private delegationAbort: AbortController | null = null;
   private io: Promise<void> = Promise.resolve();
@@ -427,9 +428,26 @@ export class LiveCall {
     this.persist(() => this.options.store.usage(current, confirmed));
   }
 
+  private backendUnavailable(id: string) {
+    if (this.closing) return;
+    this.backendFailures++;
+    this.sendLive({
+      type: "session.commentary.append",
+      delegation_id: id,
+      content:
+        this.backendFailures >= 3
+          ? "The backend is unavailable for this call. Apologize briefly and explain you cannot verify information or complete the request right now. Do not promise a text, saved details, a booking, or a callback. Do not automatically retry or repeat an operation. Let the caller respond; close politely if they are finished."
+          : "The backend request did not return a verified result. Briefly explain you had trouble checking that; do not claim anything was saved, booked, or sent. Do not repeat the operation automatically. Ask whether the caller would like you to check its status again; if they agree, delegate afresh using the current action ledger. Continue listening instead of ending the call.",
+    });
+  }
+
   private delegate(id: string, offsetMs: number) {
     if (this.seenDelegations.has(id)) return;
     this.seenDelegations.add(id);
+    if (this.backendFailures >= 3) {
+      this.backendUnavailable(id);
+      return;
+    }
     const generation = ++this.delegationGeneration;
     this.delegationAbort?.abort();
     const abort = new AbortController();
@@ -470,8 +488,9 @@ export class LiveCall {
             !abort.signal.aborted &&
             generation === this.delegationGeneration
           ) {
+            settled = true;
             abort.abort();
-            void this.close("backend_timeout", true);
+            this.backendUnavailable(id);
           }
         },
         this.options.actionsEnabled ? 35000 : 9000,
@@ -503,6 +522,7 @@ export class LiveCall {
             });
             return;
           }
+          this.backendFailures = 0;
           if (typeof result !== "string" && result.confirmationActionId)
             this.pendingAction = {
               id: result.confirmationActionId,
@@ -520,7 +540,7 @@ export class LiveCall {
         .catch(() => {
           settled = true;
           if (!abort.signal.aborted && generation === this.delegationGeneration)
-            void this.close("backend_failed", true);
+            this.backendUnavailable(id);
         });
     }, 250);
   }

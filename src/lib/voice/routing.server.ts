@@ -35,11 +35,12 @@ export function pilotRoutingDependencies(): PilotRoutingDependencies {
             });
           }
         : undefined,
-    sendFallback: async (session) => {
+    sendFallback: async (session, claim) => {
       await sendMissedCallSMS(
         session.caller_phone,
         session.business_id,
         session.call_session_id,
+        { claim },
       );
     },
   };

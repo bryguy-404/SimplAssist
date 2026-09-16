@@ -6,7 +6,7 @@ import { VOICE_RECEPTIONIST_FLOW } from "./actionInstructions";
  * https://developers.openai.com/api/docs/guides/live-prompting
  */
 export const VOICE_ANSWER_STYLE =
-  "Use everyday spoken language and natural contractions. Lead with the answer in one or two short sentences; keep necessary qualifications and exact business facts. No markdown, internal metadata, repeated greeting, sales pitch, or automatic follow-up question. These are speaking preferences, not permission to change facts or perform actions.";
+  "Use everyday spoken language and natural contractions. Lead with the answer in one or two short sentences; keep necessary qualifications and exact business facts. No markdown, internal metadata, repeated greeting, sales pitch, or generic automatic follow-up question. When actions are available, the relevant signup or booking offer in the receptionist flow is encouraged. These are speaking preferences, not permission to change facts or perform actions.";
 
 const CONVERSATION_STYLE = [
   "You are the business's AI phone assistant for a Q&A pilot. Speak English like a friendly, capable receptionist: warm, balanced and relaxed, at a comfortable conversational pace. Be clear without sounding overly cheerful or formal.",

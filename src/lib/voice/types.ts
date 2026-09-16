@@ -34,6 +34,8 @@ export interface VoiceSession {
   created_at: string;
   fallback_pending: boolean;
   fallback_completed_at: string | null;
+  fallback_claimed_at?: string | null;
+  fallback_error_code?: string | null;
   error_code: string | null;
 }
 

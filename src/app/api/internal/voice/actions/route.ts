@@ -43,8 +43,10 @@ export async function POST(request: NextRequest) {
   const json = await request.text();
   if (json.length > 32000)
     return new NextResponse("Too large", { status: 413 });
+  let operation = "validation";
   try {
     const input = schema.parse(JSON.parse(json));
+    operation = input.operation;
     if (input.operation === "playback") {
       const { error } = await supabaseAdmin.rpc("mark_voice_action_playback", {
         p_session_id: input.sessionId,
@@ -71,10 +73,10 @@ export async function POST(request: NextRequest) {
           bookingMode: c.settings.booking_mode,
           timezone: c.business.timezone,
           callerPhone: c.session.caller_phone,
-          spokenSignupInstructions:
+          spokenSignupFallback:
             c.session.business_id === "ea848911-ef72-44a6-8cf3-c47b3959be26" &&
             c.business.goal_url === "https://simplassist.com/signup"
-              ? "You can visit simplassist.com and choose Get Started."
+              ? "Only if the caller declines texting or SMS is unavailable: visit simplassist.com and choose Get Started. Otherwise offer to text the signup link."
               : null,
           actions: c.actions,
         },
@@ -85,7 +87,28 @@ export async function POST(request: NextRequest) {
       await runVoiceDecision(input.sessionId, input.decision),
       { headers: { "Cache-Control": "no-store" } },
     );
-  } catch {
+  } catch (error) {
+    // Only allow known internal codes; never log database/provider error bodies or caller data.
+    const known = new Set([
+      "voice_call_not_active",
+      "voice_action_context_unavailable",
+      "voice_action_disabled",
+      "voice_phone_must_match_caller",
+      "voice_proposal_failed",
+      "voice_action_missing",
+      "voice_signup_link_missing",
+      "voice_playback_save_failed",
+      "voice_execution_claim_failed",
+    ]);
+    console.warn("[voice-actions] request_failed", {
+      operation,
+      category:
+        error instanceof z.ZodError
+          ? "invalid_request_schema"
+          : error instanceof Error && known.has(error.message)
+            ? error.message
+            : "action_unavailable",
+    });
     return NextResponse.json(
       { error: "voice_action_unavailable" },
       { status: 409, headers: { "Cache-Control": "no-store" } },

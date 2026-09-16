@@ -176,6 +176,7 @@ export async function maintainVoicePilot(
     .select("id")
     .eq("business_id", PILOT_BUSINESS_ID)
     .eq("fallback_pending", true)
+    .is("fallback_claimed_at", null)
     .limit(4);
   if (pendingError) throw new Error("voice_fallback_recovery_lookup_failed");
   await batch(pending ?? [], (session) => fallback(session.id));

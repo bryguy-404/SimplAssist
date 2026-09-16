@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type Telnyx from "telnyx";
 import {
+  drainFallback,
   handlePilotEvent,
   pilotClientState,
   type PilotRoutingDependencies,
@@ -22,6 +23,7 @@ function fixture(status: VoiceSession["status"] = "ringing") {
     created_at: "2026-09-14T12:00:00Z",
     fallback_pending: false,
     fallback_completed_at: null,
+    fallback_claimed_at: null,
   } as VoiceSession;
   const recordings: Record<string, unknown>[] = [];
   function from(table: string) {
@@ -33,6 +35,10 @@ function fixture(status: VoiceSession["status"] = "ringing") {
         return this;
       },
       eq(key: string, value: unknown) {
+        filters.push([key, value]);
+        return this;
+      },
+      is(key: string, value: unknown) {
         filters.push([key, value]);
         return this;
       },
@@ -88,7 +94,9 @@ function fixture(status: VoiceSession["status"] = "ringing") {
     db: { from, rpc } as unknown as SupabaseClient,
     telnyx: { calls: { actions } } as unknown as Telnyx,
     workerReady: vi.fn().mockResolvedValue(true),
-    sendFallback: vi.fn().mockResolvedValue(undefined),
+    sendFallback: vi.fn(async (_session, claim) => {
+      await claim();
+    }),
     workerUrl: "https://voice.example",
     appUrl: "https://simplassist.com",
     streamSecret: "s".repeat(32),
@@ -338,5 +346,56 @@ describe("existing-number voice routing", () => {
       ),
     ).rejects.toThrow("identity_mismatch");
     expect(f.rpc).not.toHaveBeenCalled();
+  });
+});
+
+describe("voice fallback delivery claim", () => {
+  it("allows only one provider send when webhook and maintenance race", async () => {
+    const f = fixture("closed");
+    f.session.fallback_pending = true;
+    const provider = vi.fn();
+    f.deps.sendFallback = vi.fn(async (_s, claim) => {
+      if (await claim()) provider();
+    });
+    await Promise.all([
+      drainFallback(f.deps, f.session.id),
+      drainFallback(f.deps, f.session.id),
+    ]);
+    expect(provider).toHaveBeenCalledOnce();
+    await drainFallback(f.deps, f.session.id);
+    expect(provider).toHaveBeenCalledOnce();
+    expect(f.session.fallback_completed_at).not.toBeNull();
+  });
+  it("does not retry an ambiguous send, even after a worker restart", async () => {
+    const f = fixture("closed");
+    f.session.fallback_pending = true;
+    const provider = vi.fn().mockRejectedValue(new Error("response lost"));
+    f.deps.sendFallback = vi.fn(async (_s, claim) => {
+      if (await claim()) await provider();
+    });
+    await expect(drainFallback(f.deps, f.session.id)).rejects.toThrow(
+      "response lost",
+    );
+    await drainFallback(f.deps, f.session.id);
+    expect(provider).toHaveBeenCalledOnce();
+    expect(f.session).toMatchObject({
+      fallback_error_code: "delivery_unconfirmed",
+      fallback_completed_at: null,
+    });
+  });
+  it("retries a preflight failure that never attempted a send", async () => {
+    const f = fixture("closed");
+    f.session.fallback_pending = true;
+    const send = vi.fn(
+      async (_s: VoiceSession, claim: () => Promise<boolean>) => {
+        await claim();
+      },
+    );
+    send.mockRejectedValueOnce(new Error("database temporarily unavailable"));
+    f.deps.sendFallback = send;
+    await expect(drainFallback(f.deps, f.session.id)).rejects.toThrow();
+    expect(f.session).toHaveProperty("fallback_claimed_at", null);
+    await drainFallback(f.deps, f.session.id);
+    expect(f.session.fallback_completed_at).not.toBeNull();
   });
 });

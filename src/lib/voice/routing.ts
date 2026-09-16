@@ -13,7 +13,10 @@ import { VOICE_PROVIDER_OPTIONS } from "./provider";
 export interface PilotRoutingDependencies {
   db: SupabaseClient;
   telnyx: Telnyx;
-  sendFallback: (session: VoiceSession) => Promise<void>;
+  sendFallback: (
+    session: VoiceSession,
+    claim: () => Promise<boolean>,
+  ) => Promise<void>;
   workerReady: () => Promise<boolean>;
   prepareWorker?: (sessionId: string) => Promise<void>;
   appUrl: string;
@@ -461,16 +464,52 @@ export async function drainFallback(
     .eq("id", sessionId)
     .single();
   if (error) throw new Error("voice_fallback_lookup_failed");
-  if (!data.fallback_pending || data.fallback_completed_at) return;
-  // Existing sendMissedCallSMS owns account access, consent/readiness, quota,
-  // and delivery idempotency. Every recovery path uses this same call key.
-  if (!data.demo_mode) await deps.sendFallback(data as VoiceSession);
-  const { error: saved } = await deps.db
+  if (
+    !data.fallback_pending ||
+    data.fallback_completed_at ||
+    data.fallback_claimed_at
+  )
+    return;
+  let attempted = false,
+    owned = false;
+  const claim = async () => {
+    attempted = true;
+    const { data: claimed, error: failure } = await deps.db
+      .from("voice_sessions")
+      .update({ fallback_claimed_at: new Date().toISOString() })
+      .eq("id", sessionId)
+      .eq("fallback_pending", true)
+      .is("fallback_completed_at", null)
+      .is("fallback_claimed_at", null)
+      .select("id");
+    if (failure) throw new Error("voice_fallback_claim_failed");
+    owned = !!claimed?.length;
+    return owned;
+  };
+  try {
+    if (!data.demo_mode) await deps.sendFallback(data as VoiceSession, claim);
+  } catch (error) {
+    if (owned) {
+      // Ambiguous provider outcome: leave a durable review flag, never release
+      // the claim or resend. Preflight failures before claiming remain retryable.
+      await deps.db
+        .from("voice_sessions")
+        .update({ fallback_error_code: "delivery_unconfirmed" })
+        .eq("id", sessionId);
+    }
+    throw error;
+  }
+  if (attempted && !owned) return;
+  const completion = deps.db
     .from("voice_sessions")
     .update({
       fallback_pending: false,
       fallback_completed_at: new Date().toISOString(),
     })
     .eq("id", sessionId);
+  // A blocked preflight must not mark another handler's in-flight send complete.
+  const { error: saved } = await (owned
+    ? completion
+    : completion.is("fallback_claimed_at", null));
   if (saved) throw new Error("voice_fallback_finalize_failed");
 }

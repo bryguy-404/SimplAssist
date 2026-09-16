@@ -29,18 +29,21 @@ export function createVoiceAnswerer(
       status: "pending",
     });
     if (claimError) throw new Error("backend_usage_claim_failed");
+    let stage = "context";
     try {
       const context = actions
         ? await actions.context(session.id, signal)
         : null;
       const enabled =
         context && Object.values(context.capabilities).some(Boolean);
+      stage = "knowledge";
       const system = await loadVoiceKnowledge(
         db,
         session.action_business_id || session.business_id,
         Boolean(enabled),
       );
       if (signal.aborted) throw new Error("backend_superseded");
+      stage = "model";
       const response = await client.messages.create(
         {
           model: ANSWERING_MODEL,
@@ -75,6 +78,7 @@ export function createVoiceAnswerer(
         },
         { signal },
       );
+      stage = "usage";
       const { error } = await db
         .from("voice_provider_usage")
         .update({
@@ -93,13 +97,15 @@ export function createVoiceAnswerer(
         .eq("request_id", delegationId);
       if (error) throw new Error("backend_usage_finalize_failed");
       if (enabled && actions) {
+        stage = "decision_validation";
         const blocks = response.content.filter((b) => b.type === "tool_use");
         if (blocks.length !== 1 || signal.aborted)
           throw new Error("invalid_voice_decision");
         const decision = actionDecision.parse(
           (blocks[0].input as { decision: unknown }).decision,
         );
-        return actions.decision(session.id, decision, signal);
+        stage = "decision_execution";
+        return await actions.decision(session.id, decision, signal);
       }
       const answer = response.content
         .filter((b) => b.type === "text")
@@ -110,6 +116,16 @@ export function createVoiceAnswerer(
         throw new Error("invalid_backend_answer");
       return answer.slice(0, 2000);
     } catch (error) {
+      if (!signal.aborted)
+        console.warn("[voice-answer] request_failed", {
+          sessionId: session.id,
+          delegationId,
+          stage,
+          category:
+            error instanceof z.ZodError
+              ? "invalid_decision_schema"
+              : "backend_request_failed",
+        });
       // A timeout/abort may still have incurred provider charges; never mark it zero cost.
       await db
         .from("voice_provider_usage")

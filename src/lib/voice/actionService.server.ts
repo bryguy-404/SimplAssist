@@ -183,7 +183,22 @@ export async function runVoiceDecision(
       p_readback: readback,
       p_event_ids: decision.requestEventIds,
     });
-    if (error || !a) throw new Error("voice_proposal_failed");
+    if (error || !a) {
+      const reasons = [
+        "request transcript evidence missing",
+        "previous action unresolved",
+        "voice action disabled",
+        "appointment already captured",
+      ];
+      console.warn("[voice-actions] proposal_rejected", {
+        sessionId,
+        category:
+          error && reasons.includes(error.message)
+            ? error.message
+            : "database_unavailable",
+      });
+      throw new Error("voice_proposal_failed");
+    }
     if (a.status !== "awaiting_confirmation")
       return {
         text:

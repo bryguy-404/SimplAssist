@@ -399,3 +399,41 @@ describe("sendMissedCallSMS", () => {
     expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
   });
 });
+
+
+describe("voice fallback send boundary", () => {
+  it("skips provider delivery when another handler owns the claim", async () => {
+    setRows("en");
+    const claim = vi.fn().mockResolvedValue(false);
+    await sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID, { claim });
+    expect(claim).toHaveBeenCalledOnce();
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+  it("claims after eligibility checks and disables ambiguous SDK retries", async () => {
+    setRows("en");
+    const claim = vi.fn().mockResolvedValue(true);
+    await sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID, { claim });
+    expect(claim).toHaveBeenCalledOnce();
+    expect(
+      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[0],
+    ).toBeLessThan(claim.mock.invocationCallOrder[0]);
+    expect(claim.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.send.mock.invocationCallOrder[0],
+    );
+    expect(mocks.send).toHaveBeenCalledWith(expect.any(Object), {
+      maxRetries: 0,
+      timeout: 10000,
+    });
+  });
+  it("does not consume a delivery claim if eligibility blocks texting", async () => {
+    setRows("en");
+    mocks.resolveOutboundSmsOperationalAccess.mockResolvedValue({
+      allowed: false,
+      reason: "texting_paused",
+    });
+    const claim = vi.fn();
+    await sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID, { claim });
+    expect(claim).not.toHaveBeenCalled();
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+});

@@ -29,7 +29,8 @@ import { recordBusinessMetricEventBestEffort } from "@/lib/metrics/recording.ser
 export async function sendMissedCallSMS(
   callerPhone: string,
   businessId: string,
-  callSessionOrControlId: string
+  callSessionOrControlId: string,
+  delivery?: { claim: () => Promise<boolean> },
 ): Promise<void> {
   // PERMANENT conditions return without throwing — a webhook retry can
   // never fix them, and throwing would 500-loop the caller's event across
@@ -202,13 +203,19 @@ export async function sendMissedCallSMS(
       return;
     }
 
-    const result = await telnyx.messages.send({
+    // Voice fallback claims persist before crossing the provider boundary.
+    // A timeout after this point is ambiguous and must never cause a resend.
+    if (delivery && !(await delivery.claim())) return;
+    const body = {
       from: phoneNumberRow.phone_number,
       to: callerPhone,
       text: smsBody,
       messaging_profile_id: sendContext.messagingProfileId,
-      type: "SMS",
-    });
+      type: "SMS" as const,
+    };
+    const result = delivery
+      ? await telnyx.messages.send(body, { maxRetries: 0, timeout: 10000 })
+      : await telnyx.messages.send(body);
 
     const occurredAt = new Date();
     try {

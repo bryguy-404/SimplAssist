@@ -8,6 +8,11 @@ export const RECORDING_NOTICE =
 export interface VoiceSession {
   id: string;
   business_id: string;
+  action_business_id?: string | null;
+  action_conversation_id?: string | null;
+  demo_mode?: boolean;
+  preparation_started_at?: string | null;
+  prepared_openai_id?: string | null;
   conversation_id: string | null;
   call_control_id: string;
   call_session_id: string;

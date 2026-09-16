@@ -90,6 +90,8 @@ export class LiveCall {
     { id: string; eventId: string; callerEnd: number }
   >();
   private lastAudibleOutputAt = 0;
+  private audibleOutputGeneration = 0;
+  private callerFragmentGeneration = 0;
   private finishReason = "completed";
   private finishError: string | null = null;
   private fallback = false;
@@ -342,8 +344,10 @@ export class LiveCall {
         case "session.output_audio.delta":
           if (!this.closing) {
             const bytes = decodeAudio(event.delta, this.options.profile);
-            if (hasAudibleAudio(bytes, this.options.profile))
+            if (hasAudibleAudio(bytes, this.options.profile)) {
               this.lastAudibleOutputAt = Date.now();
+              this.audibleOutputGeneration++;
+            }
             this.output.append(bytes);
           }
           break;
@@ -361,6 +365,7 @@ export class LiveCall {
           };
           if (this.transcript.add(fragment)) {
             if (fragment.role === "customer") {
+              this.callerFragmentGeneration++;
               this.lastCallerAt = Date.now();
               this.idleWarningSent = false;
             }
@@ -428,9 +433,65 @@ export class LiveCall {
     this.persist(() => this.options.store.usage(current, confirmed));
   }
 
+  private delegationLifecycle(
+    event:
+      | "delegate_started"
+      | "result_forwarded"
+      | "result_discarded"
+      | "superseded"
+      | "backend_failed",
+    id: string,
+    details: {
+      elapsedMs?: number;
+      fragmentCount?: number;
+      callerEndMs?: number;
+      latestCallerEndMs?: number;
+      providerOffsetMs?: number;
+      failures?: number;
+    } = {},
+  ) {
+    // Keep caller speech, contact details and backend results out of logs.
+    console.info(`[voice-delegation] ${event}`, {
+      sessionId: this.options.session.id,
+      delegationId: id,
+      ...details,
+    });
+  }
+
+  private async capturePersistedTranscript(signal: AbortSignal) {
+    while (!signal.aborted && !this.closing) {
+      const pending = this.io;
+      // New fragments can extend this queue while an earlier write is pending.
+      // Drain the current tail, not just the tail seen when delegation started.
+      await new Promise<void>((resolve, reject) => {
+        const complete = () => {
+          signal.removeEventListener("abort", complete);
+          resolve();
+        };
+        signal.addEventListener("abort", complete, { once: true });
+        if (signal.aborted) complete();
+        void pending.then(complete, (error) => {
+          signal.removeEventListener("abort", complete);
+          reject(error);
+        });
+      });
+      if (signal.aborted || this.closing) return null;
+      if (pending === this.io)
+        return {
+          transcript: this.transcript.capture(),
+          callerEndMs: this.transcript.latestCallerEndMs,
+          callerGeneration: this.callerFragmentGeneration,
+        };
+    }
+    return null;
+  }
+
   private backendUnavailable(id: string) {
     if (this.closing) return;
     this.backendFailures++;
+    this.delegationLifecycle("backend_failed", id, {
+      failures: this.backendFailures,
+    });
     this.sendLive({
       type: "session.commentary.append",
       delegation_id: id,
@@ -441,6 +502,42 @@ export class LiveCall {
     });
   }
 
+  private nudgeSilentResult(
+    id: string,
+    generation: number,
+    kind: "result" | "stale",
+  ) {
+    const audioGeneration = this.audibleOutputGeneration;
+    const callerGeneration = this.callerFragmentGeneration;
+    // A result is not proof of speech. Nudge the conversation once if nothing
+    // resumes, without retrying the backend or treating silence as permission.
+    this.later(() => {
+      if (
+        this.closing ||
+        generation !== this.delegationGeneration ||
+        audioGeneration !== this.audibleOutputGeneration ||
+        callerGeneration !== this.callerFragmentGeneration
+      )
+        return;
+      try {
+        this.sendLive({
+          type: "session.commentary.append",
+          delegation_id: id,
+          content:
+            kind === "stale"
+              ? "Continue the existing task. Delegate the caller's complete latest reply with the current action ledger; do not restart the conversation or repeat an action."
+              : "Continue naturally using the latest verified backend result or its exact pending confirmation question. Do not rerun a backend action or claim any additional completion.",
+        });
+      } catch {
+        // An optional speaking prompt must not crash the media worker.
+        console.warn("[voice-delegation] resume_unavailable", {
+          sessionId: this.options.session.id,
+          delegationId: id,
+        });
+      }
+    }, 5000);
+  }
+
   private delegate(id: string, offsetMs: number) {
     if (this.seenDelegations.has(id)) return;
     this.seenDelegations.add(id);
@@ -449,24 +546,25 @@ export class LiveCall {
       return;
     }
     const generation = ++this.delegationGeneration;
-    this.delegationAbort?.abort();
+    this.delegationAbort?.abort("superseded");
     const abort = new AbortController();
     this.delegationAbort = abort;
+    const startedAt = Date.now();
+    let settled = false;
+    abort.signal.addEventListener(
+      "abort",
+      () => {
+        if (!settled && abort.signal.reason === "superseded")
+          this.delegationLifecycle("superseded", id, {
+            elapsedMs: Date.now() - startedAt,
+          });
+      },
+      { once: true },
+    );
     // Transcripts can trail the delegation event. This is a bounded coalescing
     // window, never a declaration that a fragment completes a customer turn.
     this.later(() => {
       if (this.closing || generation !== this.delegationGeneration) return;
-      const callerEnd = Math.max(offsetMs, this.transcript.latestCallerEndMs);
-      if (!this.transcript.hasCallerText) {
-        this.sendLive({
-          type: "session.commentary.append",
-          delegation_id: id,
-          content:
-            "The caller's question transcript is not available yet. Ask them briefly to repeat the question; do not guess.",
-        });
-        return;
-      }
-      let settled = false;
       if (this.options.actionsEnabled)
         this.later(() => {
           if (
@@ -495,31 +593,68 @@ export class LiveCall {
         },
         this.options.actionsEnabled ? 35000 : 9000,
       );
-      void this.io
-        .then(() =>
-          this.options.answer(
+      void this.capturePersistedTranscript(abort.signal)
+        .then(async (captured) => {
+          if (
+            !captured ||
+            this.closing ||
+            abort.signal.aborted ||
+            generation !== this.delegationGeneration
+          ) {
+            settled = true;
+            return;
+          }
+          const { transcript } = captured;
+          const callerEnd = captured.callerEndMs;
+          if (!transcript.fragments.some((f) => f.role === "customer")) {
+            settled = true;
+            this.sendLive({
+              type: "session.commentary.append",
+              delegation_id: id,
+              content:
+                "The caller's question transcript is not available yet. Ask them briefly to repeat the question; do not guess.",
+            });
+            return;
+          }
+          this.delegationLifecycle("delegate_started", id, {
+            elapsedMs: Date.now() - startedAt,
+            fragmentCount: transcript.fragments.length,
+            callerEndMs: callerEnd,
+            providerOffsetMs: offsetMs,
+          });
+          const result = await this.options.answer(
             this.options.session,
             id,
-            this.transcript.capture(),
+            transcript,
             abort.signal,
-          ),
-        )
-        .then((result) => {
+          );
           settled = true;
           const answer = typeof result === "string" ? result : result.text;
           if (
             this.closing ||
             abort.signal.aborted ||
             generation !== this.delegationGeneration
-          )
+          ) {
+            this.delegationLifecycle("result_discarded", id, {
+              elapsedMs: Date.now() - startedAt,
+              callerEndMs: callerEnd,
+              latestCallerEndMs: this.transcript.latestCallerEndMs,
+            });
             return;
-          if (this.transcript.latestCallerEndMs > callerEnd) {
+          }
+          if (this.callerFragmentGeneration !== captured.callerGeneration) {
+            this.delegationLifecycle("result_discarded", id, {
+              elapsedMs: Date.now() - startedAt,
+              callerEndMs: callerEnd,
+              latestCallerEndMs: this.transcript.latestCallerEndMs,
+            });
             this.sendLive({
               type: "session.commentary.append",
               delegation_id: id,
               content:
-                "Discard the obsolete backend answer. The caller spoke again or corrected the question. Delegate their current question before answering.",
+                "This backend answer is obsolete because additional caller speech arrived. Preserve the existing task and current action state. Delegate the caller's complete latest reply with the current action ledger before continuing; do not restart the conversation or repeat a completed or uncertain action.",
             });
+            this.nudgeSilentResult(id, generation, "stale");
             return;
           }
           this.backendFailures = 0;
@@ -536,6 +671,11 @@ export class LiveCall {
             delegation_id: id,
             content: answer,
           });
+          this.delegationLifecycle("result_forwarded", id, {
+            elapsedMs: Date.now() - startedAt,
+            fragmentCount: transcript.fragments.length,
+          });
+          this.nudgeSilentResult(id, generation, "result");
         })
         .catch(() => {
           settled = true;

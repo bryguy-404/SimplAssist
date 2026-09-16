@@ -98,6 +98,60 @@ function assertCapability(
   )
     throw new Error("voice_booking_request_disabled");
 }
+
+async function completedActionAnswer(
+  sessionId: string,
+  action: VoiceAction,
+  summary: string,
+): Promise<VoiceAnswer> {
+  if (action.kind !== "contact" || action.status !== "succeeded")
+    return { text: summary };
+  // Saving contact details and preparing the next permission question are
+  // separate outcomes. The saved contact remains successful if this optional
+  // continuation becomes unavailable, and preparation never grants SMS consent.
+  try {
+    const fresh = await loadVoiceActionContext(sessionId);
+    if (!fresh.capabilities.signup || fresh.business.primary_goal !== "signup")
+      return { text: summary };
+    const url = normalizeHttpsGoalUrl(fresh.business.goal_url);
+    if (!url) return { text: summary };
+    const payload = { kind: "signup" as const };
+    const { data: next, error } = await db.rpc(
+      "prepare_voice_signup_after_contact",
+      {
+        p_session_id: sessionId,
+        p_contact_action_id: action.id,
+        p_fingerprint: actionFingerprint(payload, url),
+        p_payload: { ...payload, approvedUrl: url },
+        p_readback: buildActionReadback(
+          payload,
+          fresh.session.caller_phone,
+          fresh.business.timezone,
+        ),
+      },
+    );
+    if (error) throw new Error("voice_signup_continuation_failed");
+    if (!next) return { text: summary };
+    if (
+      next.session_id !== sessionId ||
+      next.kind !== "signup" ||
+      next.status !== "awaiting_confirmation"
+    )
+      throw new Error("voice_signup_continuation_failed");
+    return {
+      text: `${summary} If the caller has declined signup or is finished, acknowledge that and do not repeat the offer. Otherwise continue now with this prepared permission question, preserving every detail: ${next.readback} Wait for a fresh clear reply. Nothing has been sent yet; permission to save details does not authorize a text.`,
+      confirmationActionId: next.id,
+    };
+  } catch {
+    console.warn("[voice-actions] signup_continuation_unavailable", {
+      sessionId,
+      actionId: action.id,
+      category: "preparation_failed",
+    });
+    return { text: summary };
+  }
+}
+
 async function saveConfirmedContact(a: VoiceAction) {
   const { data, error } = await db.rpc("save_voice_action_contact", {
     p_action_id: a.id,
@@ -199,11 +253,12 @@ export async function runVoiceDecision(
       throw new Error("voice_proposal_failed");
     }
     if (a.status !== "awaiting_confirmation")
-      return {
-        text:
-          a.result?.summary ||
+      return completedActionAnswer(
+        sessionId,
+        a,
+        a.result?.summary ||
           "This request was already attempted. Do not repeat it or claim a new success.",
-      };
+      );
     return {
       text: `Ask this confirmation naturally, preserving every detail: ${readback} Wait for a clear yes. Nothing has been saved, booked, or sent yet.`,
       confirmationActionId: a.id,
@@ -213,10 +268,16 @@ export async function runVoiceDecision(
   if (!a) throw new Error("voice_action_missing");
   assertCapability(ctx, a.kind);
   if (a.status !== "awaiting_confirmation")
-    return {
-      text:
-        a.result?.summary ||
+    return completedActionAnswer(
+      sessionId,
+      a,
+      a.result?.summary ||
         "This request is already being checked. Do not submit it again or claim success.",
+    );
+  if (decision.intent === "readback")
+    return {
+      text: `Ask this stored confirmation naturally, preserving every detail: ${a.readback} Wait for a fresh clear reply before delegating confirmation. Nothing has been saved, booked, or sent by this pending action.`,
+      confirmationActionId: a.id,
     };
   if (!a.playback_at || !Number.isSafeInteger(a.playback_caller_end_ms))
     return {
@@ -443,7 +504,11 @@ async function executeVoiceAction(
       .eq("id", a.id)
       .eq("status", "executing");
     if (error) throw new Error("voice_result_save_failed");
-    return { text: result.summary };
+    return await completedActionAnswer(
+      ctx.session.id,
+      { ...a, status: "succeeded", result },
+      result.summary,
+    );
   } catch (failure) {
     const { data: completed } = await db
       .from("voice_actions")
@@ -451,7 +516,11 @@ async function executeVoiceAction(
       .eq("id", a.id)
       .maybeSingle();
     if (completed?.status === "succeeded" && completed.result?.summary)
-      return { text: completed.result.summary };
+      return completedActionAnswer(
+        ctx.session.id,
+        { ...a, status: "succeeded", result: completed.result },
+        completed.result.summary,
+      );
     const status = (failure as { status?: number })?.status;
     if (status && [400, 401, 403, 404, 422].includes(status)) submitted = false;
     await db

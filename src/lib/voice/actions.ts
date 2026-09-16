@@ -38,6 +38,7 @@ export const actionDecision = z.discriminatedUnion("intent", [
   z.object({ intent: z.literal("availability"), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).strict(),
   z.object({ intent: z.literal("propose"), payload: voiceActionPayload,
     requestEventIds: z.array(z.string().min(1)).min(1).max(100) }).strict(),
+  z.object({ intent: z.literal("readback"), actionId: z.string().uuid() }).strict(),
   z.object({ intent: z.literal("confirm"), actionId: z.string().uuid(),
     readbackEventIds: z.array(z.string().min(1)).min(1).max(100),
     confirmationEventIds: z.array(z.string().min(1)).min(1).max(100) }).strict(),

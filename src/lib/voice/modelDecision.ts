@@ -29,6 +29,12 @@ export const modelVoiceDecision = z.discriminatedUnion("intent", [
     .strict(),
   z
     .object({
+      intent: z.literal("readback"),
+      actionId: z.string().uuid(),
+    })
+    .strict(),
+  z
+    .object({
       intent: z.literal("confirm"),
       actionId: z.string().uuid(),
       confirmationSegments: segments,
@@ -98,6 +104,11 @@ export function resolveModelDecision(
         decision.confirmationSegments,
       ),
     });
+  }
+  if (decision.intent === "readback") {
+    const action = context.actions.find((a) => a.id === decision.actionId);
+    if (!action || action.status !== "awaiting_confirmation")
+      throw new Error("invalid_transcript_evidence");
   }
   return decision;
 }

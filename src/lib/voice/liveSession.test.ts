@@ -152,8 +152,14 @@ function harness(
 }
 
 describe("continuous phone bridge", () => {
-  beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "info").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
   it("adopts a prepared provider without starting another session", async () => {
     const preparedSocket = new Socket();
     const h = harness("pcm16", false, {
@@ -609,6 +615,319 @@ describe("continuous phone bridge", () => {
     ).toBe(true);
     await h.finish();
   });
+  it("captures the caller boundary with all persisted fragments after queued writes drain", async () => {
+    const h = harness("pcm16", false, { actionsEnabled: true });
+    await h.start();
+    let persistFirst!: () => void;
+    let persistSecond!: () => void;
+    h.store.fragment
+      .mockImplementationOnce(
+        () => new Promise<void>((resolve) => (persistFirst = resolve)),
+      )
+      .mockImplementationOnce(
+        () => new Promise<void>((resolve) => (persistSecond = resolve)),
+      );
+    h.answer.mockResolvedValue({ text: "Your details were saved." });
+    h.live.event({
+      type: "session.input_transcript.delta",
+      event_id: "confirmation-start",
+      delta: "Yes, you can",
+      start_ms: 0,
+      end_ms: 1000,
+    });
+    h.live.event({
+      type: "session.delegation.created",
+      offset_ms: 1000,
+      delegation: { id: "save-details", target: "client" },
+    });
+    await vi.advanceTimersByTimeAsync(251);
+    expect(h.answer).not.toHaveBeenCalled();
+    h.live.event({
+      type: "session.input_transcript.delta",
+      event_id: "confirmation-end",
+      delta: " save those details.",
+      start_ms: 1000,
+      end_ms: 1600,
+    });
+    persistFirst();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(h.store.fragment).toHaveBeenCalledTimes(2);
+    expect(h.answer).not.toHaveBeenCalled();
+    persistSecond();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(h.answer).toHaveBeenCalledOnce();
+    expect(h.answer.mock.calls[0][2].fragments).toHaveLength(2);
+    expect(h.live.sent).toContainEqual(
+      expect.objectContaining({
+        delegation_id: "save-details",
+        content: "Your details were saved.",
+      }),
+    );
+    expect(console.info).toHaveBeenCalledWith(
+      "[voice-delegation] delegate_started",
+      expect.objectContaining({
+        sessionId: "call",
+        delegationId: "save-details",
+        fragmentCount: 2,
+        callerEndMs: 1600,
+      }),
+    );
+    expect(JSON.stringify(vi.mocked(console.info).mock.calls)).not.toContain(
+      "save those details",
+    );
+    await h.finish();
+  });
+  it.each([
+    ["below the delegation offset", 1100, 1400],
+    ["older than the captured caller boundary", 500, 800],
+  ] as const)(
+    "requires fresh evaluation when a new caller fragment ends %s",
+    async (_case, startMs, endMs) => {
+      const h = harness("pcm16", false, { actionsEnabled: true });
+      await h.start();
+      let resolve!: (result: string) => void;
+      h.answer.mockImplementationOnce(
+        () => new Promise<string>((r) => (resolve = r)),
+      );
+      h.live.event({
+        type: "session.input_transcript.delta",
+        event_id: "initial-confirmation",
+        delta: "Yes.",
+        start_ms: 0,
+        end_ms: 1000,
+      });
+      h.live.event({
+        type: "session.delegation.created",
+        offset_ms: 2000,
+        delegation: { id: "initial", target: "client" },
+      });
+      await vi.advanceTimersByTimeAsync(251);
+      h.live.event({
+        type: "session.input_transcript.delta",
+        event_id: "late-correction",
+        delta: "But use my other email.",
+        start_ms: startMs,
+        end_ms: endMs,
+      });
+      resolve("OUTDATED RESULT");
+      await vi.advanceTimersByTimeAsync(1);
+      expect(h.answer).toHaveBeenCalledOnce();
+      expect(h.live.sent.some((e) => e.content === "OUTDATED RESULT")).toBe(
+        false,
+      );
+      expect(h.live.sent).toContainEqual(
+        expect.objectContaining({
+          delegation_id: "initial",
+          content: expect.stringContaining(
+            "Delegate the caller's complete latest reply",
+          ),
+        }),
+      );
+      expect(console.info).toHaveBeenCalledWith(
+        "[voice-delegation] result_discarded",
+        expect.objectContaining({ delegationId: "initial" }),
+      );
+      h.answer.mockResolvedValue("Please provide the corrected email.");
+      h.live.event({
+        type: "session.delegation.created",
+        offset_ms: 2000,
+        delegation: { id: "fresh", target: "client" },
+      });
+      await vi.advanceTimersByTimeAsync(251);
+      expect(h.answer).toHaveBeenCalledTimes(2);
+      expect(h.answer.mock.calls[1][2].fragments).toContainEqual(
+        expect.objectContaining({ eventId: "late-correction" }),
+      );
+      expect(h.live.sent).toContainEqual(
+        expect.objectContaining({
+          delegation_id: "fresh",
+          content: "Please provide the corrected email.",
+        }),
+      );
+      await h.finish();
+    },
+  );
+  it("does not start a superseded delegation after its persistence wait finishes", async () => {
+    const h = harness();
+    await h.start();
+    let persist!: () => void;
+    h.store.fragment.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (persist = resolve)),
+    );
+    h.live.event({
+      type: "session.input_transcript.delta",
+      event_id: "caller",
+      delta: "Please save my details.",
+      start_ms: 0,
+      end_ms: 1000,
+    });
+    for (const id of ["old", "current"]) {
+      h.live.event({
+        type: "session.delegation.created",
+        offset_ms: 1000,
+        delegation: { id, target: "client" },
+      });
+      await vi.advanceTimersByTimeAsync(251);
+    }
+    persist();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(h.answer).toHaveBeenCalledOnce();
+    expect(h.answer.mock.calls[0][1]).toBe("current");
+    expect(console.info).toHaveBeenCalledWith(
+      "[voice-delegation] superseded",
+      expect.objectContaining({ delegationId: "old" }),
+    );
+    await h.finish();
+  });
+  it.each(["deadline", "closed"])(
+    "does not start a delegation after its persistence wait is stopped by %s",
+    async (reason) => {
+      const h = harness("pcm16", false, { actionsEnabled: true });
+      await h.start();
+      let persist!: () => void;
+      h.store.fragment.mockImplementationOnce(
+        () => new Promise<void>((resolve) => (persist = resolve)),
+      );
+      h.live.event({
+        type: "session.input_transcript.delta",
+        event_id: "caller",
+        delta: "Please save my details.",
+        start_ms: 0,
+        end_ms: 1000,
+      });
+      h.live.event({
+        type: "session.delegation.created",
+        offset_ms: 1000,
+        delegation: { id: "waiting", target: "client" },
+      });
+      await vi.advanceTimersByTimeAsync(251);
+      const finished = reason === "closed" ? h.finish() : null;
+      if (reason === "deadline") {
+        await vi.advanceTimersByTimeAsync(35001);
+        expect(console.info).toHaveBeenCalledWith(
+          "[voice-delegation] backend_failed",
+          expect.objectContaining({ delegationId: "waiting" }),
+        );
+      }
+      persist();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(h.answer).not.toHaveBeenCalled();
+      if (finished) await finished;
+      else await h.finish();
+    },
+  );
+  it.each(["result", "stale"])(
+    "nudges a silent %s response once without running another backend request",
+    async (kind) => {
+      const h = harness("pcm16", false, { actionsEnabled: true });
+      await h.start();
+      let resolve!: (result: string) => void;
+      h.answer.mockImplementationOnce(
+        () => new Promise<string>((r) => (resolve = r)),
+      );
+      h.live.event({
+        type: "session.input_transcript.delta",
+        event_id: "confirmation",
+        delta: "Yes, please save those details.",
+        start_ms: 0,
+        end_ms: 1000,
+      });
+      h.live.event({
+        type: "session.delegation.created",
+        offset_ms: 1000,
+        delegation: { id: "save-details", target: "client" },
+      });
+      await vi.advanceTimersByTimeAsync(251);
+      if (kind === "stale")
+        h.live.event({
+          type: "session.input_transcript.delta",
+          event_id: "late-fragment",
+          delta: " please.",
+          start_ms: 1000,
+          end_ms: 1200,
+        });
+      resolve("The details were saved.");
+      await vi.advanceTimersByTimeAsync(1);
+      if (kind === "stale")
+        expect(h.live.sent).toContainEqual(
+          expect.objectContaining({
+            delegation_id: "save-details",
+            content: expect.stringContaining(
+              "Preserve the existing task and current action state",
+            ),
+          }),
+        );
+      await vi.advanceTimersByTimeAsync(5001);
+      const nudges = () =>
+        h.live.sent.filter(
+          (e) =>
+            e.delegation_id === "save-details" &&
+            typeof e.content === "string" &&
+            e.content.startsWith("Continue "),
+        );
+      expect(nudges()).toHaveLength(1);
+      expect(nudges()[0].content).toContain(
+        kind === "stale"
+          ? "current action ledger"
+          : "Do not rerun a backend action",
+      );
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(nudges()).toHaveLength(1);
+      expect(h.answer).toHaveBeenCalledOnce();
+      await h.finish();
+    },
+  );
+  it.each(["audio", "caller", "delegation", "closed"])(
+    "cancels a result's silence nudge after new %s activity",
+    async (activity) => {
+      const h = harness("pcm16", false, { actionsEnabled: true });
+      await h.start();
+      h.live.event({
+        type: "session.input_transcript.delta",
+        event_id: "caller",
+        delta: "Please save those details.",
+        start_ms: 0,
+        end_ms: 1000,
+      });
+      h.live.event({
+        type: "session.delegation.created",
+        offset_ms: 1000,
+        delegation: { id: "first", target: "client" },
+      });
+      await vi.advanceTimersByTimeAsync(4000);
+      if (activity === "audio")
+        h.live.event({
+          type: "session.output_audio.delta",
+          delta: Buffer.alloc(640, 17).toString("base64"),
+        });
+      else if (activity === "caller")
+        h.live.event({
+          type: "session.input_transcript.delta",
+          event_id: "new-caller-fragment",
+          delta: "Thank you.",
+          // Even an out-of-order fragment cancels the conversational nudge.
+          start_ms: 600,
+          end_ms: 900,
+        });
+      else if (activity === "delegation")
+        h.live.event({
+          type: "session.delegation.created",
+          offset_ms: 1000,
+          delegation: { id: "next", target: "client" },
+        });
+      else await h.finish();
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(
+        h.live.sent.some(
+          (e) =>
+            e.delegation_id === "first" &&
+            typeof e.content === "string" &&
+            e.content.startsWith("Continue "),
+        ),
+      ).toBe(false);
+      if (activity !== "closed") await h.finish();
+    },
+  );
   it("retains cumulative usage without summing snapshots and marks a missing final result unconfirmed", async () => {
     const h = harness();
     await h.start();

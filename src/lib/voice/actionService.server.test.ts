@@ -157,13 +157,29 @@ beforeEach(() => {
           error: null,
         };
       if (name === "propose_voice_action") {
+        const existing = tables.voice_actions.find(
+          (a) => a.kind === args.p_kind && a.fingerprint === args.p_fingerprint,
+        );
+        if (existing) return { data: existing, error: null };
+        for (const pending of tables.voice_actions)
+          if (pending.status === "awaiting_confirmation")
+            pending.status = "superseded";
         const a = {
-          id: aid,
+          id: tables.voice_actions.length
+            ? `22222222-2222-4222-8222-${String(tables.voice_actions.length + 1).padStart(12, "0")}`
+            : aid,
           session_id: sid,
           business_id: "business",
           kind: args.p_kind,
           payload: args.p_payload,
           readback: args.p_readback,
+          fingerprint: args.p_fingerprint,
+          request_event_ids: args.p_event_ids,
+          revision:
+            Math.max(
+              0,
+              ...tables.voice_actions.map((a) => Number(a.revision)),
+            ) + 1,
           status: "awaiting_confirmation",
           playback_at: "2026-09-15T12:00:01.000Z",
           playback_caller_end_ms: 200,
@@ -172,8 +188,66 @@ beforeEach(() => {
         tables.voice_actions.push(a);
         return { data: a, error: null };
       }
+      if (name === "prepare_voice_signup_after_contact") {
+        const contact = tables.voice_actions.find(
+          (a) => a.id === args.p_contact_action_id,
+        );
+        if (contact?.kind !== "contact" || contact.status !== "succeeded")
+          throw new Error("Contact success must be persisted first");
+        const previous = tables.voice_actions.find((a) => a.kind === "signup");
+        if (previous) {
+          if (
+            previous.status === "superseded" &&
+            Number(previous.revision) < Number(contact.revision) &&
+            previous.fingerprint === args.p_fingerprint &&
+            !previous.confirmed_at &&
+            !previous.source_message_id &&
+            !previous.execution_started_at &&
+            !previous.result &&
+            !previous.error_code
+          )
+            Object.assign(previous, {
+              status: "awaiting_confirmation",
+              revision: Number(contact.revision) + 1,
+              request_event_ids: contact.request_event_ids,
+              readback: args.p_readback,
+              playback_at: null,
+              playback_event_id: null,
+              playback_caller_end_ms: null,
+              readback_event_ids: null,
+              confirmation_event_ids: null,
+            });
+          return {
+            data:
+              previous.status === "awaiting_confirmation" &&
+              previous.fingerprint === args.p_fingerprint
+                ? previous
+                : null,
+            error: null,
+          };
+        }
+        const next = {
+          id: "33333333-3333-4333-8333-333333333333",
+          session_id: sid,
+          business_id: "business",
+          kind: "signup",
+          payload: args.p_payload,
+          fingerprint: args.p_fingerprint,
+          readback: args.p_readback,
+          request_event_ids: contact.request_event_ids,
+          revision: Number(contact.revision) + 1,
+          status: "awaiting_confirmation",
+          playback_at: null,
+          playback_event_id: null,
+          playback_caller_end_ms: null,
+          confirmation_event_ids: null,
+          execution_started_at: null,
+        };
+        tables.voice_actions.push(next);
+        return { data: next, error: null };
+      }
       if (name === "claim_voice_action") {
-        const a = tables.voice_actions[0];
+        const a = tables.voice_actions.find((a) => a.id === args.p_action_id)!;
         a.status = "executing";
         a.source_message_id = "source";
         return { data: { ...a }, error: null };
@@ -414,6 +488,371 @@ describe("semantic permission with complete current evidence", () => {
     expect((await runVoiceDecision(sid, confirm)).text).toContain(
       "not been acknowledged as played",
     );
+    expect(m.send).not.toHaveBeenCalled();
+  });
+});
+
+describe("saved-contact signup continuation", () => {
+  const contactProposal: ActionDecision = {
+    intent: "propose",
+    payload: {
+      kind: "contact",
+      name: "Test Caller",
+      phone: "+15555550101",
+      email: "test@example.test",
+    },
+    requestEventIds: ["request"],
+  };
+  async function saveContact() {
+    await runVoiceDecision(sid, contactProposal);
+    return runVoiceDecision(sid, confirm);
+  }
+
+  it("persists the contact before returning a prepared signup permission question without sending", async () => {
+    const result = await saveContact();
+    const next = tables.voice_actions[1];
+    expect(tables.voice_actions[0].status).toBe("succeeded");
+    expect(result.text).toContain("contact details were saved");
+    expect(result.text).toContain(String(next.readback));
+    expect(result.text).toContain(
+      "If the caller has declined signup or is finished",
+    );
+    expect(result.text).toContain("Wait for a fresh clear reply");
+    expect(result.confirmationActionId).toBe(next.id);
+    expect(next).toMatchObject({
+      status: "awaiting_confirmation",
+      request_event_ids: ["request"],
+      confirmation_event_ids: null,
+      playback_at: null,
+    });
+    expect(m.rpc).toHaveBeenCalledWith(
+      "prepare_voice_signup_after_contact",
+      expect.objectContaining({
+        p_contact_action_id: aid,
+        p_payload: {
+          kind: "signup",
+          approvedUrl: "https://simplassist.com/signup",
+        },
+      }),
+    );
+    expect(m.send).not.toHaveBeenCalled();
+  });
+
+  it("requires the new signup readback and fresh assent rather than reusing contact permission", async () => {
+    await saveContact();
+    const next = tables.voice_actions[1];
+    const signupConfirm: ActionDecision = {
+      ...confirm,
+      actionId: String(next.id),
+      readbackEventIds: ["signup-readback"],
+    };
+    expect((await runVoiceDecision(sid, signupConfirm)).text).toContain(
+      "not been acknowledged as played",
+    );
+    expect(m.send).not.toHaveBeenCalled();
+    Object.assign(next, {
+      playback_at: "2026-09-15T12:00:04.000Z",
+      playback_event_id: "signup-readback",
+      playback_caller_end_ms: 1000,
+    });
+    tables.voice_transcript_fragments.push({
+      session_id: sid,
+      event_id: "signup-yes",
+      role: "customer",
+      content: "Yes, text it to me.",
+      start_ms: 1200,
+      received_at: "2026-09-15T12:00:05.000Z",
+    });
+    expect((await runVoiceDecision(sid, signupConfirm)).text).toContain(
+      "complete current caller response",
+    );
+    expect(m.send).not.toHaveBeenCalled();
+    const result = await runVoiceDecision(sid, {
+      ...signupConfirm,
+      confirmationEventIds: ["signup-yes"],
+    });
+    expect(result.text).toContain("accepted for sending");
+    expect(m.send).toHaveBeenCalledOnce();
+  });
+
+  it("returns the same pending signup on replayed contact confirmations and proposals", async () => {
+    const first = await saveContact();
+    const repeatedConfirmation = await runVoiceDecision(sid, confirm);
+    const repeatedProposal = await runVoiceDecision(sid, contactProposal);
+    expect(repeatedConfirmation.confirmationActionId).toBe(
+      first.confirmationActionId,
+    );
+    expect(repeatedProposal.confirmationActionId).toBe(
+      first.confirmationActionId,
+    );
+    expect(tables.voice_actions).toHaveLength(2);
+    expect(
+      m.rpc.mock.calls.filter(([name]) => name === "save_voice_action_contact"),
+    ).toHaveLength(1);
+    expect(m.send).not.toHaveBeenCalled();
+  });
+
+  it("rearms a stored signup readback when its first response was suppressed before playback", async () => {
+    // Contact save committed, but the worker discarded the returned offer when
+    // the caller spoke again. The next delegation must recover the same offer.
+    await saveContact();
+    const next = tables.voice_actions[1];
+    const result = await runVoiceDecision(sid, {
+      intent: "readback",
+      actionId: String(next.id),
+    });
+    expect(next.playback_at).toBeNull();
+    expect(result.confirmationActionId).toBe(next.id);
+    expect(result.text).toContain(String(next.readback));
+    expect(result.text).toContain("fresh clear reply");
+    expect(tables.voice_actions).toHaveLength(2);
+    expect(tables.voice_actions[0].status).toBe("succeeded");
+    expect(m.send).not.toHaveBeenCalled();
+  });
+
+  it("continues after corrected contact details with new signup playback and new text permission", async () => {
+    await saveContact();
+    const signup = tables.voice_actions[1];
+    Object.assign(signup, {
+      playback_at: "2026-09-15T12:00:04.000Z",
+      playback_event_id: "old-signup-readback",
+      playback_caller_end_ms: 1000,
+    });
+    tables.voice_transcript_fragments.push(
+      {
+        session_id: sid,
+        event_id: "old-signup-yes",
+        role: "customer",
+        content: "Yes",
+        start_ms: 1200,
+        received_at: "2026-09-15T12:00:05.000Z",
+      },
+      {
+        session_id: sid,
+        event_id: "corrected-request",
+        role: "customer",
+        content: "Actually my email is corrected@example.test",
+        start_ms: 1400,
+        received_at: "2026-09-15T12:00:06.000Z",
+      },
+    );
+    await runVoiceDecision(sid, {
+      ...contactProposal,
+      payload: {
+        kind: "contact",
+        name: "Test Caller",
+        phone: "+15555550101",
+        email: "corrected@example.test",
+      },
+      requestEventIds: ["corrected-request"],
+    });
+    const corrected = tables.voice_actions[2];
+    expect(signup.status).toBe("superseded");
+    Object.assign(corrected, {
+      playback_at: "2026-09-15T12:00:07.000Z",
+      playback_event_id: "corrected-readback",
+      playback_caller_end_ms: 1600,
+    });
+    tables.voice_transcript_fragments.push({
+      session_id: sid,
+      event_id: "corrected-save-yes",
+      role: "customer",
+      content: "Yes, save those",
+      start_ms: 1800,
+      received_at: "2026-09-15T12:00:08.000Z",
+    });
+    const result = await runVoiceDecision(sid, {
+      ...confirm,
+      actionId: String(corrected.id),
+      readbackEventIds: ["corrected-readback"],
+      confirmationEventIds: ["corrected-save-yes"],
+    });
+    expect(result.confirmationActionId).toBe(signup.id);
+    expect(signup).toMatchObject({
+      status: "awaiting_confirmation",
+      revision: 4,
+      request_event_ids: ["corrected-request"],
+      playback_at: null,
+      playback_event_id: null,
+      confirmation_event_ids: null,
+    });
+    const staleSignupConfirm: ActionDecision = {
+      ...confirm,
+      actionId: String(signup.id),
+      readbackEventIds: ["old-signup-readback"],
+      confirmationEventIds: ["old-signup-yes"],
+    };
+    expect((await runVoiceDecision(sid, staleSignupConfirm)).text).toContain(
+      "not been acknowledged as played",
+    );
+    expect(m.send).not.toHaveBeenCalled();
+    expect(
+      (
+        await runVoiceDecision(sid, {
+          intent: "readback",
+          actionId: String(signup.id),
+        })
+      ).confirmationActionId,
+    ).toBe(signup.id);
+    Object.assign(signup, {
+      playback_at: "2026-09-15T12:00:09.000Z",
+      playback_event_id: "fresh-signup-readback",
+      playback_caller_end_ms: 2000,
+    });
+    tables.voice_transcript_fragments.push({
+      session_id: sid,
+      event_id: "fresh-signup-yes",
+      role: "customer",
+      content: "Yes, text it",
+      start_ms: 2200,
+      received_at: "2026-09-15T12:00:10.000Z",
+    });
+    expect((await runVoiceDecision(sid, staleSignupConfirm)).text).toContain(
+      "complete current caller response",
+    );
+    expect(m.send).not.toHaveBeenCalled();
+    expect(
+      (
+        await runVoiceDecision(sid, {
+          ...staleSignupConfirm,
+          readbackEventIds: ["fresh-signup-readback"],
+          confirmationEventIds: ["fresh-signup-yes"],
+        })
+      ).text,
+    ).toContain("accepted for sending");
+    expect(m.send).toHaveBeenCalledOnce();
+  });
+
+  it("returns only stored pending details and their action ID when readback needs replay", async () => {
+    await runVoiceDecision(sid, contactProposal);
+    const pending = tables.voice_actions[0];
+    pending.playback_at = null;
+    const result = await runVoiceDecision(sid, {
+      intent: "readback",
+      actionId: aid,
+    });
+    expect(result.text).toContain(String(pending.readback));
+    expect(result.confirmationActionId).toBe(aid);
+    expect(pending.status).toBe("awaiting_confirmation");
+    expect(
+      m.rpc.mock.calls.some(([name]) => name === "claim_voice_action"),
+    ).toBe(false);
+    expect(m.send).not.toHaveBeenCalled();
+  });
+
+  it("cannot rearm an action from a different call", async () => {
+    await runVoiceDecision(sid, contactProposal);
+    await expect(
+      runVoiceDecision(sid, {
+        intent: "readback",
+        actionId: "44444444-4444-4444-8444-444444444444",
+      }),
+    ).rejects.toThrow("voice_action_missing");
+    expect(m.send).not.toHaveBeenCalled();
+  });
+
+  it.each(["succeeded", "failed", "uncertain", "executing", "superseded"])(
+    "does not retry an already %s signup when a contact result is replayed",
+    async (status) => {
+      await saveContact();
+      tables.voice_actions[1].status = status;
+      const result = await runVoiceDecision(sid, confirm);
+      expect(result.confirmationActionId).toBeUndefined();
+      expect(result.text).toContain("contact details were saved");
+      expect(tables.voice_actions).toHaveLength(2);
+      expect(tables.voice_actions[1].status).toBe(status);
+      expect(m.send).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not prepare signup when the current goal is booking", async () => {
+    tables.businesses[0].primary_goal = "book";
+    const result = await saveContact();
+    expect(result.confirmationActionId).toBeUndefined();
+    expect(tables.voice_actions).toHaveLength(1);
+    expect(
+      m.rpc.mock.calls.some(
+        ([name]) => name === "prepare_voice_signup_after_contact",
+      ),
+    ).toBe(false);
+    expect(m.send).not.toHaveBeenCalled();
+  });
+
+  it("respects a disabled signup capability while keeping successful contact capture", async () => {
+    const original = m.rpc.getMockImplementation()!;
+    m.rpc.mockImplementation(async (name, args) => {
+      if (name === "voice_action_allowed" && args.p_kind === "signup")
+        return { data: false, error: null };
+      return original(name, args);
+    });
+    const result = await saveContact();
+    expect(result.confirmationActionId).toBeUndefined();
+    expect(tables.voice_actions[0].status).toBe("succeeded");
+    expect(tables.voice_actions).toHaveLength(1);
+    expect(m.send).not.toHaveBeenCalled();
+  });
+
+  it("preserves contact success if the call ends before the continuation", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const original = m.rpc.getMockImplementation()!;
+    m.rpc.mockImplementation(async (name, args) => {
+      const result = await original(name, args);
+      if (name === "save_voice_action_contact")
+        tables.voice_sessions[0].status = "closed";
+      return result;
+    });
+    const result = await saveContact();
+    expect(result.text).toContain("contact details were saved");
+    expect(result.confirmationActionId).toBeUndefined();
+    expect(tables.voice_actions[0].status).toBe("succeeded");
+    expect(tables.voice_actions).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it("preserves saved success and logs no private error body if preparation fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const original = m.rpc.getMockImplementation()!;
+    m.rpc.mockImplementation(async (name, args) => {
+      if (name === "prepare_voice_signup_after_contact")
+        return {
+          data: null,
+          error: { message: "private customer/provider data" },
+        };
+      return original(name, args);
+    });
+    const result = await saveContact();
+    expect(result.text).toContain("contact details were saved");
+    expect(result.confirmationActionId).toBeUndefined();
+    expect(tables.voice_actions[0].status).toBe("succeeded");
+    expect(warn).toHaveBeenCalledWith(
+      "[voice-actions] signup_continuation_unavailable",
+      { sessionId: sid, actionId: aid, category: "preparation_failed" },
+    );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("private");
+    expect(m.send).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("honors an atomic guard refusal when a newer action appeared", async () => {
+    const original = m.rpc.getMockImplementation()!;
+    m.rpc.mockImplementation(async (name, args) => {
+      if (name === "prepare_voice_signup_after_contact") {
+        tables.voice_actions.push({
+          id: "newer-correction",
+          session_id: sid,
+          kind: "contact",
+          status: "awaiting_confirmation",
+          revision: 2,
+        });
+        return { data: null, error: null };
+      }
+      return original(name, args);
+    });
+    const result = await saveContact();
+    expect(result.confirmationActionId).toBeUndefined();
+    expect(tables.voice_actions[0].status).toBe("succeeded");
+    expect(tables.voice_actions[1].status).toBe("awaiting_confirmation");
+    expect(tables.voice_actions.some((a) => a.kind === "signup")).toBe(false);
     expect(m.send).not.toHaveBeenCalled();
   });
 });

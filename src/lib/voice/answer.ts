@@ -126,8 +126,28 @@ export function createVoiceAnswerer(
           context,
           modelTranscript,
         );
+        console.info("[voice-answer] decision_selected", {
+          sessionId: session.id,
+          delegationId,
+          intent: decision.intent,
+          actionKind:
+            decision.intent === "propose"
+              ? decision.payload.kind
+              : decision.intent === "confirm" || decision.intent === "readback"
+                ? context.actions.find((a) => a.id === decision.actionId)?.kind
+                : undefined,
+          latencyMs: Date.now() - started,
+        });
         stage = "decision_execution";
-        return await actions.decision(session.id, decision, signal);
+        const result = await actions.decision(session.id, decision, signal);
+        console.info("[voice-answer] decision_result_received", {
+          sessionId: session.id,
+          delegationId,
+          intent: decision.intent,
+          hasConfirmation: Boolean(result.confirmationActionId),
+          latencyMs: Date.now() - started,
+        });
+        return result;
       }
       const answer = response.content
         .filter((b) => b.type === "text")

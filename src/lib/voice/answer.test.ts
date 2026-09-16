@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { APIConnectionTimeoutError } from "@anthropic-ai/sdk/core/error";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { VoiceSession } from "./types";
@@ -61,6 +61,7 @@ function fixture() {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.spyOn(console, "info").mockImplementation(() => {});
   m.knowledge.mockResolvedValue("Approved business information.");
   m.create.mockResolvedValue({
     id: "response",
@@ -85,6 +86,7 @@ beforeEach(() => {
     ],
   });
 });
+afterEach(() => vi.restoreAllMocks());
 describe("delegated voice decisions", () => {
   it("passes a validated contact proposal to the backend and retains confirmation identity", async () => {
     const f = fixture();
@@ -135,6 +137,28 @@ describe("delegated voice decisions", () => {
     expect(JSON.stringify(request.tools[0].input_schema)).not.toContain(
       "requestEventIds",
     );
+  });
+  it("records the decision path without logging caller details or backend text", async () => {
+    const f = fixture();
+    await f.answer(
+      session,
+      "d",
+      snapshot("private email and name"),
+      new AbortController().signal,
+    );
+    expect(console.info).toHaveBeenCalledWith(
+      "[voice-answer] decision_selected",
+      expect.objectContaining({ intent: "propose", actionKind: "contact" }),
+    );
+    expect(console.info).toHaveBeenCalledWith(
+      "[voice-answer] decision_result_received",
+      expect.objectContaining({ intent: "propose", hasConfirmation: true }),
+    );
+    const logs = JSON.stringify(vi.mocked(console.info).mock.calls);
+    expect(logs).not.toContain("Test Caller");
+    expect(logs).not.toContain("test@example.test");
+    expect(logs).not.toContain("private email");
+    expect(logs).not.toContain("May I save");
   });
   it("keeps an action request bounded and propagates its cancellation signal", async () => {
     const f = fixture();

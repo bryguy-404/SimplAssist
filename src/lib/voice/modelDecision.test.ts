@@ -141,6 +141,44 @@ describe("compact model decision evidence adapter", () => {
       ).toThrow("invalid_transcript_evidence");
     }
   });
+  it("requests a stored readback without claiming playback or caller permission", () => {
+    const ctx = {
+      ...context,
+      actions: [
+        {
+          ...action,
+          playback_event_id: null,
+          playback_at: null,
+          playback_caller_end_ms: null,
+        },
+      ],
+    };
+    const transcript = buildModelTranscript(
+      [fragment("request", "customer", "Please send the link", 0)],
+      ctx,
+    );
+    expect(
+      resolveModelDecision(
+        { intent: "readback", actionId: id },
+        ctx,
+        transcript,
+      ),
+    ).toEqual({ intent: "readback", actionId: id });
+    expect(() =>
+      resolveModelDecision(
+        { intent: "confirm", actionId: id, confirmationSegments: [1] },
+        ctx,
+        transcript,
+      ),
+    ).toThrow("invalid_transcript_evidence");
+    expect(() =>
+      resolveModelDecision(
+        { intent: "readback", actionId: id },
+        context,
+        transcript,
+      ),
+    ).toThrow("invalid_transcript_evidence");
+  });
   it("never accepts raw event IDs or readback overrides from model output", () => {
     const transcript = buildModelTranscript(
       [fragment("caller", "customer", "Test Caller", 0)],

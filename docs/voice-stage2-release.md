@@ -85,3 +85,12 @@ Bryan authorized the remaining implementation. Deployed clean private archives o
 Live checks passed: app health 200; authenticated worker readiness 200; action protocol 1; internal credentials match; unauthorized readiness/actions return 404; invalid stream credentials return 401; authenticated nonexistent-call context is rejected. OpenAI/Anthropic model access, Telnyx callback routing and durable maintenance passed preflight. Read-only SMS checks confirmed correct phone assignment, carrier readiness, operational access and no tester opt-out. The account had 120 of 1,500 SMS parts used at verification. No SMS was sent by deployment checks.
 
 The pilot is ready for Bryan's first real signup/contact call. No voice action has yet been phone-accepted in this release; the twenty-call acceptance set above remains outstanding. Review resulting calls at `https://simplassist.com/admin/voice`. A delivered signup link is not a completed signup. Keep wider release and booking disabled until their own acceptance gates pass.
+
+
+## Proactive receptionist guidance — September 15, 2026
+
+Bryan requested that the assistant initiate contact collection after the caller agrees to the relevant next step. Shared speaking/delegation guidance now asks for name, then email, skips details already provided in this call, reads back and confirms before saving, then continues to signup permission without waiting for the caller to ask. Refusals are respected; contact capture is not a gate to receiving the link. Contact-save assent and SMS permission stay separate. Booking remains disabled.
+
+Verified the existing dashboard path: confirmed details fill `contacts.name`/`contacts.email` and appear in Contacts and the conversation header. Existing different canonical details are preserved; new confirmed details remain in the call action record/transcript for review. No database or dashboard schema changes were needed.
+
+Local voice regression: 9 files / 71 tests passed; voice-worker TypeScript check passed. Optional isolated live-model evaluation was blocked by automatic approval review before execution because it would send proprietary voice instructions to Anthropic. No external model evaluation was performed; naturalness and the live collection flow still require a phone test.

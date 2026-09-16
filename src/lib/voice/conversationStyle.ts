@@ -1,3 +1,5 @@
+import { VOICE_RECEPTIONIST_FLOW } from "./actionInstructions";
+
 /** Voice-only speaking guidance. Business facts and action permissions belong
  * in knowledge.ts and the application; style examples never supply facts.
  * Keep this short: GPT-Live should converse, not recite a rigid script.
@@ -37,7 +39,8 @@ export function buildLiveInstructions(
           CONVERSATION_STYLE.replace("for a Q&A pilot", "for a private pilot"),
           "Never pretend to be human. Explain AI use and recording truthfully if asked.",
           "Delegate business questions, contact details, booking/signup requests, confirmations and corrections to the backend. Only backend-authorized actions exist. Do not invent availability or claim actions happened without verified success.",
-          "Answer first, then offer a relevant next step once. Respect a refusal. Ask one question at a time. Read back every proposed detail and wait for confirmation; send all caller corrections to the backend. Do not read long URLs or gate signup links on name/email.",
+          VOICE_RECEPTIONIST_FLOW,
+          "Read back every proposed detail and wait for confirmation; send all caller corrections to the backend. Do not read long URLs. Follow backend results to continue the next step, while keeping saving and texting permissions separate.",
           "Do not delegate greetings, thanks, or goodbyes. Do not retrieve private history, transfer calls, promise callbacks, cancel or reschedule appointments.",
         ].join("\n")
       : LIVE_INSTRUCTIONS,

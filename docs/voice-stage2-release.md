@@ -109,3 +109,13 @@ Changes:
 - Migration 077 adds a durable fallback delivery claim and error marker. The claim is acquired atomically after messaging eligibility checks and before provider submission. SDK retries are disabled only for this voice fallback path. Preflight failures remain retryable; a claimed but uncompleted send requires provider review and must never be blindly resent or have its claim automatically released. Maintenance excludes claimed sends. A blocked concurrent preflight cannot complete another handler's active delivery.
 
 Verification: 1,330 regression tests across 59 files; final focused run 93 tests across 11 files after the final concurrency guard; worker TypeScript and application production build passed. The isolated local database suite passed 64 files / 2,802 assertions, including migration 077 and claim behavior. Mocked model responses test strict decision validation and safe failure diagnostics; no external model evaluation or automated customer SMS was performed. Booking remains disabled. The next real call must verify a proactive offer, confirmed contact capture, signup-link delivery and no duplicate generic fallback messages. Deployment details follow after verification.
+
+Production verification: migration 077 and its history entry were applied atomically, then independently verified through a read-only CLI session. Both claim columns exist; anonymous/customer writes remain denied. Contacts/signup remain enabled at revision 4, booking disabled, 12,000-second pilot budget unchanged, goal Signup with the approved URL. No active calls were present.
+
+Deployed private archives of `335e4434bd85600cda084bf169f251aaa207f2b4`, SHA-256 `cc20b1c87a0c4ed1b611dee4282853cc851b9346d30d25a1492ea9237ccb0f9a`:
+
+- Voice worker: `a3ca449a-7598-4650-92b8-75aaab022133`, SUCCESS.
+- App: `3f8fa167-3fa1-44de-9c98-812431bc055f`, SUCCESS.
+- Scan worker unchanged at `12c2582a-2263-4055-92a8-1f4eaf27c642`.
+
+Post-deployment app health and authenticated worker readiness returned 200; readiness true, action protocol 1, matching internal credentials, actions enabled in both services, zero active calls. Unauthenticated readiness/action requests remained 404 and authenticated nonexistent-call access was rejected. No customer message was sent by deployment or verification. The historical final contact-step rejection cannot be reconstructed from old logs; the next caller test must establish actual contact-save and signup-link success. Do not claim live acceptance from mocked tests or healthy deployment status alone.

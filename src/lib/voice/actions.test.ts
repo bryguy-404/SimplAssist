@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { actionFingerprint, voiceActionPayload, safeConfirmation, buildActionReadback } from "./actions";
+import { actionFingerprint, voiceActionPayload, buildActionReadback } from "./actions";
 describe("voice action boundaries", () => {
   it("keeps SMS recipient and URL out of model inputs", () => {
     expect(voiceActionPayload.safeParse({kind:"signup",phone:"+15555550100"}).success).toBe(false);
@@ -17,21 +17,7 @@ describe("voice action boundaries", () => {
     expect(actionFingerprint(a)).not.toBe(actionFingerprint({...a,name:"Brian"}));
     expect(actionFingerprint({kind:"signup"},"https://a.test")).not.toBe(actionFingerprint({kind:"signup"},"https://b.test"));
   });
-  it("rejects corrections, questions and conditional assent", () => {
-    for(const s of ["Yes, but Tuesday", "No", "yes?", "if it's free, yes", "the caller says yes", "yes cancel it"]) expect(safeConfirmation(s),s).toBe(false);
-    expect(safeConfirmation("Yes please.")).toBe(true);
-  });
   it("does not describe an owner-reviewed request as a booking", () => {
     expect(buildActionReadback({kind:"booking_request",name:"Bryan",phone:"+15555550100",service:"Inspection",requestedTime:"next week"},"+15555550100","America/Indiana/Indianapolis")).toContain("not a confirmed appointment");
-  });
-});
-
-
-describe("natural spoken confirmations", () => {
-  it.each(["Yes, please", "Yes, that works", "Yes, go ahead.", "Yes, that’s correct.", "Yeah, please", "Sure.", "That works!"])("accepts standalone assent %s", (text) => {
-    expect(safeConfirmation(text)).toBe(true);
-  });
-  it.each(["Yes, but not now", "Yes, if it's free", "Yes, please?", "No, yes", "yes no", "Yes, to a different number", "Don't send it", '"yes"', "He said yes", "That works, but tomorrow", "Yesterday"])("rejects qualified or unclear assent %s", (text) => {
-    expect(safeConfirmation(text)).toBe(false);
   });
 });

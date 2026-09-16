@@ -49,6 +49,14 @@ function query(table: string) {
       filters.push((r) => r[k] === v);
       return q;
     },
+    gte: (k: string, v: number) => {
+      filters.push((r) => Number(r[k]) >= v);
+      return q;
+    },
+    gt: (k: string, v: string) => {
+      filters.push((r) => String(r[k] ?? "") > v);
+      return q;
+    },
     is: (k: string, v: unknown) => {
       filters.push((r) => (r[k] ?? null) === v);
       return q;
@@ -127,6 +135,7 @@ beforeEach(() => {
         content: "Yes please.",
         role: "customer",
         start_ms: 500,
+        received_at: "2026-09-15T12:00:02.000Z",
       },
     ],
   };
@@ -156,7 +165,8 @@ beforeEach(() => {
           payload: args.p_payload,
           readback: args.p_readback,
           status: "awaiting_confirmation",
-          playback_at: new Date().toISOString(),
+          playback_at: "2026-09-15T12:00:01.000Z",
+          playback_caller_end_ms: 200,
           execution_started_at: null,
         };
         tables.voice_actions.push(a);
@@ -212,13 +222,15 @@ describe("voice signup execution", () => {
     await runVoiceDecision(sid, confirm);
     expect(m.send).toHaveBeenCalledTimes(1);
   });
-  it("does not send on a correction", async () => {
+  it("does not execute when the semantic decision asks to clarify a correction", async () => {
     await runVoiceDecision(sid, propose);
-    tables.voice_transcript_fragments[0].content = "Yes but another number";
-    expect((await runVoiceDecision(sid, confirm)).text).toContain(
-      "not an unambiguous",
-    );
+    const result = await runVoiceDecision(sid, {
+      intent: "answer",
+      text: "I can only send to the number calling. Would you like that?",
+    });
+    expect(result.text).toContain("number calling");
     expect(m.send).not.toHaveBeenCalled();
+    expect(tables.voice_actions[0].status).toBe("awaiting_confirmation");
   });
   it("refuses changed signup links after permission", async () => {
     await runVoiceDecision(sid, propose);
@@ -288,6 +300,7 @@ describe("spoken signup permission", () => {
         content,
         role: "customer",
         start_ms: 500 + i * 200,
+        received_at: "2026-09-15T12:00:02.000Z",
       }));
       const decision: ActionDecision = {
         ...confirm,
@@ -299,12 +312,108 @@ describe("spoken signup permission", () => {
       expect(m.send).toHaveBeenCalledOnce();
     },
   );
-  it("rearms playback tracking when genuine ambiguity needs a new permission question", async () => {
+  it("rearms playback tracking when the decision omitted part of the reply", async () => {
     await runVoiceDecision(sid, propose);
-    tables.voice_transcript_fragments[0].content = "Yes, but to another number";
+    tables.voice_transcript_fragments.push({
+      ...tables.voice_transcript_fragments[0],
+      event_id: "correction",
+      content: ", but to another number",
+    });
     const result = await runVoiceDecision(sid, confirm);
     expect(result.confirmationActionId).toBe(aid);
     expect(result.text).toContain("ending in 0101");
+    expect(m.send).not.toHaveBeenCalled();
+  });
+});
+
+describe("semantic permission with complete current evidence", () => {
+  it.each([
+    "Yes, that-that's correct",
+    "Yes, you can save those",
+    "Uh yes, please",
+    "Go right ahead and save that for me",
+  ])(
+    "saves contacts once for model-interpreted permission: %s",
+    async (reply) => {
+      await runVoiceDecision(sid, {
+        intent: "propose",
+        payload: {
+          kind: "contact",
+          name: "Test Caller",
+          phone: "+15555550101",
+          email: "test@example.test",
+        },
+        requestEventIds: ["request"],
+      });
+      tables.voice_transcript_fragments[0].content = reply;
+      expect((await runVoiceDecision(sid, confirm)).text).toContain(
+        "contact details were saved",
+      );
+      await runVoiceDecision(sid, confirm);
+      expect(
+        m.rpc.mock.calls.filter(
+          ([name]) => name === "save_voice_action_contact",
+        ),
+      ).toHaveLength(1);
+      expect(m.send).not.toHaveBeenCalled();
+    },
+  );
+  it("rejects a selected yes that leaves out a condition, even if it ends the reply", async () => {
+    await runVoiceDecision(sid, propose);
+    tables.voice_transcript_fragments.unshift({
+      ...tables.voice_transcript_fragments[0],
+      event_id: "condition",
+      start_ms: 300,
+      content: "If it is free, ",
+    });
+    const result = await runVoiceDecision(sid, confirm);
+    expect(result.text).toContain("complete current caller response");
+    expect(
+      m.rpc.mock.calls.some(([name]) => name === "claim_voice_action"),
+    ).toBe(false);
+    expect(m.send).not.toHaveBeenCalled();
+  });
+  it("rejects a correction arriving after the model selected its evidence", async () => {
+    await runVoiceDecision(sid, propose);
+    tables.voice_transcript_fragments.push({
+      ...tables.voice_transcript_fragments[0],
+      event_id: "later",
+      start_ms: 700,
+      content: ", wait, don't send it",
+    });
+    expect((await runVoiceDecision(sid, confirm)).confirmationActionId).toBe(
+      aid,
+    );
+    expect(m.send).not.toHaveBeenCalled();
+  });
+  it("cannot reuse consent from before the current readback", async () => {
+    await runVoiceDecision(sid, propose);
+    tables.voice_transcript_fragments[0].received_at =
+      "2026-09-15T12:00:00.000Z";
+    expect((await runVoiceDecision(sid, confirm)).confirmationActionId).toBe(
+      aid,
+    );
+    expect(m.send).not.toHaveBeenCalled();
+  });
+  it("ignores a delayed older fragment outside the current spoken response window", async () => {
+    await runVoiceDecision(sid, propose);
+    tables.voice_transcript_fragments.push({
+      ...tables.voice_transcript_fragments[0],
+      event_id: "delayed-old",
+      start_ms: 100,
+      content: "An earlier question",
+    });
+    expect((await runVoiceDecision(sid, confirm)).text).toContain(
+      "accepted for sending",
+    );
+    expect(m.send).toHaveBeenCalledOnce();
+  });
+  it("cannot confirm a proposal without recorded playback", async () => {
+    await runVoiceDecision(sid, propose);
+    tables.voice_actions[0].playback_at = null;
+    expect((await runVoiceDecision(sid, confirm)).text).toContain(
+      "not been acknowledged as played",
+    );
     expect(m.send).not.toHaveBeenCalled();
   });
 });

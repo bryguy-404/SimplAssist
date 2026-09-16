@@ -3,6 +3,7 @@ import { actionDecision, type VoiceAnswer } from "./actions";
 import type { VoiceActionClient } from "./actionClient";
 import { VOICE_ACTION_INSTRUCTIONS } from "./actionInstructions";
 import Anthropic from "@anthropic-ai/sdk";
+import { APIConnectionTimeoutError } from "@anthropic-ai/sdk/core/error";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadVoiceKnowledge } from "./knowledge";
 import { ANSWERING_MODEL, type VoiceSession } from "./types";
@@ -72,11 +73,11 @@ export function createVoiceAnswerer(
           messages: [
             {
               role: "user",
-              content: `Current call transcript (partial spoken fragments; latest caller correction takes precedence):\n${transcript}\n\nPrepare the answer to the latest business question. ${enabled ? "Choose the current safe decision." : "No actions are available."}`,
+              content: `Current call transcript (partial spoken fragments; latest caller correction takes precedence):\n${transcript}\n\n${enabled ? "Choose the next safe decision for the latest caller response and current action state. If a pending action exists, interpret the full response to its current permission question; do not propose a duplicate merely because the caller agreed." : "Prepare the answer to the latest business question. No actions are available."}`,
             },
           ],
         },
-        { signal },
+        { signal, timeout: enabled ? 12000 : 8000 },
       );
       stage = "usage";
       const { error } = await db
@@ -98,6 +99,8 @@ export function createVoiceAnswerer(
       if (error) throw new Error("backend_usage_finalize_failed");
       if (enabled && actions) {
         stage = "decision_validation";
+        if (response.stop_reason === "max_tokens")
+          throw new Error("backend_output_incomplete");
         const blocks = response.content.filter((b) => b.type === "tool_use");
         if (blocks.length !== 1 || signal.aborted)
           throw new Error("invalid_voice_decision");
@@ -124,7 +127,12 @@ export function createVoiceAnswerer(
           category:
             error instanceof z.ZodError
               ? "invalid_decision_schema"
-              : "backend_request_failed",
+              : error instanceof Error &&
+                  error.message === "backend_output_incomplete"
+                ? "incomplete_model_output"
+                : error instanceof APIConnectionTimeoutError
+                  ? "model_timeout"
+                  : "backend_request_failed",
         });
       // A timeout/abort may still have incurred provider charges; never mark it zero cost.
       await db

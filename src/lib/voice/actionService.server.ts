@@ -5,7 +5,6 @@ import {
   voiceActionPayload,
   actionFingerprint,
   buildActionReadback,
-  safeConfirmation,
   type ActionDecision,
   type VoiceAction,
   type VoiceAnswer,
@@ -219,23 +218,37 @@ export async function runVoiceDecision(
         a.result?.summary ||
         "This request is already being checked. Do not submit it again or claim success.",
     };
+  if (!a.playback_at || !Number.isSafeInteger(a.playback_caller_end_ms))
+    return {
+      text: `The current permission question has not been acknowledged as played. Ask it again and wait for the caller: ${a.readback}`,
+      confirmationActionId: a.id,
+    };
+  // intent=confirm is the answering model's semantic classification of the
+  // complete reply, not a phrase match. Enforce its evidence independently:
+  // a selected "yes" must not omit conditions/corrections from that reply.
   const { data: evidence, error: ee } = await db
     .from("voice_transcript_fragments")
-    .select("content,start_ms,event_id,role")
+    .select("event_id")
     .eq("session_id", sessionId)
-    .in("event_id", decision.confirmationEventIds)
-    .order("start_ms");
+    .eq("role", "customer")
+    .gt("received_at", a.playback_at)
+    .gte("start_ms", a.playback_caller_end_ms!);
+  const cited = new Set(decision.confirmationEventIds);
   if (
     ee ||
     !evidence?.length ||
-    !safeConfirmation(evidence.map((f) => f.content).join(""))
+    evidence.length !== cited.size ||
+    decision.confirmationEventIds.length !== cited.size ||
+    evidence.some((f) => !cited.has(f.event_id))
   ) {
     console.warn("[voice-actions] confirmation_rejected", {
       sessionId,
-      category: ee ? "evidence_unavailable" : "assent_not_clear",
+      category: ee
+        ? "evidence_unavailable"
+        : "confirmation_evidence_incomplete",
     });
     return {
-      text: `The response was not an unambiguous confirmation. Clarify any correction first; propose updated details if anything changed. Otherwise ask the current confirmation again: ${a.readback}`,
+      text: `The cited reply does not cover the complete current caller response. Do not act on selected words or earlier permission. Clarify any correction; otherwise ask the current permission question again: ${a.readback}`,
       confirmationActionId: a.id,
     };
   }
@@ -250,6 +263,7 @@ export async function runVoiceDecision(
       "voice action not confirmable",
       "readback evidence missing",
       "confirmation evidence out of order",
+      "confirmation evidence incomplete",
       "confirmation superseded",
     ];
     console.warn("[voice-actions] confirmation_rejected", {

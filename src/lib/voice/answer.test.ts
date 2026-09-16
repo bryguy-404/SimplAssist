@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { APIConnectionTimeoutError } from "@anthropic-ai/sdk/core/error";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { VoiceSession } from "./types";
 const m = vi.hoisted(() => ({ create: vi.fn(), knowledge: vi.fn() }));
@@ -30,18 +31,14 @@ function fixture() {
     }),
   } as unknown as SupabaseClient;
   const actions = {
-    context: vi
-      .fn()
-      .mockResolvedValue({
-        capabilities: { contacts: true, signup: true, booking: false },
-        actions: [],
-      }),
-    decision: vi
-      .fn()
-      .mockResolvedValue({
-        text: "May I save these details?",
-        confirmationActionId: "stored-action",
-      }),
+    context: vi.fn().mockResolvedValue({
+      capabilities: { contacts: true, signup: true, booking: false },
+      actions: [],
+    }),
+    decision: vi.fn().mockResolvedValue({
+      text: "May I save these details?",
+      confirmationActionId: "stored-action",
+    }),
     playback: vi.fn(),
   };
   return {
@@ -94,6 +91,38 @@ describe("delegated voice decisions", () => {
       expect.any(AbortSignal),
     );
     expect(result).toHaveProperty("confirmationActionId", "stored-action");
+  });
+  it("keeps an action request bounded and propagates its cancellation signal", async () => {
+    const f = fixture();
+    const abort = new AbortController();
+    await f.answer(session, "d", "synthetic call", abort.signal);
+    expect(m.create.mock.calls[0][1]).toEqual({
+      signal: abort.signal,
+      timeout: 12000,
+    });
+  });
+  it("does not execute truncated model output even if part of it parses", async () => {
+    const f = fixture();
+    const response = await m.create();
+    m.create.mockResolvedValue({ ...response, stop_reason: "max_tokens" });
+    await expect(
+      f.answer(session, "d", "synthetic call", new AbortController().signal),
+    ).rejects.toThrow("backend_output_incomplete");
+    expect(f.actions.decision).not.toHaveBeenCalled();
+    expect(f.updates[0]).toMatchObject({ status: "confirmed" });
+  });
+  it("categorizes an actual SDK timeout without logging its body", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const f = fixture();
+    m.create.mockRejectedValue(new APIConnectionTimeoutError());
+    await expect(
+      f.answer(session, "d", "synthetic call", new AbortController().signal),
+    ).rejects.toThrow();
+    expect(warn).toHaveBeenCalledWith(
+      "[voice-answer] request_failed",
+      expect.objectContaining({ stage: "model", category: "model_timeout" }),
+    );
+    warn.mockRestore();
   });
   it("rejects invented action IDs without executing and records only nonpersonal diagnostics", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});

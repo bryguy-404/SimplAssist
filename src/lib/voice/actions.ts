@@ -18,6 +18,7 @@ export interface VoiceAction {
   id: string; session_id: string; business_id: string; kind: VoiceActionKind;
   revision: number; fingerprint: string; payload: VoiceActionPayload;
   readback: string; created_at: string; playback_at: string | null;
+  playback_caller_end_ms: number | null;
   playback_event_id: string | null; source_message_id: string | null;
   status: "awaiting_confirmation" | "executing" | "succeeded" | "failed" | "superseded" | "uncertain";
   result: { summary: string; [key: string]: unknown } | null;
@@ -53,12 +54,4 @@ export function buildActionReadback(payload: VoiceActionPayload, callerPhone: st
   if (payload.kind === "contact") return `May I save these contact details: ${details}?`;
   if (payload.kind === "booking_request") return `May I save a request for ${payload.service}, ${payload.requestedTime}, for ${details}? This is for owner review, not a confirmed appointment.`;
   return `May I book ${payload.service} on ${payload.startTime.replace("T", " at ")} (${timezone}) for ${details}?`;
-}
-export function safeConfirmation(text: string): boolean {
-  // Speech transcripts include punctuation inside phrases and may use curly
-  // apostrophes. Normalize only that presentation, never remove qualifying words
-  // or question marks. Keep a whole-utterance allowlist, not a search for "yes".
-  const normalized = text.toLowerCase().replace(/[’‘]/g, "'")
-    .replace(/[.,!]/g, " ").replace(/\s+/g, " ").trim();
-  return /^(yes|yeah|yep|correct|that's correct|that is correct|that's right|that is right|sounds good|go ahead|please do|okay|ok|sure|that works|yes please|yeah please|yes that's correct|yes that is correct|yes that's right|yes that is right|yes go ahead|yes that works)$/.test(normalized);
 }

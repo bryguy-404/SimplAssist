@@ -1,3 +1,4 @@
+import { validateVoiceBookingAccess, type VoiceBookingAuthority } from "@/lib/voice/bookingAccess.server";
 import { createHash, randomUUID } from "node:crypto";
 import type { calendar_v3 } from "googleapis";
 import { getAuthenticatedClient, getCalendarService } from "./client";
@@ -619,7 +620,8 @@ async function loadBookingCatalogContext(
   requestedServiceName: string,
   contactId: string,
   localStart: BusinessLocalParts,
-  customerEmail?: string
+  customerEmail?: string,
+  confirmedVoiceEmail?: string
 ): Promise<{
   serviceId: string;
   serviceName: string;
@@ -692,7 +694,7 @@ async function loadBookingCatalogContext(
   }
   if (customerEmail) {
     const persistedEmail = normalizeEmail(contact.email);
-    if (!persistedEmail || persistedEmail !== customerEmail) {
+    if (persistedEmail !== customerEmail && confirmedVoiceEmail !== customerEmail) {
       throw new Error(
         "A calendar invitation can only be sent to the validated email saved on this contact."
       );
@@ -792,14 +794,16 @@ async function calendarRangeIsBusy(
 export async function checkAvailability(
   businessId: string,
   date: string, // YYYY-MM-DD
-  timezone: string
+  timezone: string,
+  voiceAuthority?: VoiceBookingAuthority
 ): Promise<string[]> {
   const businessTimezone = requireBusinessTimeZone(
     timezone,
     "A valid IANA business timezone is required to check availability."
   );
   await assertBookingOperationallyAllowed(businessId);
-  await requireDirectBooking(businessId);
+  if (voiceAuthority) await validateVoiceBookingAccess(businessId, voiceAuthority);
+  else await requireDirectBooking(businessId);
   if (
     typeof date !== "string" ||
     date.length === 0 ||
@@ -949,14 +953,18 @@ export async function createBooking(
   businessId: string,
   params: BookingParams,
   timezone: string,
-  linkage: BookingLinkage
+  linkage: BookingLinkage,
+  voiceAuthority?: VoiceBookingAuthority
 ): Promise<BookingResult> {
   const businessTimezone = requireBusinessTimeZone(
     timezone,
     CREATE_BOOKING_TIMEZONE_ERROR
   );
   await assertBookingOperationallyAllowed(businessId);
-  await requireDirectBooking(businessId);
+  const voiceConfirmation = voiceAuthority
+    ? await validateVoiceBookingAccess(businessId, voiceAuthority, linkage.sourceMessageId)
+    : null;
+  if (!voiceAuthority) await requireDirectBooking(businessId);
   const normalizedParams = normalizeBookingParams(params, linkage);
   const startDate = parseBookingStartTime(
     normalizedParams.startTime,
@@ -1019,7 +1027,8 @@ export async function createBooking(
     normalizedParams.serviceName,
     linkage.contactId,
     localStart,
-    normalizedParams.customerEmail
+    normalizedParams.customerEmail,
+    voiceConfirmation?.email
   );
   assertWithinBusinessHours(
     startDate,

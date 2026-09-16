@@ -2111,8 +2111,8 @@ SET operation_claimed_at = clock_timestamp() - interval '6 minutes'
 WHERE source_message_id = '40000000-0000-4000-a063-000000000002';
 
 UPDATE public.businesses
-SET deleted_at = clock_timestamp(),
-    deletion_scheduled_for = clock_timestamp() + interval '60 days'
+SET deleted_at = statement_timestamp(),
+    deletion_scheduled_for = statement_timestamp() + interval '60 days'
 WHERE id = '10000000-0000-4000-a063-000000000001';
 
 SET LOCAL ROLE service_role;

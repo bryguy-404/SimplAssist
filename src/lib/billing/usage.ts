@@ -248,6 +248,7 @@ function smsFeatureForPurpose(purpose: OutboundSmsPurpose): FeatureKey {
       return "manual_sms";
     case "missed_call":
       return "missed_call_sms";
+    case "voice_followup":
     case "ai_reply":
     case "mms_fallback":
       return "ai_sms_conversations";

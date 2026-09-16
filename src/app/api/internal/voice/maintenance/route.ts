@@ -1,3 +1,4 @@
+import { recoverVoiceActions } from "@/lib/voice/actionRecovery.server";
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { pilotRoutingDependencies } from "@/lib/voice/routing.server";
@@ -20,6 +21,8 @@ export async function POST(request: NextRequest) {
     await maintainVoicePilot(deps.db, deps.telnyx, (id) =>
       drainFallback(deps, id),
     );
+    if (process.env.VOICE_ACTIONS_ROLLOUT === "true")
+      await recoverVoiceActions();
     return NextResponse.json(
       { ok: true },
       { headers: { "Cache-Control": "no-store" } },

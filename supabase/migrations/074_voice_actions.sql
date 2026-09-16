@@ -63,7 +63,9 @@ BEGIN
     IF ROW(NEW.action_business_id,NEW.action_conversation_id,NEW.demo_mode) IS DISTINCT FROM
        ROW(OLD.action_business_id,OLD.action_conversation_id,OLD.demo_mode) THEN
       -- Account deletion can clear links, but cannot retarget surviving calls.
-      IF NEW.action_business_id IS NOT NULL OR NEW.action_conversation_id IS NOT NULL THEN
+      IF (NEW.action_business_id IS DISTINCT FROM OLD.action_business_id AND NEW.action_business_id IS NOT NULL)
+        OR (NEW.action_conversation_id IS DISTINCT FROM OLD.action_conversation_id AND NEW.action_conversation_id IS NOT NULL)
+        OR NEW.demo_mode IS DISTINCT FROM OLD.demo_mode THEN
         RAISE EXCEPTION 'voice action route is immutable';
       END IF;
     END IF;
@@ -78,7 +80,7 @@ BEGIN
   IF tester.test_mode='booking_demo' THEN
     SELECT owner_id INTO owner FROM public.businesses WHERE id=NEW.business_id;
     IF cfg.demo_business_id IS NULL OR cfg.demo_calendar_id IS NULL OR NOT EXISTS
-      (SELECT 1 FROM public.businesses WHERE id=cfg.demo_business_id AND owner_id=owner AND deleted_at IS NULL
+      (SELECT 1 FROM public.businesses WHERE id=cfg.demo_business_id AND owner_id IS NOT NULL AND owner_id<>owner AND deleted_at IS NULL
        AND operations_suspended_at IS NULL AND ai_replies_paused_at IS NULL) THEN
       RAISE EXCEPTION 'booking demo is not ready';
     END IF;
@@ -104,7 +106,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
       AND s.phone_ended_at IS NULL AND sub.status IN ('active','trialing')
       AND owner_business.deleted_at IS NULL AND owner_business.operations_suspended_at IS NULL AND owner_business.ai_replies_paused_at IS NULL
       AND b.deleted_at IS NULL AND b.operations_suspended_at IS NULL AND b.ai_replies_paused_at IS NULL
-      AND (NOT s.demo_mode OR (b.id=p.demo_business_id AND b.owner_id=owner_business.owner_id))
+      AND (NOT s.demo_mode OR (b.id=p.demo_business_id AND b.owner_id IS NOT NULL AND b.owner_id<>owner_business.owner_id))
       AND CASE p_kind WHEN 'contact' THEN p.contacts_enabled
         WHEN 'booking' THEN p.booking_enabled AND p.contacts_enabled AND b.bookings_paused_at IS NULL
         WHEN 'booking_request' THEN p.booking_enabled AND p.contacts_enabled AND b.bookings_paused_at IS NULL
@@ -140,7 +142,7 @@ RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 DECLARE changed uuid;
 BEGIN
   UPDATE public.voice_actions a SET playback_event_id=p_event_id,playback_at=clock_timestamp(),playback_caller_end_ms=p_caller_end_ms
-    WHERE a.id=p_action_id AND a.session_id=p_session_id AND a.status='awaiting_confirmation' AND a.playback_at IS NULL
+    WHERE a.id=p_action_id AND a.session_id=p_session_id AND a.status='awaiting_confirmation'
       AND public.voice_action_allowed(p_session_id,a.kind)
       AND EXISTS (SELECT 1 FROM public.voice_transcript_fragments f WHERE f.session_id=p_session_id AND f.event_id=p_event_id
         AND f.role='assistant' AND f.received_at>=a.created_at)

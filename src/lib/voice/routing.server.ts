@@ -18,6 +18,23 @@ export function pilotRoutingDependencies(): PilotRoutingDependencies {
     streamSecret: process.env.VOICE_STREAM_SECRET || "",
     profile: process.env.VOICE_AUDIO_PROFILE === "pcmu8" ? "pcmu8" : "pcm16",
     workerReady: () => checkVoiceWorkerReady(workerUrl, token),
+    prepareWorker:
+      process.env.VOICE_ACTIONS_ROLLOUT === "true"
+        ? async (sessionId) => {
+            const url = new URL("/prepare", workerUrl);
+            if (url.protocol !== "https:" || token.length < 32)
+              throw new Error("voice_preparation_configuration");
+            await fetch(url, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ sessionId }),
+              signal: AbortSignal.timeout(1500),
+            });
+          }
+        : undefined,
     sendFallback: async (session) => {
       await sendMissedCallSMS(
         session.caller_phone,

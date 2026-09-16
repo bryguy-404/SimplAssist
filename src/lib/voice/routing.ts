@@ -15,6 +15,7 @@ export interface PilotRoutingDependencies {
   telnyx: Telnyx;
   sendFallback: (session: VoiceSession) => Promise<void>;
   workerReady: () => Promise<boolean>;
+  prepareWorker?: (sessionId: string) => Promise<void>;
   appUrl: string;
   workerUrl: string;
   streamSecret: string;
@@ -38,6 +39,8 @@ export async function checkVoiceWorkerReady(
     const body = await response.json();
     return (
       body.ready === true &&
+      (process.env.VOICE_ACTIONS_ROLLOUT !== "true" ||
+        body.actionProtocol === 1) &&
       body.model === "gpt-live-1" &&
       body.profile === (process.env.VOICE_AUDIO_PROFILE || "pcm16")
     );
@@ -245,6 +248,10 @@ export async function handlePilotEvent(
         },
         VOICE_PROVIDER_OPTIONS,
       );
+      // Request preparation after ringing is queued. The worker independently
+      // checks the default-off switch and prior tester disclosure.
+      if (deps.prepareWorker)
+        await deps.prepareWorker(session.id).catch(() => {});
     } else if (
       eventType === "call.playback.ended" &&
       state.voicePilotPhase === "ringing" &&
@@ -457,7 +464,7 @@ export async function drainFallback(
   if (!data.fallback_pending || data.fallback_completed_at) return;
   // Existing sendMissedCallSMS owns account access, consent/readiness, quota,
   // and delivery idempotency. Every recovery path uses this same call key.
-  await deps.sendFallback(data as VoiceSession);
+  if (!data.demo_mode) await deps.sendFallback(data as VoiceSession);
   const { error: saved } = await deps.db
     .from("voice_sessions")
     .update({

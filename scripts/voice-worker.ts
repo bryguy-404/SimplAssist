@@ -1,3 +1,5 @@
+import { VoicePreparations } from "../src/lib/voice/preparation";
+import { createVoiceActionClient } from "../src/lib/voice/actionClient";
 import { createServer } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
@@ -41,8 +43,22 @@ const telnyx = new Telnyx({
   maxRetries: 0,
   timeout: 5000,
 });
-const answer = createVoiceAnswerer(db, required("ANTHROPIC_API_KEY"));
+const actionClient =
+  process.env.VOICE_ACTIONS_ROLLOUT === "true"
+    ? createVoiceActionClient(appUrl.toString(), internalToken)
+    : undefined;
+const answer = createVoiceAnswerer(
+  db,
+  required("ANTHROPIC_API_KEY"),
+  actionClient,
+);
 const calls = new Set<LiveCall>();
+const preparations = new VoicePreparations(
+  db,
+  openaiKey,
+  profile,
+  Boolean(actionClient),
+);
 let draining = false;
 let readyAt = 0;
 let probing = false;
@@ -93,7 +109,10 @@ async function probe() {
         signal: AbortSignal.timeout(5000),
       }),
     ]);
-    if (error || !provider.ok) {
+    const schema = actionClient
+      ? await db.from("voice_actions").select("id").limit(1)
+      : { error: null };
+    if (error || schema.error || !provider.ok) {
       readyAt = 0;
       return;
     }
@@ -109,6 +128,43 @@ const server = createServer((req, res) => {
   const path = req.url?.split("?", 1)[0];
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("Content-Type", "application/json");
+  if (path === "/prepare" && req.method === "POST") {
+    if (
+      !authorized(req.headers.authorization) ||
+      draining ||
+      Date.now() - readyAt > 45000
+    ) {
+      res.writeHead(404).end();
+      return;
+    }
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 1000) req.destroy();
+    });
+    req.on("end", () => {
+      try {
+        const input = JSON.parse(body);
+        if (
+          typeof input.sessionId !== "string" ||
+          !/^[0-9a-f-]{36}$/i.test(input.sessionId)
+        )
+          throw new Error("invalid_id");
+        if (
+          !preparations.has(input.sessionId) &&
+          calls.size + preparations.size + pendingUpgrades >= 2
+        ) {
+          res.writeHead(503).end();
+          return;
+        }
+        void preparations.prepare(input.sessionId).catch(() => {});
+        res.writeHead(202).end(JSON.stringify({ accepted: true }));
+      } catch {
+        res.writeHead(400).end();
+      }
+    });
+    return;
+  }
   if (path !== "/health" && path !== "/ready") {
     res.writeHead(404).end();
     return;
@@ -127,6 +183,7 @@ const server = createServer((req, res) => {
       profile,
       model: VOICE_MODEL,
       activeCalls: calls.size,
+      actionProtocol: actionClient ? 1 : 0,
     }),
   );
 });
@@ -168,7 +225,7 @@ server.on("upgrade", (req, socket, head) => {
       const { data: business, error: businessError } = await db
         .from("businesses")
         .select("name")
-        .eq("id", session.business_id)
+        .eq("id", session.action_business_id || session.business_id)
         .single();
       if (
         businessError ||
@@ -177,15 +234,31 @@ server.on("upgrade", (req, socket, head) => {
         socket.destroyed
       )
         throw new Error("voice_business_identity_unavailable");
+      let prepared = preparations.take(session.id);
+      if (session.preparation_started_at && !prepared) {
+        for (let i = 0; i < 40 && !prepared && !socket.destroyed; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          prepared = preparations.take(session.id);
+        }
+        if (!prepared) throw new Error("prepared_session_unavailable");
+      }
       wss.handleUpgrade(req, socket, head, (phone) => {
         const call = new LiveCall({
           session,
+          prepared: prepared || undefined,
           businessName: business.name.trim(),
           phone,
           openaiKey,
           profile,
           store: createVoiceStore(db, session),
           answer,
+          actionsEnabled: Boolean(actionClient),
+          acknowledgeActionPlayback: actionClient
+            ? (actionId, eventId, callerEndMs) =>
+                actionClient
+                  .playback(session.id, actionId, eventId, callerEndMs)
+                  .then(() => undefined)
+            : undefined,
           stopConnectingRingback:
             openingRingback && session.prior_disclosure_acknowledged_at
               ? async () => {
@@ -235,11 +308,14 @@ async function shutdown() {
   clearInterval(probeTimer);
   clearInterval(maintenanceTimer);
   server.close();
+  preparations.closeAll();
   const deadline = setTimeout(() => process.exit(1), 25000);
   await Promise.allSettled(
     Array.from(calls).map((call) => call.close("worker_shutdown", true)),
   );
   wss.close();
+  if (preparations.size)
+    await new Promise((resolve) => setTimeout(resolve, 15000));
   clearTimeout(deadline);
   process.exit(0);
 }

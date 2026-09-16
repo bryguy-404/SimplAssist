@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type WebSocket from "ws";
-import { LiveCall } from "./liveSession";
+import { LiveCall, type LiveSessionOptions } from "./liveSession";
 import {
   AUDIO_PROFILES,
   AudioQueue,
@@ -48,6 +48,7 @@ const session = {
 function harness(
   profile: "pcm16" | "pcmu8" = "pcm16",
   connectingRingback = false,
+  overrides: Partial<LiveSessionOptions> = {},
 ) {
   const phone = new Socket();
   const live = new Socket();
@@ -81,6 +82,7 @@ function harness(
       : undefined,
     onStartupTiming,
     connectOpenAI: () => live.asWebSocket(),
+    ...overrides,
   });
   async function start(delayAudio = false, acknowledgeGreeting = true) {
     const p = AUDIO_PROFILES[profile];
@@ -152,6 +154,86 @@ function harness(
 describe("continuous phone bridge", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
+  it("adopts a prepared provider without starting another session", async () => {
+    const preparedSocket = new Socket();
+    const h = harness("pcm16", false, {
+      prepared: {
+        socket: preparedSocket.asWebSocket(),
+        startedEvent: JSON.stringify({
+          type: "session.started",
+          session: {
+            id: "prepared-id",
+            audio: { format: AUDIO_PROFILES.pcm16.format },
+          },
+        }),
+        startedAt: Date.now() - 11000,
+        seconds: 11,
+      },
+    });
+    await h.start();
+    expect(h.store.activate).toHaveBeenCalledWith("prepared-id");
+    expect(preparedSocket.sent.some((e) => e.type === "session.start")).toBe(
+      false,
+    );
+    expect(
+      preparedSocket.sent.filter(
+        (e) => e.type === "session.instructions.append",
+      ),
+    ).toHaveLength(1);
+    const done = h.call.close("caller_hangup", false);
+    preparedSocket.event({ type: "session.closed", usage: { seconds: 12 } });
+    await done;
+    expect(h.store.usage).toHaveBeenCalledWith(12, true);
+  });
+  it("does not treat a proposed action or generated text as caller playback", async () => {
+    const acknowledged = vi.fn().mockResolvedValue(undefined);
+    const h = harness("pcm16", false, {
+      actionsEnabled: true,
+      acknowledgeActionPlayback: acknowledged,
+    });
+    await h.start();
+    h.answer.mockResolvedValue({
+      text: "May I text the signup link?",
+      confirmationActionId: "action-id",
+    });
+    h.live.event({
+      type: "session.input_transcript.delta",
+      event_id: "request",
+      delta: "Send the signup link",
+      start_ms: 100,
+      end_ms: 400,
+    });
+    h.live.event({
+      type: "session.delegation.created",
+      offset_ms: 400,
+      delegation: { id: "delegate", target: "client" },
+    });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(acknowledged).not.toHaveBeenCalled();
+    h.live.event({
+      type: "session.output_transcript.delta",
+      event_id: "readback",
+      delta: "May I text the signup link?",
+      start_ms: 500,
+      end_ms: 900,
+    });
+    h.live.event({
+      type: "session.output_audio.delta",
+      delta: Buffer.alloc(640, 17).toString("base64"),
+    });
+    await vi.advanceTimersByTimeAsync(240);
+    const mark = h.phone.sent.find(
+      (e) =>
+        e.event === "mark" &&
+        String((e.mark as { name: string }).name).startsWith("action-"),
+    );
+    expect(mark).toBeDefined();
+    expect(acknowledged).not.toHaveBeenCalled();
+    h.phone.event({ event: "mark", mark: mark?.mark });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(acknowledged).toHaveBeenCalledWith("action-id", "readback", 400);
+    await h.finish();
+  });
   it("opens once in Marin with the assigned business name and a single natural question", async () => {
     const h = harness();
     await h.start();

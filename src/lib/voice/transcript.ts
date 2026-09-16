@@ -32,7 +32,7 @@ export class CallTranscript {
       )
       .map(
         (f) =>
-          `${f.role === "customer" ? "Caller" : "Spoken assistant"} [${f.startMs}-${f.endMs}ms]: ${f.text}`,
+          `${f.role === "customer" ? "Caller" : "Spoken assistant"} {event:${f.eventId}} [${f.startMs}-${f.endMs}ms]: ${f.text}`,
       )
       .join("\n")
       .slice(-24000);

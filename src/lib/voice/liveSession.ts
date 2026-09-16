@@ -1,3 +1,5 @@
+import type { PreparedLiveConnection } from "./preparation";
+import type { VoiceAnswer } from "./actions";
 import { randomUUID } from "node:crypto";
 import WebSocket from "ws";
 import {
@@ -26,7 +28,14 @@ export interface LiveSessionOptions {
     delegationId: string,
     transcript: string,
     signal: AbortSignal,
-  ) => Promise<string>;
+  ) => Promise<string | VoiceAnswer>;
+  prepared?: PreparedLiveConnection;
+  actionsEnabled?: boolean;
+  acknowledgeActionPlayback?: (
+    actionId: string,
+    eventId: string,
+    callerEndMs: number,
+  ) => Promise<void>;
   hangup: () => Promise<void>;
   onClosed: () => void;
   stopConnectingRingback?: () => Promise<void>;
@@ -68,6 +77,18 @@ export class LiveCall {
   private io: Promise<void> = Promise.resolve();
   private timers = new Set<ReturnType<typeof setTimeout>>();
   private heartbeatBusy = false;
+  private pendingAction: {
+    id: string;
+    after: number;
+    lastAssistantEvent: string | null;
+    callerEnd: number;
+    marked: boolean;
+  } | null = null;
+  private actionMarks = new Map<
+    string,
+    { id: string; eventId: string; callerEnd: number }
+  >();
+  private lastAudibleOutputAt = 0;
   private finishReason = "completed";
   private finishError: string | null = null;
   private fallback = false;
@@ -166,6 +187,23 @@ export class LiveCall {
         );
       } else if (event.event === "mark") {
         const name = event.mark?.name;
+        const actionMark = this.actionMarks.get(name);
+        if (actionMark) {
+          this.actionMarks.delete(name);
+          if (
+            !this.closing &&
+            this.pendingAction?.id === actionMark.id &&
+            this.transcript.latestCallerEndMs <= actionMark.callerEnd
+          ) {
+            this.persist(async () => {
+              await this.options.acknowledgeActionPlayback?.(
+                actionMark.id,
+                actionMark.eventId,
+                actionMark.callerEnd,
+              );
+            });
+          }
+        }
         if (
           typeof name === "string" &&
           this.pendingMarks.delete(name) &&
@@ -188,7 +226,9 @@ export class LiveCall {
   }
 
   private startOpenAI() {
+    const prepared = this.options.prepared;
     const ws =
+      prepared?.socket ??
       this.options.connectOpenAI?.() ??
       new WebSocket("wss://api.openai.com/v1/live/sessions", {
         headers: { Authorization: `Bearer ${this.options.openaiKey}` },
@@ -196,6 +236,10 @@ export class LiveCall {
         maxPayload: 512_000,
       });
     this.openai = ws;
+    if (prepared) {
+      this.openedAt = prepared.startedAt;
+      this.latestUsage = prepared.seconds;
+    }
     ws.on("open", () => {
       if (this.closing) {
         ws.close();
@@ -210,6 +254,7 @@ export class LiveCall {
           instructions: buildLiveInstructions(
             this.options.businessName,
             Boolean(this.options.session.prior_disclosure_acknowledged_at),
+            Boolean(this.options.actionsEnabled),
           ),
           audio: {
             format: AUDIO_PROFILES[this.options.profile].format,
@@ -226,6 +271,7 @@ export class LiveCall {
       if (!this.closing) void this.close("openai_disconnected", true);
       else void this.finish();
     });
+    if (prepared) this.liveEvent(prepared.startedEvent);
   }
 
   private liveEvent(raw: string) {
@@ -293,8 +339,12 @@ export class LiveCall {
           }
           break;
         case "session.output_audio.delta":
-          if (!this.closing)
-            this.output.append(decodeAudio(event.delta, this.options.profile));
+          if (!this.closing) {
+            const bytes = decodeAudio(event.delta, this.options.profile);
+            if (hasAudibleAudio(bytes, this.options.profile))
+              this.lastAudibleOutputAt = Date.now();
+            this.output.append(bytes);
+          }
           break;
         case "session.input_transcript.delta":
         case "session.output_transcript.delta": {
@@ -314,6 +364,14 @@ export class LiveCall {
               this.idleWarningSent = false;
             }
             this.persist(() => this.options.store.fragment(fragment));
+            if (
+              fragment.role === "assistant" &&
+              this.pendingAction &&
+              Date.now() >= this.pendingAction.after
+            ) {
+              this.pendingAction.lastAssistantEvent = fragment.eventId;
+              this.pendingAction.marked = false;
+            }
           }
           break;
         }
@@ -391,25 +449,45 @@ export class LiveCall {
         return;
       }
       let settled = false;
-      this.later(() => {
-        if (
-          !settled &&
-          !abort.signal.aborted &&
-          generation === this.delegationGeneration
-        ) {
-          abort.abort();
-          void this.close("backend_timeout", true);
-        }
-      }, 9000);
-      void this.options
-        .answer(
-          this.options.session,
-          id,
-          this.transcript.snapshot(),
-          abort.signal,
+      if (this.options.actionsEnabled)
+        this.later(() => {
+          if (
+            !settled &&
+            !abort.signal.aborted &&
+            generation === this.delegationGeneration
+          )
+            this.sendLive({
+              type: "session.commentary.append",
+              delegation_id: id,
+              content:
+                "The backend is still checking. Briefly tell the caller you are checking; do not claim success or repeat the operation.",
+            });
+        }, 3000);
+      this.later(
+        () => {
+          if (
+            !settled &&
+            !abort.signal.aborted &&
+            generation === this.delegationGeneration
+          ) {
+            abort.abort();
+            void this.close("backend_timeout", true);
+          }
+        },
+        this.options.actionsEnabled ? 35000 : 9000,
+      );
+      void this.io
+        .then(() =>
+          this.options.answer(
+            this.options.session,
+            id,
+            this.transcript.snapshot(),
+            abort.signal,
+          ),
         )
-        .then((answer) => {
+        .then((result) => {
           settled = true;
+          const answer = typeof result === "string" ? result : result.text;
           if (
             this.closing ||
             abort.signal.aborted ||
@@ -425,6 +503,14 @@ export class LiveCall {
             });
             return;
           }
+          if (typeof result !== "string" && result.confirmationActionId)
+            this.pendingAction = {
+              id: result.confirmationActionId,
+              after: Date.now(),
+              lastAssistantEvent: null,
+              callerEnd: this.transcript.latestCallerEndMs,
+              marked: false,
+            };
           this.sendLive({
             type: "session.commentary.append",
             delegation_id: id,
@@ -471,6 +557,25 @@ export class LiveCall {
               throw new Error("playback_stalled");
             this.sendPhone({ event: "mark", mark: { name } });
           }
+        }
+        if (
+          this.pendingAction &&
+          !this.pendingAction.marked &&
+          this.pendingAction.lastAssistantEvent &&
+          this.transcript.latestCallerEndMs <= this.pendingAction.callerEnd &&
+          this.output.pendingMs === 0 &&
+          Date.now() - this.lastAudibleOutputAt > 200
+        ) {
+          const name = `action-${randomUUID()}`;
+          this.pendingAction.marked = true;
+          this.actionMarks.set(name, {
+            id: this.pendingAction.id,
+            eventId: this.pendingAction.lastAssistantEvent,
+            callerEnd: this.pendingAction.callerEnd,
+          });
+          if (this.actionMarks.size > 20)
+            throw new Error("action_playback_stalled");
+          this.sendPhone({ event: "mark", mark: { name } });
         }
         const elapsed = (Date.now() - this.openedAt) / 1000;
         const limit = this.options.session.reserved_seconds;

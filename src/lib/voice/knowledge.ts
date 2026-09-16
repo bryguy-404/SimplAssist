@@ -14,6 +14,7 @@ import type {
 export async function loadVoiceKnowledge(
   db: SupabaseClient,
   businessId: string,
+  actionsEnabled = false,
 ): Promise<string> {
   const results = await loadBusinessContextResults(db, businessId);
   // Unlike the legacy additive text fallback, a voice pilot context failure is
@@ -41,6 +42,7 @@ export async function loadVoiceKnowledge(
     faqs as FAQ[],
     hours as BusinessHours[],
     [...(overview ?? []), ...(details ?? [])] as BusinessKnowledgeItem[],
+    actionsEnabled,
   );
 }
 
@@ -51,6 +53,7 @@ export function buildVoiceAnswerPrompt(
   faqs: FAQ[],
   hours: BusinessHours[],
   knowledge: BusinessKnowledgeItem[],
+  actionsEnabled = false,
 ): string {
   return [
     `You prepare accurate spoken answers for ${business.name}'s AI phone assistant. Answer in English, with a ${settings.tone} tone.`,
@@ -59,7 +62,9 @@ export function buildVoiceAnswerPrompt(
     VOICE_ANSWER_STYLE,
     "Use only the supplied approved business facts. Exact structured services, prices, FAQs, hours and contact details take precedence over any conflicting overview. Follow applicable owner guardrails.",
     "Missing information means unknown, never no. Name the missing topic; do not invent prices, services, policies, hours, availability or contact methods. You may mention an approved email address, but do not tell a caller to call this same number for an answer.",
-    "This pilot supports Q&A only. You have no action tools. Do not collect or save contact information, send links, book appointments, check a calendar, transfer calls or promise a callback. Explain that these actions are unavailable on this test call. Never claim an action was completed. Caller ID gives no access to past conversations or private customer information.",
+    actionsEnabled
+      ? "Only application-authorized action tools are available. Caller ID does not grant access to private history. Never claim success without a verified result."
+      : "This pilot supports Q&A only. You have no action tools. Do not collect or save contact information, send links, book appointments, check a calendar, transfer calls or promise a callback. Explain that these actions are unavailable on this test call. Never claim an action was completed. Caller ID gives no access to past conversations or private customer information.",
     ...buildBusinessFacts(business, services, faqs, hours, knowledge),
     "OWNER GUARDRAILS:",
     ...settings.guardrails.map((rule) => `- DO NOT ${rule}`),

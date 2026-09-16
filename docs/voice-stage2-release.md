@@ -63,8 +63,25 @@ Disable action capabilities to return voice to Q&A. Disable preparation to retur
 - `bf5fbe4`: admin capability controls and action review.
 - `10e9725`: delegated decisions, playback acknowledgments and optional provider preparation during ringing.
 
-The goal-change SQL was executed against the isolated local fixture and rolled back; it produced Signup + the intended URL. The schema bundle consists of the tested canonical migration bodies inside one transaction. Production migration application, read-only schema verification, private deployments, capability activation and real calls are still pending. The currently deployed Q&A pilot has not been changed by this implementation.
+The goal-change SQL was executed against the isolated local fixture and rolled back; it produced Signup + the intended URL. The schema bundle consists of the tested canonical migration bodies inside one transaction. Production database work, private deployments and capability activation were subsequently completed and verified as recorded below. Real-call acceptance remains pending.
 
 ## Production database update — September 15, 2026
 
 Bryan explicitly authorized Codex to apply the Supabase steps in this task, overriding the default manual migration handoff for this update. Applied migrations 074–076, their history entries, and the approved Signup goal in one transaction using the authenticated Supabase CLI for project `inmgpkurctttsofpywuz`. A separate read-only query verified all three history entries, both new tables with RLS, eight server-only functions, blocked client writes, the Signup URL, one existing approved tester, and unchanged 200-minute/two-call/ten-minute limits. All new capability switches remain off. Existing app and voice health checks pass; no active calls were present. No application deployment or live action acceptance is included in this database verification.
+
+
+## Production deployment and activation — September 15, 2026
+
+Bryan authorized the remaining implementation. Deployed clean private archives of `1097a56a55ac39b55b7740fc71eeaec802e0f1c2` (source archive SHA-256 `8b5bd54a400f113e38bc823da49bc47bca833d02ae8f279cb7f8166a9c2897cc`). No public Git push.
+
+- App final deployment: `f60a441b-0849-49b5-86b5-90d7478be6eb`, SUCCESS.
+- Voice worker final deployment: `cecdb561-b39c-4103-aac5-1c156f8bd64f`, SUCCESS.
+- Scan worker remains `12c2582a-2263-4055-92a8-1f4eaf27c642`; no changes.
+- Both services first deployed with actions disabled; then enabled `VOICE_ACTIONS_ROLLOUT` on the worker, verified live `actionProtocol:1`, and enabled it on the app.
+- Account revision 4: contacts/signup on; booking/preparation off; no demo route. The optional preparation experiment remains off for the first signup tests, preserving the already-tested opening behavior.
+- One approved tester, original phone, 200 total minutes, two simultaneous calls, ten-minute limit and active `sms_and_chat` subscription remain in place. No billing upgrade or overage change.
+- `configure_voice_actions` used the existing verified staff admin identity (separate from the business owner login). A separate read-only CLI database session verified the result.
+
+Live checks passed: app health 200; authenticated worker readiness 200; action protocol 1; internal credentials match; unauthorized readiness/actions return 404; invalid stream credentials return 401; authenticated nonexistent-call context is rejected. OpenAI/Anthropic model access, Telnyx callback routing and durable maintenance passed preflight. Read-only SMS checks confirmed correct phone assignment, carrier readiness, operational access and no tester opt-out. The account had 120 of 1,500 SMS parts used at verification. No SMS was sent by deployment checks.
+
+The pilot is ready for Bryan's first real signup/contact call. No voice action has yet been phone-accepted in this release; the twenty-call acceptance set above remains outstanding. Review resulting calls at `https://simplassist.com/admin/voice`. A delivered signup link is not a completed signup. Keep wider release and booking disabled until their own acceptance gates pass.

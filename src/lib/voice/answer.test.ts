@@ -3,6 +3,7 @@ import { APIConnectionTimeoutError } from "@anthropic-ai/sdk/core/error";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { VoiceSession } from "./types";
 import { CallTranscript } from "./transcript";
+import type { ActionContext, VoiceAction } from "./actions";
 const m = vi.hoisted(() => ({ create: vi.fn(), knowledge: vi.fn() }));
 vi.mock("@anthropic-ai/sdk", () => ({
   default: class {
@@ -169,6 +170,127 @@ describe("delegated voice decisions", () => {
       timeout: 12000,
     });
   });
+  it("attaches the whole captured confirmation without model-copied segment references", async () => {
+    const f = fixture();
+    const actionId = "00000000-0000-4000-8000-000000000001";
+    const t = new CallTranscript();
+    t.add({
+      eventId: "details",
+      role: "customer",
+      text: "Test Caller",
+      startMs: 0,
+      endMs: 100,
+    });
+    t.add({
+      eventId: "readback",
+      role: "assistant",
+      text: "May I save Test Caller, phone +15555550101?",
+      startMs: 200,
+      endMs: 1000,
+    });
+    t.add({
+      eventId: "yes",
+      role: "customer",
+      text: "Yes",
+      startMs: 1500,
+      endMs: 1700,
+    });
+    t.add({
+      eventId: "rest",
+      role: "customer",
+      text: ", that's fine.",
+      startMs: 1700,
+      endMs: 2000,
+    });
+    t.add({
+      eventId: "breath",
+      role: "customer",
+      text: "[breathing]",
+      startMs: 2200,
+      endMs: 2300,
+    });
+    f.actions.context.mockResolvedValue({
+      capabilities: { contacts: true, signup: true, booking: false },
+      actions: [
+        {
+          id: actionId,
+          kind: "contact",
+          status: "awaiting_confirmation",
+          playback_event_id: "readback",
+          playback_at: "2026-09-16T00:00:00Z",
+          playback_caller_end_ms: 100,
+        } as VoiceAction,
+      ],
+    } as ActionContext);
+    const response = await m.create();
+    response.content[0].input.decision = { intent: "confirm", actionId };
+    m.create.mockClear().mockResolvedValue(response);
+    await f.answer(session, "d", t.capture(), new AbortController().signal);
+    expect(f.actions.decision).toHaveBeenCalledExactlyOnceWith(
+      session.id,
+      {
+        intent: "confirm",
+        actionId,
+        readbackEventIds: ["readback"],
+        confirmationEventIds: ["yes", "rest", "breath"],
+      },
+      expect.any(AbortSignal),
+    );
+    expect(m.create).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(m.create.mock.calls[0][0].tools)).not.toContain(
+      "confirmationSegments",
+    );
+  });
+  it.each([
+    ["missing_action", "action_missing"],
+    ["missing_playback", "playback_not_acknowledged"],
+    ["missing_visible_playback", "playback_not_visible"],
+  ])(
+    "diagnoses %s without logging evidence contents or executing",
+    async (mode, evidenceReason) => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const f = fixture();
+      const actionId = "00000000-0000-4000-8000-000000000001";
+      f.actions.context.mockResolvedValue({
+        capabilities: { contacts: true, signup: true, booking: false },
+        actions:
+          mode === "missing_action"
+            ? []
+            : [
+                {
+                  id: actionId,
+                  kind: "contact",
+                  status: "awaiting_confirmation",
+                  playback_event_id:
+                    mode === "missing_playback" ? null : "missing-marker",
+                  playback_at: "2026-09-16T00:00:00Z",
+                  playback_caller_end_ms: 0,
+                } as VoiceAction,
+              ],
+      } as ActionContext);
+      const response = await m.create();
+      response.content[0].input.decision = { intent: "confirm", actionId };
+      m.create.mockResolvedValue(response);
+      await expect(
+        f.answer(
+          session,
+          "d",
+          snapshot("private reply"),
+          new AbortController().signal,
+        ),
+      ).rejects.toThrow("invalid_transcript_evidence");
+      expect(f.actions.decision).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith("[voice-answer] request_failed", {
+        sessionId: session.id,
+        delegationId: "d",
+        stage: "decision_validation",
+        category: "invalid_transcript_evidence",
+        evidenceReason,
+      });
+      expect(JSON.stringify(warn.mock.calls)).not.toContain("private reply");
+      expect(JSON.stringify(warn.mock.calls)).not.toContain("missing-marker");
+    },
+  );
   it("does not execute truncated model output even if part of it parses", async () => {
     const f = fixture();
     const response = await m.create();
@@ -206,7 +328,6 @@ describe("delegated voice decisions", () => {
             decision: {
               intent: "confirm",
               actionId: "invented",
-              confirmationSegments: [1],
             },
           },
         },

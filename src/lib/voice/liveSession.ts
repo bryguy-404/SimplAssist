@@ -193,11 +193,26 @@ export class LiveCall {
         const actionMark = this.actionMarks.get(name);
         if (actionMark) {
           this.actionMarks.delete(name);
-          if (
-            !this.closing &&
-            this.pendingAction?.id === actionMark.id &&
-            this.transcript.latestCallerEndMs <= actionMark.callerEnd
-          ) {
+          const latestCallerEndMs = this.transcript.latestCallerEndMs;
+          const reason = this.closing
+            ? "closing"
+            : this.pendingAction?.id !== actionMark.id
+              ? "stale_action"
+              : latestCallerEndMs > actionMark.callerEnd
+                ? "caller_advanced"
+                : "playback_acknowledged";
+          // Record the transport gate's outcome, without speech, contact data,
+          // provider event IDs, or implying the queued write has succeeded.
+          console.info("[voice-playback] action_mark_received", {
+            sessionId: this.options.session.id,
+            actionId: actionMark.id,
+            outcome:
+              reason === "playback_acknowledged" ? "accepted" : "rejected",
+            reason,
+            callerEndMs: actionMark.callerEnd,
+            latestCallerEndMs,
+          });
+          if (reason === "playback_acknowledged") {
             this.persist(async () => {
               await this.options.acknowledgeActionPlayback?.(
                 actionMark.id,

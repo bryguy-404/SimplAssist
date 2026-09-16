@@ -68,7 +68,7 @@ describe("compact model decision evidence adapter", () => {
     });
     expect(transcript.text).not.toContain("provider_long_unique_identifier");
   });
-  it("derives only the selected pending action's current playback anchor and preserves all assent fragments", () => {
+  it("derives the selected pending action's current playback anchor and complete assent without model evidence references", () => {
     const ctx = { ...context, actions: [action] };
     const fragments = [
       fragment("older_request", "customer", "Test Caller", 0),
@@ -85,7 +85,7 @@ describe("compact model decision evidence adapter", () => {
     const transcript = buildModelTranscript(fragments, ctx);
     expect(
       resolveModelDecision(
-        { intent: "confirm", actionId: id, confirmationSegments: [3] },
+        { intent: "confirm", actionId: id },
         ctx,
         transcript,
       ),
@@ -118,7 +118,7 @@ describe("compact model decision evidence adapter", () => {
       );
       expect(() =>
         resolveModelDecision(
-          { intent: "confirm", actionId: id, confirmationSegments: [2] },
+          { intent: "confirm", actionId: id },
           ctx,
           transcript,
         ),
@@ -134,7 +134,7 @@ describe("compact model decision evidence adapter", () => {
     for (const actionId of [id, "00000000-0000-4000-8000-000000000002"]) {
       expect(() =>
         resolveModelDecision(
-          { intent: "confirm", actionId, confirmationSegments: [1] },
+          { intent: "confirm", actionId },
           ctx,
           transcript,
         ),
@@ -166,7 +166,7 @@ describe("compact model decision evidence adapter", () => {
     ).toEqual({ intent: "readback", actionId: id });
     expect(() =>
       resolveModelDecision(
-        { intent: "confirm", actionId: id, confirmationSegments: [1] },
+        { intent: "confirm", actionId: id },
         ctx,
         transcript,
       ),
@@ -196,7 +196,6 @@ describe("compact model decision evidence adapter", () => {
         {
           intent: "confirm",
           actionId: id,
-          confirmationSegments: [1],
           readbackEventIds: ["fake"],
         },
         context,
@@ -229,10 +228,87 @@ describe("compact model decision evidence adapter", () => {
     // retains the full response; it does not itself classify natural language.
     expect(
       resolveModelDecision(
-        { intent: "confirm", actionId: id, confirmationSegments: [2] },
+        { intent: "confirm", actionId: id },
         ctx,
         transcript,
       ),
     ).toMatchObject({ confirmationEventIds: ["yes", "correction"] });
+  });
+
+  it("includes the entire reply across separate caller segments without model-selected references", () => {
+    const ctx = { ...context, actions: [action] };
+    const transcript = buildModelTranscript(
+      [
+        fragment("old-consent", "customer", "Yes, text me", 0),
+        fragment(action.playback_event_id!, "assistant", action.readback, 1000, 2000),
+        fragment("yes", "customer", "Yes, that's fine", 2100),
+        fragment("nonverbal", "customer", " [breathing]", 4000),
+        fragment("correction", "customer", ", but my email is different.", 6000),
+      ],
+      ctx,
+    );
+    // Permission semantics remain the model's responsibility; the evidence
+    // adapter cannot silently omit a qualifier because it is in another group.
+    expect(
+      resolveModelDecision({ intent: "confirm", actionId: id }, ctx, transcript),
+    ).toMatchObject({ confirmationEventIds: ["yes", "nonverbal", "correction"] });
+  });
+
+  it("rejects copied evidence fields instead of allowing them to narrow confirmation", () => {
+    const ctx = { ...context, actions: [action] };
+    const transcript = buildModelTranscript(
+      [
+        fragment(action.playback_event_id!, "assistant", action.readback, 1000),
+        fragment("yes", "customer", "Yes", 2100),
+      ],
+      ctx,
+    );
+    for (const override of [
+      { confirmationSegments: [2] },
+      { confirmationEventIds: ["yes"] },
+      { readbackEventIds: [action.playback_event_id] },
+    ]) {
+      expect(() =>
+        resolveModelDecision(
+          { intent: "confirm", actionId: id, ...override },
+          ctx,
+          transcript,
+        ),
+      ).toThrow();
+    }
+  });
+
+  it("requires fresh caller evidence after the current readback cutoff", () => {
+    const ctx = { ...context, actions: [action] };
+    const transcript = buildModelTranscript(
+      [
+        fragment("old-yes", "customer", "Yes", 0),
+        fragment(action.playback_event_id!, "assistant", action.readback, 1000),
+      ],
+      ctx,
+    );
+    expect(() =>
+      resolveModelDecision({ intent: "confirm", actionId: id }, ctx, transcript),
+    ).toThrow("invalid_transcript_evidence");
+  });
+
+  it("rejects a truncated current reply even when its playback anchor and final yes remain visible", () => {
+    const ctx = {
+      ...context,
+      actions: [{ ...action, playback_caller_end_ms: 0 }],
+    };
+    const transcript = buildModelTranscript(
+      [
+        fragment("hidden-condition", "customer", "Only if " + "x".repeat(14990), 0),
+        fragment(action.playback_event_id!, "assistant", action.readback, 1000),
+        fragment("visible-yes", "customer", "Yes " + "x".repeat(14990), 2100),
+      ],
+      ctx,
+    );
+    expect(transcript.playbackSegment(action.playback_event_id!)).toBeDefined();
+    expect(transcript.text).not.toContain("Only if");
+    expect(() =>
+      resolveModelDecision({ intent: "confirm", actionId: id }, ctx, transcript),
+    ).toThrow("invalid_transcript_evidence");
   });
 });

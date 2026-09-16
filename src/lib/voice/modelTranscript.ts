@@ -1,5 +1,6 @@
 import type { ActionContext } from "./actions";
 import type { TranscriptFragment } from "./types";
+import { VoiceEvidenceError } from "./evidenceError";
 
 const MAX_CONTEXT_CHARS = 24000;
 const MAX_SEGMENT_FRAGMENTS = 20;
@@ -28,6 +29,10 @@ export function buildModelTranscript(
   text: string;
   resolveCallerSegments: (refs: number[]) => string[];
   playbackSegment: (eventId: string) => number | undefined;
+  currentCallerResponse: (cutoff: number) => {
+    segments: number[];
+    eventIds: string[];
+  };
 } {
   // Capture primitives now; later provider events or caller mutation cannot
   // change the evidence represented by this particular model request.
@@ -116,28 +121,59 @@ export function buildModelTranscript(
         : [],
     ),
   );
+  const callerSegments = new Map(
+    retained.flatMap((segment) =>
+      segment.role === "customer"
+        ? segment.fragments.map(
+            (fragment) => [fragment.eventId, segment.number] as const,
+          )
+        : [],
+    ),
+  );
 
   return {
     text: lines.join("\n"),
     resolveCallerSegments(refs) {
-      const invalid = () => new Error("invalid_transcript_evidence");
       if (
         !Array.isArray(refs) ||
         refs.length === 0 ||
         new Set(refs).size !== refs.length ||
         refs.some((ref) => !Number.isInteger(ref) || ref < 1)
       )
-        throw invalid();
+        throw new VoiceEvidenceError("invalid_segment_list");
       const ids: string[] = [];
       for (const ref of [...refs].sort((a, b) => a - b)) {
         const segment = byNumber.get(ref);
-        if (!segment || segment.role !== "customer") throw invalid();
+        if (!segment) throw new VoiceEvidenceError("segment_not_visible");
+        if (segment.role !== "customer")
+          throw new VoiceEvidenceError("segment_not_caller");
         ids.push(...segment.fragments.map((fragment) => fragment.eventId));
-        if (ids.length > 100) throw invalid();
+        if (ids.length > 100) throw new VoiceEvidenceError("evidence_limit");
       }
-      if (new Set(ids).size !== ids.length) throw invalid();
+      if (new Set(ids).size !== ids.length)
+        throw new VoiceEvidenceError("duplicate_event");
       return ids;
     },
     playbackSegment: (eventId) => assistantSegments.get(eventId),
+    currentCallerResponse(cutoff) {
+      if (!Number.isSafeInteger(cutoff) || cutoff < 0)
+        throw new VoiceEvidenceError("invalid_playback_cutoff");
+      // Use only the immutable speech the model actually saw. Never fill gaps
+      // from a later database read: that could add an unseen correction to an
+      // earlier model decision. The server still checks receipt time and exact
+      // coverage under its call lock before allowing any action.
+      const reply = captured.filter(
+        (f) => f.role === "customer" && f.startMs >= cutoff,
+      );
+      if (!reply.length) throw new VoiceEvidenceError("reply_missing");
+      if (reply.length > 100) throw new VoiceEvidenceError("evidence_limit");
+      const eventIds = reply.map((f) => f.eventId);
+      if (new Set(eventIds).size !== eventIds.length)
+        throw new VoiceEvidenceError("duplicate_event");
+      const refs = eventIds.map((id) => callerSegments.get(id));
+      if (refs.some((ref) => ref === undefined))
+        throw new VoiceEvidenceError("reply_not_visible");
+      return { eventIds, segments: Array.from(new Set(refs as number[])) };
+    },
   };
 }

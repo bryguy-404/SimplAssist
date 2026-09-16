@@ -241,4 +241,112 @@ describe("compact model transcript evidence", () => {
     expect(result.resolveCallerSegments([1])).toEqual(["original"]);
     expect(result.text).toContain('"Yes"');
   });
+
+  it("captures the full current reply across presentation groups, including fillers and corrections", () => {
+    const fragments = [
+      fragment("earlier", "Earlier permission", 0),
+      fragment("readback", "May I save those details?", 100, "assistant"),
+      fragment("yes", "Yes", 200),
+      fragment("filler", " [breathing]", 2000),
+      fragment("correction", ", but use my other email.", 4000),
+    ];
+    const result = buildModelTranscript(
+      fragments,
+      context([{ playback_caller_end_ms: 200, playback_event_id: "readback" }]),
+    );
+    expect(result.currentCallerResponse(200)).toEqual({
+      segments: [3, 4, 5],
+      eventIds: ["yes", "filler", "correction"],
+    });
+    expect(result.currentCallerResponse(4000)).toEqual({
+      segments: [5],
+      eventIds: ["correction"],
+    });
+  });
+
+  it("includes all fragments when a reply exceeds the presentation group's fragment limit", () => {
+    const fragments = Array.from({ length: 45 }, (_, index) =>
+      fragment(`reply-${index}`, index === 0 ? "Yes" : " please", index * 100),
+    );
+    const result = buildModelTranscript(fragments, context());
+    expect(result.currentCallerResponse(0)).toEqual({
+      segments: [1, 2, 3],
+      eventIds: fragments.map((f) => f.eventId),
+    });
+  });
+
+  it("rejects a current reply when any of its fragments was omitted from the model context", () => {
+    const result = buildModelTranscript(
+      [
+        fragment("condition", "Only if " + "x".repeat(14990), 0),
+        fragment("yes", "yes " + "x".repeat(14990), 2000),
+      ],
+      context(),
+    );
+    expect(result.text).not.toContain("Only if");
+    expect(result.text).toContain("yes ");
+    expect(() => result.currentCallerResponse(0)).toThrow(
+      "invalid_transcript_evidence",
+    );
+    expect(result.currentCallerResponse(2000)).toEqual({
+      segments: [2],
+      eventIds: ["yes"],
+    });
+  });
+
+  it("rejects empty replies and does not reuse assent before a new playback cutoff", () => {
+    const result = buildModelTranscript(
+      [
+        fragment("old-yes", "Yes", 0),
+        fragment("new-readback", "May I also text you?", 200, "assistant"),
+      ],
+      context(),
+    );
+    expect(() => result.currentCallerResponse(100)).toThrow(
+      "invalid_transcript_evidence",
+    );
+    expect(() => buildModelTranscript([], context()).currentCallerResponse(0)).toThrow(
+      "invalid_transcript_evidence",
+    );
+  });
+
+  it("rejects invalid cutoffs, duplicate evidence IDs, and replies over the evidence limit", () => {
+    const result = buildModelTranscript([fragment("yes", "Yes", 0)], context());
+    for (const cutoff of [-1, 0.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => result.currentCallerResponse(cutoff)).toThrow(
+        "invalid_transcript_evidence",
+      );
+    }
+    const duplicate = buildModelTranscript(
+      [fragment("same", "Yes", 0), fragment("same", " please", 100)],
+      context(),
+    );
+    expect(() => duplicate.currentCallerResponse(0)).toThrow(
+      "invalid_transcript_evidence",
+    );
+    const overflow = buildModelTranscript(
+      Array.from({ length: 101 }, (_, index) =>
+        fragment(`event-${index}`, " yes", index * 100),
+      ),
+      context(),
+    );
+    expect(() => overflow.currentCallerResponse(0)).toThrow(
+      "invalid_transcript_evidence",
+    );
+  });
+
+  it("derives confirmation evidence only from its immutable snapshot and returns fresh arrays", () => {
+    const fragments = [fragment("original", "Yes", 0)];
+    const result = buildModelTranscript(fragments, context());
+    fragments[0].eventId = "changed";
+    fragments[0].text = "No";
+    fragments.push(fragment("late-correction", "Wait", 100));
+    const reply = result.currentCallerResponse(0);
+    reply.eventIds[0] = "changed-again";
+    reply.segments[0] = 999;
+    expect(result.currentCallerResponse(0)).toEqual({
+      segments: [1],
+      eventIds: ["original"],
+    });
+  });
 });

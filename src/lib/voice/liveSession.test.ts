@@ -282,6 +282,112 @@ describe("continuous phone bridge", () => {
     );
     await h.finish();
   });
+  it.each([
+    ["accepted", "playback_acknowledged", 400],
+    ["caller_advanced", "caller_advanced", 1200],
+    ["stale", "stale_action", 400],
+    ["closing", "closing", 400],
+  ] as const)(
+    "logs only safe playback diagnostics when an action mark is %s",
+    async (scenario, reason, latestCallerEndMs) => {
+      const acknowledged = vi.fn().mockResolvedValue(undefined);
+      const h = harness("pcm16", false, {
+        actionsEnabled: true,
+        acknowledgeActionPlayback: acknowledged,
+      });
+      await h.start();
+      h.answer.mockResolvedValue({
+        text: "May I save the caller's private contact details?",
+        confirmationActionId: "action-id",
+      });
+      h.live.event({
+        type: "session.input_transcript.delta",
+        event_id: "private-request-event",
+        delta: "My private email is person@example.com",
+        start_ms: 100,
+        end_ms: 400,
+      });
+      h.live.event({
+        type: "session.delegation.created",
+        offset_ms: 400,
+        delegation: { id: "delegate", target: "client" },
+      });
+      await vi.advanceTimersByTimeAsync(300);
+      h.live.event({
+        type: "session.output_transcript.delta",
+        event_id: "private-readback-event",
+        delta: "May I save person@example.com?",
+        start_ms: 500,
+        end_ms: 900,
+      });
+      h.live.event({
+        type: "session.output_audio.delta",
+        delta: Buffer.alloc(640, 17).toString("base64"),
+      });
+      await vi.advanceTimersByTimeAsync(240);
+      const mark = h.phone.sent.find(
+        (event) =>
+          event.event === "mark" &&
+          String((event.mark as { name: string }).name).startsWith("action-"),
+      );
+      expect(mark).toBeDefined();
+
+      if (scenario === "caller_advanced") {
+        // The caller's assent arrives before the phone's delayed playback ack.
+        // Keep the existing rejection, even though the readback was generated.
+        h.live.event({
+          type: "session.input_transcript.delta",
+          event_id: "private-confirmation-event",
+          delta: "Yes, save person@example.com",
+          start_ms: 1000,
+          end_ms: 1200,
+        });
+      } else if (scenario === "stale") {
+        h.answer.mockResolvedValue({
+          text: "May I confirm the replacement action?",
+          confirmationActionId: "replacement-action",
+        });
+        h.live.event({
+          type: "session.delegation.created",
+          offset_ms: 400,
+          delegation: { id: "replacement-delegate", target: "client" },
+        });
+        await vi.advanceTimersByTimeAsync(300);
+      } else if (scenario === "closing") {
+        void h.call.close("caller_hangup", false);
+      }
+
+      h.phone.event({ event: "mark", mark: mark?.mark });
+      await vi.advanceTimersByTimeAsync(1);
+      h.phone.event({ event: "mark", mark: mark?.mark });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(acknowledged).toHaveBeenCalledTimes(scenario === "accepted" ? 1 : 0);
+      if (scenario === "accepted")
+        expect(acknowledged).toHaveBeenCalledWith(
+          "action-id",
+          "private-readback-event",
+          400,
+        );
+      const diagnostics = vi.mocked(console.info).mock.calls.filter(
+        ([message]) => message === "[voice-playback] action_mark_received",
+      );
+      // Exact keys also ensure no transcript, contact data, or provider IDs leak.
+      expect(diagnostics).toEqual([
+        [
+          "[voice-playback] action_mark_received",
+          {
+            sessionId: session.id,
+            actionId: "action-id",
+            outcome: scenario === "accepted" ? "accepted" : "rejected",
+            reason,
+            callerEndMs: 400,
+            latestCallerEndMs,
+          },
+        ],
+      ]);
+      await h.finish();
+    },
+  );
   it("opens once in Marin with the assigned business name and a single natural question", async () => {
     const h = harness();
     await h.start();

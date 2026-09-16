@@ -6,6 +6,7 @@ import {
   resolveModelDecision,
 } from "./modelDecision";
 import { buildModelTranscript } from "./modelTranscript";
+import { VoiceEvidenceError } from "./evidenceError";
 import type { VoiceTranscriptSnapshot } from "./transcript";
 import type { VoiceActionClient } from "./actionClient";
 import { VOICE_ACTION_INSTRUCTIONS } from "./actionInstructions";
@@ -163,6 +164,9 @@ export function createVoiceAnswerer(
           sessionId: session.id,
           delegationId,
           stage,
+          ...(error instanceof VoiceEvidenceError
+            ? { evidenceReason: error.reason }
+            : {}),
           category:
             error instanceof z.ZodError
               ? "invalid_decision_schema"

@@ -437,7 +437,7 @@ describe("canonical homepage static HTML", () => {
       ),
     ).toEqual(["sms_only", "sms_and_chat", "full"]);
     expect(pricing).toContain("<table");
-    expect(html).toContain(HOME_DEFINITION);
+    expect(visibleText(html)).toContain(HOME_DEFINITION);
     expect(content.faqs).toBe(HOME_FAQS);
     expect(content.title).toBe(HOME_TITLE);
     expect(content.description).toBe(HOME_DESCRIPTION);

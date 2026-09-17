@@ -2,11 +2,11 @@ import Link from "next/link";
 import Image from "next/image";
 import {
   Phone,
+  PhoneCall,
   MessageCircle,
   Inbox,
   Target,
   Star,
-  ArrowUpRight,
   ChevronDown,
   Check,
 } from "lucide-react";
@@ -50,16 +50,22 @@ import {
 
 const features = [
   {
+    icon: MessageCircle,
+    title: "AI Website Chat",
+    description:
+      "Answer website visitors' questions, capture leads, and book appointments while you focus on your business.",
+  },
+  {
     icon: Phone,
     title: "Automatic Missed-Call Texting",
     description:
-      "Automatically reply when you can't answer the phone so potential customers never hear silence.",
+      "SMS plans send a text when you miss a call. SMS + Web Chat adds AI that can carry the conversation for you.",
   },
   {
-    icon: MessageCircle,
-    title: "Website Chat Widget",
+    icon: PhoneCall,
+    title: "AI Voice Receptionist",
     description:
-      "Turn your site into a lead-capturing assistant that answers questions around the clock.",
+      "Full Suite speaks with callers when you can't answer — answering questions, collecting details, and helping book appointments by phone.",
   },
   {
     icon: Inbox,
@@ -78,12 +84,6 @@ const features = [
     title: "Custom AI Personality",
     description:
       "Set tone, greetings, and guardrails so your assistant sounds like your brand, not a generic bot.",
-  },
-  {
-    icon: ArrowUpRight,
-    title: "Lead Prioritization",
-    description:
-      "See your warmest prospects first so you know where to focus your time when you're back online.",
   },
 ];
 
@@ -144,7 +144,7 @@ const chatOnlyPlan = {
   category: "Website chat",
   billingNote: "No setup fee",
   description:
-    "An AI website receptionist for teams that want web chat without texting.",
+    "Answer website visitors, capture leads, and book appointments without phone or texting setup.",
   highlights: [
     "Website AI chat widget",
     `${formattedChatOnlyAiReplies} completed AI replies/month`,
@@ -174,7 +174,7 @@ const existingPlans = [
     price: formattedPlanPrice("sms_only"),
     category: "Texting",
     billingNote: smsActivationFeeLabel,
-    description: "Missed-call texting for small teams that want fast coverage.",
+    description: "Send missed callers an automatic text, then follow up yourself from one inbox.",
     highlights: [
       "Local SimplAssist number",
       "Automatic missed-call text-back",
@@ -199,7 +199,7 @@ const existingPlans = [
     price: formattedPlanPrice("sms_and_chat"),
     category: "Texting + web chat",
     billingNote: smsActivationFeeLabel,
-    description: "Capture leads from calls and your website, then turn them into booked appointments.",
+    description: "Let AI handle text and website conversations, capture leads, and book appointments.",
     highlights: [
       "Everything in SMS Only, plus",
       "Website chat widget + lead capture",
@@ -720,7 +720,7 @@ export default function HomePage() {
       {/* ── Container ── */}
       <div className="relative z-[1] w-[min(calc(100%-32px),1200px)] mx-auto pt-[5.25rem] sm:pt-24">
         {/* ── Hero ── */}
-        <section className="grid lg:grid-cols-[1.12fr_.88fr] gap-7 items-center pt-4 pb-10">
+        <section id="hero" className="grid lg:grid-cols-[1.12fr_.88fr] gap-7 items-center pt-4 pb-10">
           <Reveal priority>
             <div className="flex flex-col items-start">
               <h1 className={`text-[clamp(40px,7vw,76px)] font-extrabold leading-[0.96] tracking-[-0.05em] mb-5 mt-12 sm:mt-0 ${ink}`}>
@@ -730,17 +730,31 @@ export default function HomePage() {
               </h1>
 
               <p className={`text-[clamp(17px,2.3vw,20px)] leading-[1.7] ${body} max-w-[680px] mb-7`}>
-                SimplAssist texts missed callers back and chats with website visitors
-                24/7—helping you turn missed opportunities into booked appointments.
+                {publicChatOnlyAvailable ? (
+                  <>
+                    Start with AI website chat for {formattedPlanPrice("chat_only")}/month
+                    to answer questions, capture leads, and book appointments. Add
+                    texting and, with Full Suite, an AI voice receptionist that
+                    speaks with callers when you can&apos;t answer.
+                  </>
+                ) : (
+                  <>
+                    SimplAssist texts missed callers back, chats with website visitors,
+                    and helps book appointments. Full Suite adds an AI voice
+                    receptionist that speaks with callers when you can&apos;t answer.
+                  </>
+                )}
               </p>
 
               {/* CTA buttons — flat, matte, no glow */}
               <div className="flex gap-3.5 flex-wrap mb-7">
                 <Link href="/signup" className={btnPrimary}>
-                  Get Started
+                  {publicChatOnlyAvailable
+                    ? `Start with ${formattedPlanPrice("chat_only")} Webchat`
+                    : "Get Started"}
                 </Link>
-                <a href="#how-it-works" className={btnSecondary}>
-                  See How It Works
+                <a href="#try-it-live" className={btnSecondary}>
+                  Try Chat or Voice
                 </a>
               </div>
 
@@ -794,7 +808,7 @@ export default function HomePage() {
                 <span className={accentText}>bigger presence</span>.
               </>
             }
-            subtitle="Give customers a fast, professional experience without hiring a full-time front desk team."
+            subtitle="Start with the coverage you need: website chat, text conversations, or an AI receptionist that speaks with your callers."
           />
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -891,58 +905,86 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* ── Quick Demo ── */}
-        <section id="try-it-live" className="py-16 sm:py-24">
+        {/* ── Live chat and voice demos ── */}
+        <section id="try-it-live" aria-labelledby="live-demo-heading" className="py-16 sm:py-24">
           <SectionHeader
+            id="live-demo-heading"
             title={
               <>
-                Quick <span className={accentText}>Demo</span>.
+                Try SimplAssist. <span className={accentText}>Chat or call.</span>
               </>
             }
-            subtitle={"Call or chat with SimplAssist and see what the experience feels like from the other\u00a0side."}
-            subtitleClassName="sm:max-w-none"
+            subtitle="Type a question in webchat or speak with our AI receptionist by phone. Experience how SimplAssist helps customers in the way they prefer."
           />
 
           <div className="grid gap-5 sm:grid-cols-2">
             <Reveal className="h-full">
               <article className={`flex h-full flex-col p-6 sm:p-8 ${card} ${cardStyles.card}`}>
+                <p className={`mb-3 text-xs font-extrabold uppercase tracking-[0.09em] ${accentText}`}>
+                  Live website chat
+                </p>
                 <h3 className={`text-xl font-bold sm:text-[22px] ${ink}`}>
-                  Make the call. We won’t answer.
-                  <br />
-                  <span className="inline-block">SimplAssist will.</span>
+                  Ask a question. Keep the conversation going.
                 </h3>
                 <p className={`${body} mt-3 leading-[1.7]`}>
-                  Call this number. We’ll let it ring.
+                  Open our website chat and type a question about SimplAssist&apos;s
+                  plans, features, or setup. Ask a follow-up to see how the AI responds.
                 </p>
-                <a
-                  href="tel:+15742638634"
-                  className={`my-5 block w-fit whitespace-nowrap rounded-lg text-[clamp(27px,4vw,42px)] font-extrabold leading-none tracking-[-0.04em] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ea580c]/60 focus-visible:ring-offset-4 dark:focus-visible:ring-[#ff914d]/60 dark:focus-visible:ring-offset-[#050505] ${accentText}`}
-                >
-                  (574) 263-8634
-                </a>
-                <p className={`${body} leading-[1.7]`}>
-                  SimplAssist will text you back in seconds and carry the
-                  conversation from there.
+                <p className={`${body} mt-4 leading-[1.7]`}>
+                  On your website, AI chat uses your business information to answer
+                  visitors, collect contact details, and help book appointments.
                 </p>
                 <p className={`${body} mt-5 border-t border-[#ece4d8] pt-5 text-sm leading-[1.65] dark:border-white/[0.10]`}>
-                  Try a reply—ask about pricing, features, or how it works.
+                  Try asking: &ldquo;How can SimplAssist help my business?&rdquo;
                 </p>
+                <div className="mt-auto pt-7">
+                  <OpenChatButton className={btnPrimary} />
+                  <p className={`${body} mt-3 text-sm leading-[1.55]`}>
+                    {publicChatOnlyAvailable
+                      ? `Start with Chat Only — ${formattedPlanPrice("chat_only")}/month. No setup fee.`
+                      : `Website chat is included in SMS + Web Chat — ${formattedPlanPrice("sms_and_chat")}/month.`}
+                  </p>
+                </div>
               </article>
             </Reveal>
 
             <Reveal delayMs={90} className="h-full">
               <article className={`flex h-full flex-col p-6 sm:p-8 ${card} ${cardStyles.card}`}>
+                <p className={`mb-3 text-xs font-extrabold uppercase tracking-[0.09em] ${accentText}`}>
+                  Live voice demo · Full Suite
+                </p>
                 <h3 className={`text-xl font-bold sm:text-[22px] ${ink}`}>
-                  Ask away. SimplAssist can take it.
+                  Talk to our AI receptionist.
                 </h3>
                 <p className={`${body} mt-3 leading-[1.7]`}>
-                  Ask about pricing, features, setup, or how it works. Then ask a
-                  follow-up and see if it keeps up.
+                  Call the number below and SimplAssist&apos;s AI will answer live.
+                  Ask about our plans or how it works, then ask a follow-up —
+                  you&apos;ll hear its response over the phone.
+                </p>
+                <p className={`${body} mt-4 leading-[1.7]`}>
+                  For your business, Full Suite can answer questions using your
+                  business information, collect callers&apos; details, and help book
+                  appointments when you can&apos;t pick up.
+                </p>
+                <p className={`${body} mt-5 border-t border-[#ece4d8] pt-5 text-sm leading-[1.65] dark:border-white/[0.10]`}>
+                  Try asking: &ldquo;What does SimplAssist do?&rdquo; Then ask:
+                  &ldquo;Which plan includes phone answering?&rdquo;
                 </p>
                 <div className="mt-auto pt-7">
-                  <OpenChatButton className={btnPrimary} />
+                  <a
+                    href="tel:+15742638634"
+                    aria-label="Call our live AI receptionist at (574) 263-8634"
+                    className={`block w-fit whitespace-nowrap rounded-lg text-[clamp(25px,3.5vw,38px)] font-extrabold leading-none tracking-[-0.04em] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ea580c]/60 focus-visible:ring-offset-4 dark:focus-visible:ring-[#ff914d]/60 dark:focus-visible:ring-offset-[#050505] ${accentText}`}
+                  >
+                    (574) 263-8634
+                  </a>
                   <p className={`${body} mt-3 text-sm leading-[1.55]`}>
-                    Go off script. That’s the point.
+                    AI phone answering in English is included in{" "}
+                    <a href="#pricing-card-full" className={`${inlineLink} font-semibold hover:underline`}>
+                      Full Suite — {formattedPlanPrice("full")}/month
+                    </a>
+                    . Includes {SUBSCRIPTION_PLANS.full.includedVoiceMinutes} voice minutes per billing month.
+                    {" "}{smsActivationFeeLabel}.
                   </p>
                 </div>
               </article>
@@ -1225,7 +1267,7 @@ export default function HomePage() {
               Frequently asked <span className={accentText}>questions</span>.
             </h2>
             <p className={`${body} mt-4 max-w-[60ch] leading-[1.65]`}>
-              Straight answers about plans, missed-call texting, AI, and setup.
+              Straight answers about webchat, texting, AI phone answering, and setup.
             </p>
           </Reveal>
 
@@ -1262,7 +1304,8 @@ export default function HomePage() {
                 Your voicemail isn&apos;t closing deals.
               </h2>
               <p className={`${body} leading-[1.7] max-w-[560px]`}>
-                SimplAssist texts customers back before they&apos;ve dialed your competitor.
+                Meet customers where they reach out — with website chat, missed-call
+                texting, and AI phone answering on Full Suite.
               </p>
               <div className="mt-7 flex-1">
                 <CtaRace />
@@ -1270,14 +1313,16 @@ export default function HomePage() {
             </div>
             <div className={`${tile} p-6 h-full flex flex-col`}>
               <strong className={`block text-base mb-2.5 ${ink}`}>
-                What you get:
+                Choose the coverage you need:
               </strong>
               <ul className="flex-1 flex flex-col justify-center gap-3 mb-5">
                 {[
-                  "Automatic missed-call texts, day or night",
-                  "Website chat widget — embed with one line of code",
+                  publicChatOnlyAvailable
+                    ? `AI website chat from ${formattedPlanPrice("chat_only")}/month — no setup fee`
+                    : "AI website chat with SMS + Web Chat",
+                  "Automatic missed-call texts with SMS plans",
+                  "An AI voice receptionist with Full Suite",
                   "Every lead and conversation in one dashboard",
-                  "Live the same week, once your number's approved to send",
                 ].map((item) => (
                   <li key={item} className="flex items-center gap-2.5 text-stone-700 dark:text-[#ececec]">
                     <span className="w-2 h-2 rounded-full bg-[#ea580c] dark:bg-[#ff914d] shrink-0" />
@@ -1286,7 +1331,9 @@ export default function HomePage() {
                 ))}
               </ul>
               <Link href="/signup" className={btnPrimaryWide}>
-                Get Started
+                {publicChatOnlyAvailable
+                  ? `Start with ${formattedPlanPrice("chat_only")} Webchat`
+                  : "Get Started"}
               </Link>
               <p className="mt-3 flex items-center justify-center gap-2 text-[12px] text-stone-500 dark:text-[#bdbdbf]">
                 <span className="relative flex h-1.5 w-1.5" aria-hidden>

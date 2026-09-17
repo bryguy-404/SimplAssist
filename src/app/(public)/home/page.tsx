@@ -724,14 +724,14 @@ export default function HomePage() {
           <Reveal priority>
             <div className="flex flex-col items-start">
               <h1 className={`text-[clamp(40px,7vw,76px)] font-extrabold leading-[0.96] tracking-[-0.05em] mb-5 mt-12 sm:mt-0 ${ink}`}>
-                Never miss a{" "}
+                Stop losing <span className={accentText}>money</span>{" "}
                 <br className="hidden sm:block" />
-                <span className={accentText}>customer</span> again.
+                to missed calls.
               </h1>
 
               <p className={`text-[clamp(17px,2.3vw,20px)] leading-[1.7] ${body} max-w-[680px] mb-7`}>
-                SimplAssist texts customers back when you miss a call, chats with website
-                visitors 24/7, and keeps every lead organized in one clean dashboard.
+                SimplAssist texts missed callers back and chats with website visitors
+                24/7—helping you turn missed opportunities into booked appointments.
               </p>
 
               {/* CTA buttons — flat, matte, no glow */}

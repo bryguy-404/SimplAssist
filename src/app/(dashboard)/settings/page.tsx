@@ -1,4 +1,6 @@
 import { redirect } from 'next/navigation';
+import OwnerVoiceSettings from '@/components/settings/OwnerVoiceSettings';
+import { getOwnerVoiceSettings } from '@/lib/voice/access.server';
 import AISettingsForm from '@/components/settings/AISettingsForm';
 import GoalSettingsForm from '@/components/settings/GoalSettingsForm';
 import ServicesManager from '@/components/settings/ServicesManager';
@@ -54,6 +56,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
     { data: businessHours },
     { data: phoneNumberRow },
     { data: calendarToken },
+    voiceSettings,
   ] = await Promise.all([
     supabase.from('ai_settings').select('*').eq('business_id', business.id).single(),
     supabase.from('services').select('*').eq('business_id', business.id).order('name'),
@@ -63,6 +66,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
       ? supabase.from('phone_numbers').select('*').eq('business_id', business.id).eq('is_active', true).single()
       : Promise.resolve({ data: null }),
     supabase.from('google_calendar_tokens').select('*').eq('business_id', business.id).single(),
+    getOwnerVoiceSettings(business.id).catch(() => null),
   ]);
 
   if (!aiSettings) redirect('/onboarding');
@@ -113,6 +117,8 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
           forwardToNumber={business.forward_to_number ?? null}
         />
       </div>}
+
+      <OwnerVoiceSettings initialSettings={voiceSettings} />
 
       {/* Business Email */}
       <div className={`p-6 ${card}`}>

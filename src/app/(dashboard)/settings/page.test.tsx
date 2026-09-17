@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('server-only', () => ({}));
 
 const mocks = vi.hoisted(() => ({
+  getOwnerVoiceSettings: vi.fn(),
   redirect: vi.fn(),
   requireWorkspacePageAccess: vi.fn(),
   getDashboardEntitledContext: vi.fn(),
@@ -84,6 +85,10 @@ vi.mock('@/components/settings/DangerZone', () => ({
 }));
 vi.mock('@/components/entitlements/LockedFeatureCard', () => ({
   LockedFeatureCard: () => <div>Locked feature</div>,
+}));
+
+vi.mock("@/lib/voice/access.server", () => ({
+  getOwnerVoiceSettings: mocks.getOwnerVoiceSettings,
 }));
 
 import SettingsPage from './page';
@@ -199,6 +204,7 @@ function makeQuery(table: string): QueryRecorder {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.getOwnerVoiceSettings.mockResolvedValue(null);
   mocks.richerWebsiteScanEnabled.mockReturnValue(true);
   queryRecorders.clear();
   tableData = {
@@ -528,5 +534,37 @@ describe('SettingsPage richer scan rollout', () => {
     const markup = renderToStaticMarkup(await SettingsPage({}));
 
     expect(markup).not.toContain('href="/settings/knowledge"');
+  });
+});
+
+const VOICE_USAGE = {
+  visible: true, accessSource: "commercial", canEditPreferences: false, canEnableVoice: false,
+  status: "plan_required", timezone: "America/New_York",
+  preferences: { mode: "text", textFallbackEnabled: false, revision: 2 },
+  usage: { kind: "monthly", periodState: "current", includedSeconds: 6000, usedSeconds: 1200, heldSeconds: 0,
+    availableSeconds: 4800, resetsAt: "2026-10-01T00:00:00Z", reconciling: false },
+};
+
+describe("Settings voice integration", () => {
+  it("loads only the resolved business and hides voice activation for ordinary accounts", async () => {
+    mocks.getOwnerVoiceSettings.mockResolvedValue({ ...VOICE_USAGE, visible: false });
+    const html = renderToStaticMarkup(await SettingsPage({}));
+    expect(mocks.getOwnerVoiceSettings).toHaveBeenCalledWith(BUSINESS_ID);
+    expect(html).not.toContain("Call answering");
+    expect(html).not.toContain("Save call settings");
+  });
+  it("preserves usage and call history after access is lost", async () => {
+    mocks.getOwnerVoiceSettings.mockResolvedValue(VOICE_USAGE);
+    const html = renderToStaticMarkup(await SettingsPage({}));
+    expect(html).toContain("current plan does not include voice");
+    expect(html).toContain("Voice minutes this billing period");
+    expect(html).toContain('href="/conversations"');
+    expect(html).not.toContain("Save call settings");
+  });
+  it("keeps the settings page usable if the optional voice lookup fails", async () => {
+    mocks.getOwnerVoiceSettings.mockRejectedValue(new Error("schema temporarily unavailable"));
+    const html = renderToStaticMarkup(await SettingsPage({}));
+    expect(html).toContain("Business Email");
+    expect(html).not.toContain("Call answering");
   });
 });

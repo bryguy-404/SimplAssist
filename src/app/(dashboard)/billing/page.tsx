@@ -1,3 +1,5 @@
+import OwnerVoiceSettings from '@/components/settings/OwnerVoiceSettings';
+import { getOwnerVoiceSettings } from '@/lib/voice/access.server';
 import { redirect } from "next/navigation";
 import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
 import type { SubscriptionPlan } from "@/types/database";
@@ -75,8 +77,13 @@ export default async function BillingPage(_props: BillingPageProps) {
       </section>
     ) : null;
 
+  const voiceSettingsPromise = getOwnerVoiceSettings(business.id).catch(() => null);
+
   if (business.billing_mode !== "stripe") {
-    const partnerName = await resolveAssignedPartnerName(business.partner_id);
+    const [partnerName, voiceSettings] = await Promise.all([
+      resolveAssignedPartnerName(business.partner_id),
+      voiceSettingsPromise,
+    ]);
 
     return (
       <div className="max-w-5xl mx-auto">
@@ -92,6 +99,7 @@ export default async function BillingPage(_props: BillingPageProps) {
             {partnerManagedBillingMessage(partnerName)}
           </p>
         </div>
+        {voiceSettings?.visible ? <div className="mt-6"><OwnerVoiceSettings initialSettings={voiceSettings} variant="usage" /></div> : null}
       </div>
     );
   }
@@ -122,11 +130,12 @@ export default async function BillingPage(_props: BillingPageProps) {
       ? Math.min(100, Math.round((usedSmsParts / includedSmsParts) * 100))
       : 0;
   const activePlan = subscription?.plan as SubscriptionPlan | undefined;
-  const [{ brand }, chatOnlyAIReplyUsage] = await Promise.all([
+  const [{ brand }, chatOnlyAIReplyUsage, voiceSettings] = await Promise.all([
     getRequestBrand(),
     hasActiveSubscription && activePlan === "chat_only"
       ? loadChatOnlyAIReplyUsage(business.id)
       : Promise.resolve(null),
+    voiceSettingsPromise,
   ]);
 
   return (
@@ -247,6 +256,8 @@ export default async function BillingPage(_props: BillingPageProps) {
           })}
         </div>
       )}
+
+      {voiceSettings?.visible ? <div className="mt-6"><OwnerVoiceSettings initialSettings={voiceSettings} variant="usage" /></div> : null}
 
       {hasActiveSubscription && activePlan !== "chat_only" && (
         <div className={`mt-6 p-6 ${card}`}>

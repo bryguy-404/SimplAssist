@@ -35,6 +35,7 @@ const BILLING_URL_STATES = [
 ] as const;
 
 const mocks = vi.hoisted(() => ({
+  getOwnerVoiceSettings: vi.fn(),
   redirect: vi.fn(),
   requireWorkspacePageAccess: vi.fn(),
   getDashboardBusinessContext: vi.fn(),
@@ -73,6 +74,10 @@ vi.mock("@/lib/billing/partnerManagedBilling.server", () => ({
     partnerName
       ? `Billing is handled by ${partnerName}.`
       : "Billing is managed externally.",
+}));
+
+vi.mock("@/lib/voice/access.server", () => ({
+  getOwnerVoiceSettings: mocks.getOwnerVoiceSettings,
 }));
 
 import BillingPage from "./page";
@@ -156,6 +161,7 @@ function setDirectActiveChatOnlyBilling(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.getOwnerVoiceSettings.mockResolvedValue(null);
   mocks.redirect.mockImplementation((path: string) => {
     throw new Error(`redirect:${path}`);
   });
@@ -686,4 +692,45 @@ describe("BillingPage", () => {
       expect(html).not.toContain("SimplAssist");
     },
   );
+});
+
+const VOICE_USAGE = {
+  visible: true, accessSource: "commercial", canEditPreferences: false, canEnableVoice: false,
+  status: "plan_required", timezone: "America/New_York",
+  preferences: { mode: "text", textFallbackEnabled: false, revision: 2 },
+  usage: { kind: "monthly", periodState: "current", includedSeconds: 6000, usedSeconds: 1200, heldSeconds: 0,
+    availableSeconds: 4800, resetsAt: "2026-10-01T00:00:00Z", reconciling: false },
+};
+
+describe("Billing voice integration", () => {
+  it("shows separate voice usage and history without opening Full Suite purchases", async () => {
+    setDirectActiveChatOnlyBilling();
+    mocks.getOwnerVoiceSettings.mockResolvedValue(VOICE_USAGE);
+    const html = renderToStaticMarkup(await BillingPage({}));
+    expect(mocks.getOwnerVoiceSettings).toHaveBeenCalledWith("business-1");
+    expect(html).toContain("Voice usage");
+    expect(html).toContain("AI reply usage");
+    expect(html).toContain("100");
+    expect(html).toContain("current plan does not include voice");
+    expect(html).toContain('href="/conversations"');
+    expect(html).not.toContain("Save call settings");
+  });
+  it("hides ordinary closed rollout and survives a failed optional voice lookup", async () => {
+    setDirectActiveChatOnlyBilling();
+    mocks.getOwnerVoiceSettings.mockResolvedValue({ ...VOICE_USAGE, visible: false });
+    expect(renderToStaticMarkup(await BillingPage({}))).not.toContain("Voice usage");
+    mocks.getOwnerVoiceSettings.mockRejectedValue(new Error("schema temporarily unavailable"));
+    const html = renderToStaticMarkup(await BillingPage({}));
+    expect(html).toContain("Billing");
+    expect(html).not.toContain("Voice usage");
+  });
+  it("keeps the pilot lifetime budget separate from monthly billing", async () => {
+    setDirectActiveChatOnlyBilling();
+    mocks.getOwnerVoiceSettings.mockResolvedValue({ ...VOICE_USAGE, accessSource: "pilot", status: "ready",
+      usage: { ...VOICE_USAGE.usage, kind: "pilot_lifetime", includedSeconds: 12000, resetsAt: null } });
+    const html = renderToStaticMarkup(await BillingPage({}));
+    expect(html).toContain("Private pilot · lifetime minutes");
+    expect(html).toContain("does not reset each month");
+    expect(html).not.toContain("Voice minutes this billing period");
+  });
 });

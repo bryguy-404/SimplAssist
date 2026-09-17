@@ -3,7 +3,9 @@
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { BookingOfferingFields } from '@/components/settings/BookingSettingsForm';
+import { bookingOfferingSchema } from '@/lib/booking/contracts';
 import { createClient } from '@/lib/supabase/client';
 import type {
   AITone,
@@ -31,9 +33,14 @@ const aiPersonalitySchema = z
     web_greeting: z.string().min(1, 'Web chat greeting is required'),
     guardrails: z.string().optional(),
     booking_enabled: z.boolean(),
+    booking_details: bookingOfferingSchema.optional(),
+    booking_revision: z.number().int().nonnegative().optional(),
     booking_mode: z.enum(['collect_info', 'schedule_direct'] as const).optional(),
   })
   .superRefine((data, context) => {
+    if (data.primary_goal === 'book' && data.booking_enabled && !data.booking_details) {
+      context.addIssue({ code: 'custom', path: ['booking_details'], message: 'Choose the kind of appointment customers should book.' });
+    }
     if (data.primary_goal === 'signup' && !normalizeHttpsGoalUrl(data.goal_url)) {
       context.addIssue({
         code: 'custom',
@@ -65,6 +72,17 @@ export async function saveAIPersonalitySettings({
   const primaryGoalUpdate = buildPrimaryGoalUpdate(data);
   if (!primaryGoalUpdate) {
     throw new Error('invalid_primary_goal');
+  }
+
+  if (data.primary_goal === 'book' && data.booking_enabled) {
+    if (!data.booking_details || data.booking_revision === undefined) throw new Error('Choose and save booking details before continuing.');
+    const currentResponse = await fetch('/api/settings/booking', { cache: 'no-store' });
+    if (!currentResponse.ok) throw new Error('Booking details are unavailable.');
+    const current = await currentResponse.json();
+    const response = await fetch('/api/settings/booking', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedRevision: data.booking_revision, defaults: data.booking_details, services: current.booking.services }) });
+    if (!response.ok) throw new Error('Booking details could not be saved. Refresh and try again.');
+    const saved = await response.json();
+    data.booking_revision = saved.booking.revision;
   }
 
   const guardrailLines = data.guardrails
@@ -165,6 +183,20 @@ export default function AIPersonalityForm({
     },
   });
 
+  const [bookingLoadError, setBookingLoadError] = useState('');
+  useEffect(() => {
+    let active = true;
+    fetch('/api/settings/booking', { cache: 'no-store' }).then(async response => {
+      if (!response.ok) throw new Error('Booking details could not be loaded.');
+      const data = await response.json();
+      if (!active) return;
+      setValue('booking_revision', data.booking.revision);
+      if (data.booking.defaults) setValue('booking_details', data.booking.defaults);
+    }).catch(() => { if (active) setBookingLoadError('Booking details could not be loaded. Refresh before continuing with booking.'); });
+    return () => { active = false; };
+  }, [setValue]);
+  const bookingDetails = watch('booking_details');
+  const bookingRevision = watch('booking_revision');
   const bookingEnabled = watch('booking_enabled');
   const responseDelay = watch('response_delay_seconds');
   const selectedTone = watch('tone');
@@ -358,6 +390,13 @@ export default function AIPersonalityForm({
 
         {bookingEnabled && (
           <div className="mt-3 pl-4 border-l-2 border-[rgb(var(--brand-primary-rgb)/.30)] dark:border-[rgb(var(--brand-primary-dark-rgb)/.30)] space-y-2">
+            {bookingLoadError && <p role="alert">{bookingLoadError}</p>}
+            {!bookingDetails && <label>What kind of appointment should customers book?
+              <select className="w-full rounded-xl border bg-transparent p-2" value="" onChange={e => setValue('booking_details', { format: e.target.value as 'phone_callback' | 'business_visit' | 'customer_site', label: 'Appointment', durationMinutes: 30, businessAddress: e.target.value === 'business_visit' ? '' : null })}>
+                <option value="" disabled>Choose a format</option><option value="phone_callback">Phone callback</option><option value="business_visit">Visit your business</option><option value="customer_site">Visit the customer</option>
+              </select>
+            </label>}
+            {bookingDetails && <BookingOfferingFields prefix="onboarding-booking" value={bookingDetails} onChange={value => setValue('booking_details', value)} />}
             <label className="flex items-center gap-2 cursor-pointer">
               <input type="radio" value="collect_info" {...register('booking_mode')} className="accent-[var(--brand-primary)] dark:accent-[var(--brand-primary-dark)]" />
               <div>
@@ -391,7 +430,7 @@ export default function AIPersonalityForm({
         </button>
         <button
           type="submit"
-          disabled={saving || !goalUpdate}
+          disabled={saving || !goalUpdate || (primaryGoal === 'book' && bookingEnabled && (bookingRevision === undefined || !bookingOfferingSchema.safeParse(bookingDetails).success))}
           className={primaryCtaInlineClass}
         >
           {saving ? (

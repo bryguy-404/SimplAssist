@@ -328,3 +328,26 @@ describe("saveAIPersonalitySettings", () => {
     expect(onNext).not.toHaveBeenCalled();
   });
 });
+
+
+describe("booking onboarding configuration", () => {
+  it("requires explicit booking details before advancing", async () => {
+    const writes = makeSaveClient();
+    const onNext = vi.fn();
+    await expect(saveAIPersonalitySettings({ supabase: writes.client, businessId: "business-1", data: { ...dataFor("book", ""), booking_enabled: true }, onNext })).rejects.toThrow("Choose and save booking details");
+    expect(onNext).not.toHaveBeenCalled();
+    expect(writes.events).toEqual([]);
+  });
+  it("preserves existing service overrides and saves the expected revision", async () => {
+    const writes = makeSaveClient();
+    const services = [{ serviceId: "service", setting: { mode: "unavailable" } }];
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json({ booking: { revision: 2, services } })).mockResolvedValueOnce(Response.json({ booking: { revision: 3 } }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const data = { ...dataFor("book", ""), booking_enabled: true, booking_revision: 2, booking_details: { format: "phone_callback" as const, label: "Estimate", durationMinutes: 30, businessAddress: null } };
+      await saveAIPersonalitySettings({ supabase: writes.client, businessId: "business-1", data, onNext: vi.fn() });
+      expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({ expectedRevision: 2, services });
+      expect(data.booking_revision).toBe(3);
+    } finally { vi.unstubAllGlobals(); }
+  });
+});

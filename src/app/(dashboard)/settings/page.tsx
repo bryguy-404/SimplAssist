@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import OwnerVoiceSettings from '@/components/settings/OwnerVoiceSettings';
 import { getOwnerVoiceSettings } from '@/lib/voice/access.server';
+import BookingSettingsForm from '@/components/settings/BookingSettingsForm';
 import AISettingsForm from '@/components/settings/AISettingsForm';
 import GoalSettingsForm from '@/components/settings/GoalSettingsForm';
 import ServicesManager from '@/components/settings/ServicesManager';
@@ -178,6 +179,8 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
           showSmsResponseDelay={smsEnabled}
         />
       </div>
+
+      {!signupMode && canUseCalendar && <BookingSettingsForm services={services || []} />}
 
       {/* Services */}
       <div className={`p-6 ${card}`}>

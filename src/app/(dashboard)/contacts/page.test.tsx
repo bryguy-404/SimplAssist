@@ -128,7 +128,7 @@ describe("ContactsPage", () => {
       business: { id: BUSINESS_ID },
     });
 
-    renderToStaticMarkup(await ContactsPage());
+    renderToStaticMarkup(await ContactsPage({}));
 
     expect(mocks.requireWorkspacePageAccess).toHaveBeenCalledOnce();
     expect(mocks.from.mock.calls).toEqual([["contacts"], ["conversations"]]);

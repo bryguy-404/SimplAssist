@@ -49,7 +49,7 @@ interface MonthRange {
   timeZone: string;
 }
 
-export default async function LeadsPage({ searchParams }: { searchParams?: { lead?: string | string[] } } = {}) {
+export default async function LeadsPage({ searchParams }: { searchParams?: { lead?: string | string[] } }) {
   await requireWorkspacePageAccess();
   const context = await getDashboardBusinessContext();
   if (context.status === "unauthenticated") redirect("/login");

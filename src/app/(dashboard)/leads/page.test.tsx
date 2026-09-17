@@ -165,7 +165,7 @@ describe("LeadsPage", () => {
       user: null,
     });
 
-    await expect(LeadsPage()).rejects.toThrow("redirect:/login");
+    await expect(LeadsPage({})).rejects.toThrow("redirect:/login");
 
     expect(mocks.requireWorkspacePageAccess).toHaveBeenCalledOnce();
     expect(mocks.from).not.toHaveBeenCalled();
@@ -178,7 +178,7 @@ describe("LeadsPage", () => {
       user: { id: "user-1" },
     });
 
-    await expect(LeadsPage()).rejects.toThrow("redirect:/onboarding");
+    await expect(LeadsPage({})).rejects.toThrow("redirect:/onboarding");
     expect(mocks.from).not.toHaveBeenCalled();
   });
 
@@ -192,7 +192,7 @@ describe("LeadsPage", () => {
         business: { ...BUSINESS, primary_goal: primaryGoal },
       });
 
-      await expect(LeadsPage()).rejects.toThrow("redirect:/dashboard");
+      await expect(LeadsPage({})).rejects.toThrow("redirect:/dashboard");
       expect(mocks.from).not.toHaveBeenCalled();
     }
   );
@@ -200,7 +200,7 @@ describe("LeadsPage", () => {
   it("uses only the owner client for a capped newest-first list and an exact business-month count", async () => {
     const { list, monthlyCount } = configureQueries();
 
-    await LeadsPage();
+    await LeadsPage({});
 
     expect(mocks.from).toHaveBeenCalledTimes(2);
     expect(mocks.from).toHaveBeenNthCalledWith(1, "goal_events");
@@ -251,7 +251,7 @@ describe("LeadsPage", () => {
       sourceConversationId: "voice-conversation",
       status: { label: "Signup text delivered", detail: "This does not confirm a completed signup.", tone: "success" },
     }]]));
-    const html = renderToStaticMarkup(await LeadsPage());
+    const html = renderToStaticMarkup(await LeadsPage({}));
     expect(html).toContain("Voice call → SMS");
     expect(html).toContain("Confirmed identity"); expect(html).toContain("Stored identity");
     expect(html).toContain("Signup text delivered"); expect(html).toContain("does not confirm a completed signup");
@@ -265,7 +265,7 @@ describe("LeadsPage", () => {
     const row = { ...event({ id: "voice-lead" }), origin_kind: "voice_action", voice_action_id: "signup-action", source_conversation_id: "voice-conversation" };
     configureQueries({ events: [row as ReturnType<typeof event>], count: 1 });
     mocks.loadVoiceLeadReviews.mockRejectedValue(new Error("lookup unavailable"));
-    const html = renderToStaticMarkup(await LeadsPage());
+    const html = renderToStaticMarkup(await LeadsPage({}));
     expect(html).toContain("Call details temporarily unavailable");
     expect(html).toContain("Signup link sent");
     expect(html).not.toContain("Signup text delivered");
@@ -303,7 +303,7 @@ describe("LeadsPage", () => {
       ],
     });
 
-    const markup = renderToStaticMarkup(await LeadsPage());
+    const markup = renderToStaticMarkup(await LeadsPage({}));
 
     expect(markup).toContain("Leads");
     expect(markup).toContain("Signup links sent");
@@ -326,7 +326,7 @@ describe("LeadsPage", () => {
   it("shows a true-zero empty state without a table", async () => {
     configureQueries({ events: [], count: 0 });
 
-    const markup = renderToStaticMarkup(await LeadsPage());
+    const markup = renderToStaticMarkup(await LeadsPage({}));
 
     expect(markup).toContain(">0</p>");
     expect(markup).toContain("No signup links sent yet.");
@@ -342,7 +342,7 @@ describe("LeadsPage", () => {
       ),
     });
 
-    const markup = renderToStaticMarkup(await LeadsPage());
+    const markup = renderToStaticMarkup(await LeadsPage({}));
 
     expect(markup).toContain(">237</p>");
     expect(markup.match(/<tbody[^>]*>[\s\S]*<\/tbody>/)?.[0].match(/<tr/g)).toHaveLength(
@@ -355,7 +355,7 @@ describe("LeadsPage", () => {
     async (count) => {
       configureQueries({ count: count as null });
 
-      const markup = renderToStaticMarkup(await LeadsPage());
+      const markup = renderToStaticMarkup(await LeadsPage({}));
 
       expect(markup).toContain(">—</p>");
       expect(markup).not.toContain(">0</p>");
@@ -367,7 +367,7 @@ describe("LeadsPage", () => {
     const countError = { message: "count unavailable" };
     configureQueries({ listError, count: null, countError });
 
-    const markup = renderToStaticMarkup(await LeadsPage());
+    const markup = renderToStaticMarkup(await LeadsPage({}));
 
     expect(markup).toContain("Leads could not be loaded.");
     expect(markup).not.toContain("No signup links sent yet.");
@@ -400,7 +400,7 @@ describe("LeadsPage", () => {
       count: 1,
     });
 
-    const markup = renderToStaticMarkup(await LeadsPage());
+    const markup = renderToStaticMarkup(await LeadsPage({}));
 
     expect(monthlyCount.gte).toHaveBeenCalledWith(
       "occurred_at",

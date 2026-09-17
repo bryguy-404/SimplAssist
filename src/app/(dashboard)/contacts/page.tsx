@@ -4,7 +4,7 @@ import ContactsTable from "@/components/contacts/ContactsTable";
 import { getDashboardBusinessContext } from "@/lib/dashboard/context";
 import { requireWorkspacePageAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
-export default async function ContactsPage({ searchParams }: { searchParams?: { contact?: string | string[] } } = {}) {
+export default async function ContactsPage({ searchParams }: { searchParams?: { contact?: string | string[] } }) {
   await requireWorkspacePageAccess();
   const context = await getDashboardBusinessContext();
   if (context.status === "unauthenticated") redirect("/login");

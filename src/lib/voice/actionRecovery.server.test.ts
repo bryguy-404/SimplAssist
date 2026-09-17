@@ -8,7 +8,7 @@ vi.mock("@/lib/supabase/admin", () => ({ supabaseAdmin: { from: m.from, rpc: m.r
 vi.mock("@/lib/messaging/client", () => ({ telnyx: { messages: { retrieve: m.retrieve, send: m.send } } }));
 vi.mock("@/lib/billing/usage", () => ({ recordOutboundSmsUsage: m.usage }));
 import { persistVoiceSmsBookkeeping, recoverVoiceActions, recoverVoiceSignupBookkeeping } from "./actionRecovery.server";
-type Row = Record<string, any>;
+type Row = Record<string, unknown> & { result?: Record<string, unknown> | null };
 let rows: Row[];
 let updates: { id: unknown; patch: Row }[];
 let ordering: unknown[][];
@@ -103,7 +103,7 @@ it("keeps delivery reconciliation progressing when lead finalization fails", asy
   m.rpc.mockResolvedValue({ data: null, error: { message: "database down" } });
   await recoverVoiceActions();
   expect(rows[0].status).toBe("succeeded");
-  expect(rows[0].result.deliveryStatus).toBe("delivered");
+  expect(rows[0].result!.deliveryStatus).toBe("delivered");
   expect(rows[0].bookkeeping_attempted_at).toBeTruthy();
   expect(m.usage).not.toHaveBeenCalled();
   expect(m.send).not.toHaveBeenCalled();
@@ -117,7 +117,7 @@ it("leaves legacy timestamps for the guarded restoration and respects the retry 
 it("does not meter or log a send when the transactional finalizer rejects its provenance", async () => {
   const a = accepted();
   m.rpc.mockResolvedValue({ data: null, error: { message: "identity mismatch" } });
-  await expect(persistVoiceSmsBookkeeping(a as VoiceAction, a.result)).rejects.toThrow("finalize_failed");
+  await expect(persistVoiceSmsBookkeeping(a as unknown as VoiceAction, a.result!)).rejects.toThrow("finalize_failed");
   expect(m.usage).not.toHaveBeenCalled();
   expect(updates).toEqual([]);
 });

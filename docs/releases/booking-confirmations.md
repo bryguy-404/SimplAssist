@@ -5,7 +5,7 @@ Baseline: `59484b1`; feature branch: `codex/booking-confirmations`.
 - `73e805a`: business/service booking settings and storage.
 - `6c0b856`: revisioned booking authorization shared by voice, SMS and web chat.
 - `49f08f6`: permission-bound voice texts and dashboard review.
-- Final release commit: validation evidence and recovery/signup compatibility hardening.
+- `b02e272`: validation evidence and recovery/signup compatibility hardening.
 
 The runtime feature flag is `BOOKING_CONFIRMATION_V2_ENABLED=true`. The database also requires `booking_confirmation_control.enabled=true`. Both default off. The updated voice worker advertises `bookingProtocol: 1`; an enabled application refuses an incompatible worker. Deploy the worker before activating the application feature.
 
@@ -47,7 +47,11 @@ Real booking/calendar-invitation acceptance remains outstanding until that appro
 Disable the app feature flag and database control, coordinate app/worker rollback, and preserve all existing records. Do not replay uncertain sends/bookings. Do not disable the flag mid-submission without first draining active booking actions; in-flight accepted effects still need reconciliation. Keep the private pilot retired.
 
 ## Current release state
-Awaiting the final production database/deployment step. No production mutation has been performed by this implementation task. Read-only preflight found schema 087, no new booking tables, Full Suite active, primary goal signup, pilot disabled and zero testers. The stored booking-enabled setting is true, but signup goal prevents booking offers/actions; it was not modified.
+Bryan explicitly authorized applying migrations 088–090, deploying both services and a separate read-only production review. The atomic bundle was applied to project `inmgpkurctttsofpywuz`; independent verification confirmed migration history 090, RLS, backend-only mutation permissions and preserved signup/account/pilot state. The stored booking-enabled setting is true, but signup goal prevents booking offers/actions; it was not modified.
+
+Private source archive `b02e272e1960f104c3cf6e46e3d6bc2c65eced6a`, SHA-256 `f6d0c51cd72a9c2c06b44df2bc2f581ee7de4ceccd6cae7a5a7e270eb4eb8559`. Independent review byte-matched all 1,234 application files and 1,232 worker files. Only the worker archive excludes the two Railway application/scanner config files, preserving its existing service configuration. No public Git push.
+
+Both initial disabled-feature deployments passed health checks. Database control and runtime flags were then enabled. Final activation verification follows below.
 
 ## Final local verification
 - Full regression: **417 files / 7,034 tests passed**, including the socket capacity test. Three additional notification-recovery tests passed after the final audit.
@@ -55,4 +59,17 @@ Awaiting the final production database/deployment step. No production mutation h
 - App and worker TypeScript, ESLint and production build passed.
 - Recovery retains an independent action-bookkeeping marker, so a delivered text cannot fall out of recovery before its action outcome is saved. Existing contact/signup fingerprints remain unique even when superseded.
 - Reviewable SQL-editor bundle: `/tmp/simplassist-booking-migrations-088-090.sql`, SHA-256 `c53770aa8b1230874245223baec1799e950103968d981316c682586deb171d48`. It verifies baseline 087, applies the three migrations in one transaction, records their history and leaves the new database feature control off. Regenerate with `scripts/build-booking-migration-bundle.mjs`; the script never connects to a database.
-- Production release confirmation requested under the recorded migration/independent-verification workflow. No production changes have been applied.
+- Production release explicitly authorized and executed under the recorded migration/independent-verification workflow.
+
+## Final production verification — September 17, 2026
+Independent read-only reviewer: `booking_release_verification`; result **PASS**, no release blocker found.
+- Application `2d9d2046-1c7c-4645-93f8-2a3a7adcc801`: **SUCCESS**.
+- Voice worker `1d28d7ac-29e0-42ec-a8f5-d85ecd667e8b`: **SUCCESS**.
+- Scanner unchanged at `12c2582a-2263-4055-92a8-1f4eaf27c642`.
+- Both runtime flags and database control enabled. App health and authenticated worker readiness HTTP 200; booking protocol 1, action protocol 1, existing gpt-live-1/PCM16 configuration preserved.
+- Anonymous booking settings and conversation booking-history requests return 401.
+- Six new tables have RLS; inspected mutation RPCs are postgres/service_role-only; owner policies and current-draft/fingerprint uniqueness indexes verified.
+- Own account remains active Full Suite, signup goal, owned, unsuspended and undeleted. Pilot remains disabled/retired with zero testers. No subscription or billing change was performed.
+- No booking drafts or notification rows were created by release verification. Real booking/calendar invitation/text receipt acceptance remains outstanding on the approved booking business.
+
+The reviewer performed no mutations. Initial disabled-feature deployment IDs were app `5f95adc7-dbbc-47e9-9df6-f01a39e8e511` and worker `1a68c828-6ac9-4d38-b8fe-b65cc414ce8e`; activation deployments above use the same reviewed source. This release-record update changes documentation only.

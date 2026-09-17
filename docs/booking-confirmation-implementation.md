@@ -37,3 +37,6 @@ Verification: full application suite 7,022 tests passed; its local socket capaci
 
 ### Phase 4 local release verification
 Full regression: 417 files / 7,034 tests passed; three further notification-recovery assertions passed. Final isolated database replay: 79 files / 3,419 assertions passed. App/worker TypeScript, lint, production build and desktop/mobile walkthrough passed. Release hardening preserves existing signup/contact fingerprints and recovers notification action bookkeeping independently of delivery. Production baseline 087 and retired pilot were checked read-only. The SQL bundle and release runbook are prepared; production application/deployment is awaiting the requested workflow confirmation. Real booking acceptance still requires the approved real booking account.
+
+### Production release completed
+Bryan authorized the tested migrations and deployments. Migrations 088–090 applied, compatible app/worker deployed privately from b02e272, and both booking controls enabled after health checks. Separate read-only review passed source integrity, schema permissions, final deployments, protected API access and unchanged signup/billing/retired-pilot state. See `docs/releases/booking-confirmations.md` for IDs and evidence. Real booking and invitation/SMS receipt acceptance remains to be performed with the approved booking business.

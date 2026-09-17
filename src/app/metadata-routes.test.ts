@@ -7,6 +7,8 @@ describe("search-engine metadata routes", () => {
   it("publishes the exact curated corporate sitemap", () => {
     expect(sitemap()).toEqual([
       { url: "https://simplassist.com" },
+      { url: "https://simplassist.com/ai-chatbot-for-small-business" },
+      { url: "https://simplassist.com/ai-receptionist-for-small-business" },
       { url: "https://simplassist.com/support" },
       { url: "https://simplassist.com/support/setup-fee" },
       { url: "https://simplassist.com/privacy" },

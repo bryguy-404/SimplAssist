@@ -10,7 +10,8 @@ import {
   ChevronDown,
   Check,
 } from "lucide-react";
-import { Reveal, ThemeToggleV2 } from "@/lib/theme-v2/ui";
+import { Reveal } from "@/lib/theme-v2/ui";
+import { MarketingHeader, MarketingFooter } from "@/components/marketing/navigation";
 import { REVEAL_NO_SCRIPT_CSS } from "@/lib/theme-v2/reveal";
 import { HeroDemo } from "@/lib/theme-v2/hero-demo";
 import { CtaRace } from "@/lib/theme-v2/cta-race";
@@ -40,8 +41,6 @@ import {
   ink,
   inlineLink,
   lightAmbient,
-  navLink,
-  navShell,
   pageShell,
   tile,
 } from "@/lib/theme-v2/theme";
@@ -54,18 +53,24 @@ const features = [
     title: "AI Website Chat",
     description:
       "Answer website visitors' questions, capture leads, and book appointments while you focus on your business.",
+    href: "/ai-chatbot-for-small-business",
+    linkText: "Explore website chat",
   },
   {
     icon: Phone,
     title: "Automatic Missed-Call Texting",
     description:
       "SMS plans send a text when you miss a call. SMS + Web Chat adds AI that can carry the conversation for you.",
+    href: "/#missed-call-text-back",
+    linkText: "How missed-call text back works",
   },
   {
     icon: PhoneCall,
     title: "SimplAssist can talk, too.",
     description:
       "Give callers a natural, back-and-forth conversation when you're unavailable. SimplAssist answers questions, collects details, and helps book appointments. Included with Full Suite.",
+    href: "/ai-receptionist-for-small-business",
+    linkText: "Meet SimplAssist Voice",
   },
   {
     icon: Inbox,
@@ -508,15 +513,6 @@ function HeroStatCards() {
   );
 }
 
-function Logo() {
-  return (
-    <>
-      <Image src="/logo-dark.png" alt="SimplAssist" width={140} height={34} className="hidden dark:block h-8 w-auto object-contain" />
-      <Image src="/logo-light.png" alt="SimplAssist" width={140} height={34} className="block dark:hidden h-8 w-auto object-contain" />
-    </>
-  );
-}
-
 function SectionHeader({
   id,
   title,
@@ -633,9 +629,7 @@ export default function HomePage() {
   const comparisonPlans = publicChatOnlyAvailable
     ? [chatOnlyPlan, ...existingPlans]
     : existingPlans;
-  const pricingCardPlans = publicChatOnlyAvailable
-    ? [chatOnlyPlan, existingPlans[1], existingPlans[2]]
-    : existingPlans;
+  const pricingCardPlans = comparisonPlans;
 
   return (
     <div className={`${pageShell} isolate`} style={{ fontFamily: fontStack }}>
@@ -687,35 +681,7 @@ export default function HomePage() {
       />
 
       {/* ── Navigation — frosted pill; must NOT be inside a transformed parent or fixed breaks ── */}
-      <nav className={`${navShell} flex items-center justify-between gap-3 sm:gap-4 px-3 py-2 sm:px-6 sm:py-3`}>
-        <div className="flex items-center gap-3.5 min-w-0">
-          <Link href="/">
-            <Logo />
-          </Link>
-        </div>
-
-        <div className="hidden md:flex items-center gap-6">
-          <a href="#features" className={navLink}>
-            Features
-          </a>
-          <a href="#how-it-works" className={navLink}>
-            How It Works
-          </a>
-          <a href="#pricing" className={navLink}>
-            Pricing
-          </a>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <ThemeToggleV2 />
-          <Link href="/login" className={`${btnSecondary} max-sm:hidden`}>
-            Log In
-          </Link>
-          <Link href="/signup" className={btnPrimary}>
-            Get Started
-          </Link>
-        </div>
-      </nav>
+      <MarketingHeader />
 
       {/* ── Container ── */}
       <div className="relative z-[1] w-[min(calc(100%-32px),1200px)] mx-auto pt-[5.25rem] sm:pt-24">
@@ -723,41 +689,31 @@ export default function HomePage() {
         <section id="hero" className="grid lg:grid-cols-[1.12fr_.88fr] gap-7 items-center pt-4 pb-10">
           <Reveal priority>
             <div className="flex flex-col items-start">
-              <h1 className={`text-[clamp(40px,7vw,76px)] font-extrabold leading-[0.96] tracking-[-0.05em] mb-5 mt-12 sm:mt-0 ${ink}`}>
-                Stop losing <span className={accentText}>money</span>{" "}
-                <br className="hidden sm:block" />
-                to missed calls.
+              <h1 className={`text-[clamp(40px,6vw,68px)] font-extrabold leading-[1.02] tracking-[-0.05em] mb-5 mt-12 sm:mt-0 ${ink}`}>
+                Missed call text back. <span className={accentText}>Keep the conversation going.</span>
               </h1>
 
               <p className={`text-[clamp(17px,2.3vw,20px)] leading-[1.7] ${body} max-w-[680px] mb-7`}>
-                {publicChatOnlyAvailable ? (
-                  <>
-                    Start with website chat for {formattedPlanPrice("chat_only")}/month
-                    to answer questions, capture leads, and book appointments. With
-                    Full Suite, SimplAssist can also talk with callers, answer their
-                    questions, and help book appointments when you can&apos;t pick up.
-                  </>
-                ) : (
-                  <>
-                    SimplAssist texts missed callers back, chats with website visitors,
-                    and helps book appointments. With Full Suite, SimplAssist can
-                    also talk with callers and answer their questions when you
-                    can&apos;t pick up.
-                  </>
-                )}
+                When you can&apos;t answer, SimplAssist sends your caller a text so
+                they can tell you what they need. Missed-call texting starts at
+                {" "}{formattedPlanPrice("sms_only")}/month. Add AI text conversations
+                and website chat, or let SimplAssist talk with callers on Full Suite.
               </p>
 
               {/* CTA buttons — flat, matte, no glow */}
               <div className="flex gap-3.5 flex-wrap mb-7">
-                <Link href="/signup" className={btnPrimary}>
-                  {publicChatOnlyAvailable
-                    ? `Start with ${formattedPlanPrice("chat_only")} Webchat`
-                    : "Get Started"}
-                </Link>
+                <a href="#pricing" className={btnPrimary}>See missed-call texting plans</a>
                 <a href="#try-it-live" className={btnSecondary}>
                   Try Chat or Call
                 </a>
               </div>
+
+              <p className={`text-sm leading-6 ${body}`}>
+                {smsActivationFeeLabel}. SMS Only includes manual follow-up.
+                {publicChatOnlyAvailable && (
+                  <> Just need website chat? <Link href="/ai-chatbot-for-small-business" className={`${inlineLink} underline underline-offset-4`}>Start with {formattedPlanPrice("chat_only")}/month webchat</Link>, with no setup fee.</>
+                )}
+              </p>
 
               {/* Mini stat cards — desktop: in-column under the CTAs */}
               <div className="hidden lg:grid lg:grid-cols-3 gap-3.5 mt-7 w-full">
@@ -800,6 +756,27 @@ export default function HomePage() {
           </Reveal>
         </section>
 
+        <section id="missed-call-text-back" aria-labelledby="text-back-heading" className="scroll-mt-32 py-10 sm:py-14">
+          <Reveal>
+            <h2 id="text-back-heading" className={`text-[clamp(28px,4vw,44px)] font-extrabold leading-[1.1] tracking-[-0.035em] ${ink}`}>How missed-call text back works.</h2>
+            <p className={`${body} mt-4 max-w-3xl leading-7`}>A missed call doesn&apos;t have to end the conversation. Once your SMS account is approved and your SimplAssist number is set up, an unanswered call can become a text conversation you can follow up on.</p>
+          </Reveal>
+          <ol className="mt-8 grid gap-5 md:grid-cols-3">
+            {[
+              { title: "Your business misses a call", text: "You might be with a customer, on a job, or away from the phone. SimplAssist handles missed-call follow-up on your configured business line." },
+              { title: "The caller gets a text", text: "A branded message invites them to reply. For example: “Sorry we missed your call. How can we help?” They can explain what they need without calling again." },
+              { title: "Keep the conversation moving", text: "Reply yourself with SMS Only. SMS + Web Chat and Full Suite add AI text conversations that answer questions and help book appointments with a connected Google Calendar." },
+            ].map((step, index) => (
+                <li key={step.title} className={`${card} h-full p-6 sm:p-8`}>
+                  <span aria-hidden="true" className={`text-sm font-extrabold ${accentText}`}>0{index + 1}</span>
+                  <h3 className={`mt-4 text-xl font-bold ${ink}`}>{step.title}</h3>
+                  <p className={`${body} mt-3 leading-7`}>{step.text}</p>
+                </li>
+            ))}
+          </ol>
+          <p className={`${body} mt-6 text-sm leading-6`}>Prefer a spoken conversation? <Link href="/ai-receptionist-for-small-business" className={`${inlineLink} underline underline-offset-4`}>SimplAssist Voice answers callers on Full Suite.</Link></p>
+        </section>
+
         {/* ── Features ── */}
         <section id="features" className="py-16 sm:py-24">
           <SectionHeader
@@ -831,6 +808,7 @@ export default function HomePage() {
                     {feature.title}
                   </h3>
                   <p className={`${body} leading-[1.7]`}>{feature.description}</p>
+                  {feature.href && <Link href={feature.href} className={`${inlineLink} mt-5 inline-block text-sm underline underline-offset-4`}>{feature.linkText}</Link>}
                 </div>
               </Reveal>
             ))}
@@ -967,6 +945,7 @@ export default function HomePage() {
                   answer questions using your business information, collect their
                   details, and help book appointments when you can&apos;t pick up.
                 </p>
+                <Link href="/ai-receptionist-for-small-business" className={`${inlineLink} mt-4 inline-block text-sm underline underline-offset-4`}>See how SimplAssist Voice works during a call</Link>
                 <p className={`${body} mt-5 border-t border-[#ece4d8] pt-5 text-sm leading-[1.65] dark:border-white/[0.10]`}>
                   Try asking: &ldquo;What does SimplAssist do?&rdquo; Then ask:
                   &ldquo;Which plan includes phone answering?&rdquo;
@@ -1014,7 +993,7 @@ export default function HomePage() {
             }
           />
 
-          <div className="mx-auto grid max-w-[1160px] items-stretch gap-5 lg:grid-cols-3">
+          <div className={`mx-auto grid max-w-[1200px] items-stretch gap-5 ${publicChatOnlyAvailable ? "md:grid-cols-2 xl:grid-cols-4" : "lg:grid-cols-3"}`}>
             {pricingCardPlans.map((plan, i) => {
               const available =
                 plan.planKey === "chat_only"
@@ -1065,7 +1044,7 @@ export default function HomePage() {
                     <h3 id={cardHeadingId} className={`text-2xl font-bold lg:min-h-16 ${ink}`}>
                       {plan.name}
                     </h3>
-                    <p className={`${body} mt-2 leading-[1.65] mb-6 lg:min-h-24`}>
+                    <p className={`${body} mt-2 leading-[1.65] mb-6 lg:min-h-24 ${publicChatOnlyAvailable ? "xl:min-h-36" : ""}`}>
                       {plan.description}
                     </p>
                     <div className={`mb-1 text-[50px] font-extrabold tracking-[-0.05em] ${ink}`}>
@@ -1075,7 +1054,7 @@ export default function HomePage() {
                       </span>
                       <span className="sr-only">{plan.price} per month</span>
                     </div>
-                    <p className="mb-6 min-h-6 text-sm font-bold text-[#c2410c] dark:text-[#ffb080]">
+                    <p className={`mb-6 min-h-6 text-sm font-bold text-[#c2410c] dark:text-[#ffb080] ${publicChatOnlyAvailable ? "xl:min-h-10" : ""}`}>
                       {plan.billingNote}
                     </p>
                     <ul
@@ -1109,21 +1088,6 @@ export default function HomePage() {
           <p className={`mt-5 text-center text-sm leading-6 ${body}`}>
             {FULL_SUITE_USAGE_NOTE}
           </p>
-
-          {publicChatOnlyAvailable && (
-            <p
-              data-sms-only-footnote
-              className={`mt-5 text-center text-sm leading-6 ${body}`}
-            >
-              Just need missed-call texting without web chat?{" "}
-              <Link
-                href="/signup"
-                className={`${inlineLink} font-semibold underline-offset-4 hover:underline`}
-              >
-                SMS Only — $25/mo <span aria-hidden="true">&rarr;</span>
-              </Link>
-            </p>
-          )}
 
           <Reveal className="mt-7">
             <details className="sa-pricing-comparison group">
@@ -1379,41 +1343,7 @@ export default function HomePage() {
         </section>
 
         {/* ── Footer ── */}
-        <footer className="pb-10 pt-2">
-          <Reveal>
-            {/* Mobile: stacked and centered (logo / copyright / links);
-                sm+: single row, logo+copyright left, links right */}
-            <div className={`px-6 py-7 sm:py-6 flex flex-col items-center gap-4 text-center sm:flex-row sm:justify-between sm:text-left ${card}`}>
-              <div className="flex flex-col items-center gap-2 sm:flex-row sm:gap-3.5">
-                <Image
-                  src="/logo-dark.png"
-                  alt="SimplAssist"
-                  width={88}
-                  height={22}
-                  className="hidden dark:block h-[22px] w-auto object-contain"
-                />
-                <Image
-                  src="/logo-light.png"
-                  alt="SimplAssist"
-                  width={88}
-                  height={22}
-                  className="block dark:hidden h-[22px] w-auto object-contain"
-                />
-                <small className="text-stone-500 dark:text-[#bdbdbf] block sm:mt-1">
-                  &copy; {new Date().getFullYear()} SimplAssist, a product of Arambula Ventures LLC.
-                </small>
-              </div>
-              <div className="flex gap-x-5 gap-y-2 flex-wrap justify-center text-sm">
-                <a href="#features" className={navLink}>Features</a>
-                <a href="#pricing" className={navLink}>Pricing</a>
-                <Link href="/support" className={navLink}>Support</Link>
-                <Link href="/privacy" className={navLink}>Privacy</Link>
-                <Link href="/terms" className={navLink}>Terms</Link>
-                <Link href="/login" className={navLink}>Log In</Link>
-              </div>
-            </div>
-          </Reveal>
-        </footer>
+        <MarketingFooter />
       </div>
     </div>
   );

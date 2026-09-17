@@ -245,7 +245,7 @@ describe("canonical homepage static HTML", () => {
     );
   });
 
-  it("renders three focused selling cards and a complete plan matrix when Chat Only is public", () => {
+  it("renders all four public plans with a complete plan matrix", () => {
     const html = renderHomepage(true);
     const pricing = html.match(
       /<section id="pricing"[\s\S]*?<\/section>/,
@@ -287,8 +287,7 @@ describe("canonical homepage static HTML", () => {
     ];
 
     expect(pricing).toBeDefined();
-    expect(topPlanKeys).toEqual(["chat_only", "sms_and_chat", "full"]);
-    expect(pricing).not.toContain('data-plan-card="sms_only"');
+    expect(topPlanKeys).toEqual(["chat_only", "sms_only", "sms_and_chat", "full"]);
     expect(text).toContain("Chat Only");
     expect(text).toMatch(/\$10\s*\/mo/);
     expect(text).toContain("200 completed AI replies/month");
@@ -329,12 +328,7 @@ describe("canonical homepage static HTML", () => {
     expect(comparisonToggle).toContain('aria-hidden="true"');
     expect(comparisonToggle).not.toContain("<button");
     expect(comparisonToggle).not.toContain("<a");
-    expect(text).toContain(
-      "Just need missed-call texting without web chat? SMS Only — $25/mo →",
-    );
-    expect(pricing).toMatch(
-      /<p data-sms-only-footnote[^>]*>[\s\S]*?href="\/signup"[\s\S]*?SMS Only — \$25\/mo[\s\S]*?<\/p>/,
-    );
+    expect(pricing).toContain('aria-label="Get started with SMS Only"');
     expect(text).toContain("SMS + Web Chat");
     expect(text).toContain("Full Suite");
     expect(text.match(/Most Popular/g)).toHaveLength(1);
@@ -461,7 +455,7 @@ describe("canonical homepage static HTML", () => {
 });
 
 describe("homepage JSON-LD", () => {
-  it("emits one valid graph with two purchasable offers and FAQ parity", () => {
+  it("emits one valid graph with purchasable SMS offers and FAQ parity", () => {
     const html = renderHomepage();
     const jsonScript = html.match(
       /<script type="application\/ld\+json">([\s\S]*?)<\/script>/
@@ -499,7 +493,7 @@ describe("homepage JSON-LD", () => {
     });
 
     const offers = application?.offers as JsonRecord[];
-    expect(offers).toHaveLength(2);
+    expect(offers).toHaveLength(3);
     expect(offers.map(({ name, price, priceCurrency }) => ({
       name,
       price,
@@ -507,8 +501,8 @@ describe("homepage JSON-LD", () => {
     }))).toEqual([
       { name: "SMS Only", price: 25, priceCurrency: "USD" },
       { name: "SMS + Web Chat", price: 45, priceCurrency: "USD" },
+      { name: "Full Suite", price: 65, priceCurrency: "USD" },
     ]);
-    expect(offers.map((offer) => offer.name)).not.toContain("Full Suite");
 
     for (const offer of offers) {
       const specifications = offer.priceSpecification as JsonRecord[];
@@ -569,6 +563,7 @@ describe("homepage JSON-LD", () => {
       { name: "Chat Only", price: 10 },
       { name: "SMS Only", price: 25 },
       { name: "SMS + Web Chat", price: 45 },
+      { name: "Full Suite", price: 65 },
     ]);
     expect(chatOffer).toMatchObject({
       price: 10,

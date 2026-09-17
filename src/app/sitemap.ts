@@ -4,6 +4,8 @@ const SITE_URL = "https://simplassist.com";
 
 const SITEMAP_PATHS = [
   "",
+  "/ai-chatbot-for-small-business",
+  "/ai-receptionist-for-small-business",
   "/support",
   "/support/setup-fee",
   "/privacy",

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { isPlanAvailable } from "@/lib/billing/planAvailability";
 import { FULL_SUITE_PACKAGE_SUMMARY } from "@/lib/billing/fullSuitePresentation";
+import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
 
 const fullSuitePricingCopy = `${FULL_SUITE_PACKAGE_SUMMARY} ${isPlanAvailable("full")
   ? "Choose Full Suite during signup, or upgrade from your billing page."
@@ -17,14 +18,13 @@ export const HOME_DESCRIPTION =
 export const HOME_DEFINITION =
   "SimplAssist is a missed call text back service for small businesses, with plans starting at $25/month. Its $45/month plan adds an AI receptionist for SMS and web chat, a website chat widget, and Google Calendar appointment booking. With Full Suite, SimplAssist can also talk with callers, answer questions, collect their details, and help book appointments when you can't pick up.";
 
-export const CHAT_ONLY_HOME_TITLE =
-  "SimplAssist — $10 AI Website Chat for Small Businesses";
+export const CHAT_ONLY_HOME_TITLE = HOME_TITLE;
 
 export const CHAT_ONLY_HOME_DESCRIPTION =
-  "AI website chat for $10/month: answer questions, capture leads, and book appointments. No setup fee. Explore texting plans and Full Suite AI phone answering.";
+  "Missed call text back for small businesses from $25/month. Keep leads talking with SimplAssist. Explore $10 website chat and Full Suite phone answering.";
 
 export const CHAT_ONLY_HOME_DEFINITION =
-  "SimplAssist helps small businesses answer customers and book appointments. Start with Chat Only at $10/month for 200 completed website-chat AI replies, lead capture, a conversation inbox, AI customization, and Google Calendar booking, with no phone, texting, or setup fee. SMS plans add missed-call texting. With Full Suite, SimplAssist can also talk with callers, answer questions, and help book appointments when you can't pick up.";
+  "SimplAssist is a missed call text back service for small businesses. SMS Only starts at $25/month: missed callers receive an automatic text, and you follow up from your inbox. SMS + Web Chat at $45/month adds AI text conversations, website chat, and Google Calendar booking. For website chat on its own, Chat Only is $10/month with 200 completed AI replies and no setup fee. Full Suite adds SimplAssist Voice, so callers can have a spoken conversation, ask questions, and get help booking appointments.";
 
 export type HomepageFaq = {
   question: string;
@@ -97,9 +97,9 @@ const BASE_HOME_FAQS = [
 
 export const HOME_FAQS = [
   BASE_HOME_FAQS[1],
+  BASE_HOME_FAQS[0],
   BASE_HOME_FAQS[3],
   ...VOICE_FAQS,
-  BASE_HOME_FAQS[0],
   BASE_HOME_FAQS[2],
   ...BASE_HOME_FAQS.slice(4),
 ] as const satisfies readonly HomepageFaq[];
@@ -110,19 +110,19 @@ export const CHAT_ONLY_HOME_FAQS = [
     answer:
       "SimplAssist is a customer communication service built for small businesses. Chat Only provides an AI website receptionist, lead capture, a conversation inbox, and Google Calendar booking without phone or SMS setup. SMS plans add missed-call text back and business texting. Full Suite adds an AI voice receptionist that speaks with callers, collects details, and helps book appointments by phone.",
   },
-  {
-    question: "What is included in Chat Only?",
-    answer:
-      "Chat Only is $10/month and includes a website chat widget, 200 completed AI replies per month, web-chat lead capture, a contact and conversation inbox, AI answer and tone customization, Google Calendar connection, and AI appointment booking. It has no phone number, SMS, MMS, Telnyx activation, or setup fee.",
-  },
+  BASE_HOME_FAQS[0],
   {
     question: "How much does SimplAssist cost?",
     answer:
       `Chat Only is $10/month with 200 completed website-chat AI replies and no setup fee. SMS Only is $25/month with 500 included SMS parts, and SMS + Web Chat is $45/month with 1,500 included SMS parts. Paid SMS activation has a one-time $25 setup fee per business for carrier registration. ${fullSuitePricingCopy}`,
   },
   ...VOICE_FAQS,
-  BASE_HOME_FAQS[0],
   BASE_HOME_FAQS[2],
+  {
+    question: "What is included in Chat Only?",
+    answer:
+      "Chat Only is $10/month and includes a website chat widget, 200 completed AI replies per month, web-chat lead capture, a contact and conversation inbox, AI answer and tone customization, Google Calendar connection, and AI appointment booking. It has no phone number, SMS, MMS, or setup fee.",
+  },
   BASE_HOME_FAQS[4],
   {
     question: "Does the AI answer with my business's real information?",
@@ -270,6 +270,18 @@ export function getHomepageJsonLd(chatOnlyPublicLaunchEnabled = false) {
         activationPriceSpecification,
       ],
     },
+    ...(isPlanAvailable("full") ? [{
+      "@type": "Offer",
+      name: "Full Suite",
+      url: `${SITE_ORIGIN}/#pricing-card-full`,
+      price: SUBSCRIPTION_PLANS.full.price,
+      priceCurrency: "USD",
+      availability: "https://schema.org/InStock",
+      priceSpecification: [
+        monthlyPriceSpecification(SUBSCRIPTION_PLANS.full.price),
+        activationPriceSpecification,
+      ],
+    }] : []),
   ];
 
   return {

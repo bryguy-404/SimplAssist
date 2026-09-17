@@ -65,7 +65,9 @@ export default async function VoiceCallPage({
       <section>
         <h2 className="text-xl font-semibold">Recording</h2>
         <p className="mt-2 text-sm text-stone-500">
-          {session.prior_disclosure_acknowledged_at
+          {session.disclosure_version === 2
+            ? "This call used the natural AI greeting setting. The recording announcement was disabled; no spoken recording notice is recorded."
+            : session.prior_disclosure_acknowledged_at
             ? "This private tester previously acknowledged AI use, audio recording and transcript storage. The call opened directly with the live assistant."
             : session.notice_completed_at
               ? "The AI and recording notice played before recording began."

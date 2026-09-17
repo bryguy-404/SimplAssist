@@ -9,7 +9,7 @@ import { WebSocketServer } from "ws";
 import { consumeStreamToken, createVoiceStore } from "../src/lib/voice/store";
 import { createVoiceAnswerer } from "../src/lib/voice/answer";
 import { LiveCall } from "../src/lib/voice/liveSession";
-import { VOICE_MODEL, usesPublicDisclosure } from "../src/lib/voice/types";
+import { VOICE_MODEL, usesPublicOpening } from "../src/lib/voice/types";
 import type { AudioProfileName } from "../src/lib/voice/audio";
 
 function required(name: string) {
@@ -187,6 +187,7 @@ const server = createServer((req, res) => {
       activeCalls: calls.size,
       actionProtocol: actionClient ? 1 : 0,
       commercialProtocol: 2,
+      naturalOpeningProtocol: 1,
     }),
   );
 });
@@ -263,7 +264,7 @@ server.on("upgrade", (req, socket, head) => {
                   .then(() => undefined)
             : undefined,
           stopConnectingRingback:
-            openingRingback && (session.prior_disclosure_acknowledged_at || usesPublicDisclosure(session))
+            openingRingback && (session.prior_disclosure_acknowledged_at || usesPublicOpening(session))
               ? async () => {
                   await telnyx.calls.actions.stopPlayback(
                     session.call_control_id,

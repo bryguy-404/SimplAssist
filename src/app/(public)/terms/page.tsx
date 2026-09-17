@@ -109,7 +109,7 @@ export default function TermsPage() {
           Full Suite includes 2,500 SMS parts and 100 voice minutes per billing month. Long texts
           can use multiple parts. A mid-period upgrade receives a proportional voice allowance
           until renewal. Voice minutes do not roll over, and there are no automatic paid voice
-          overages. Ringing, preparation, and the recording notice do not count toward the voice
+          overages. Ringing, preparation, and a recording announcement when enabled do not count toward the voice
           allowance; conversation time includes listening, pauses, and response waits. When voice
           is unavailable or the allowance is exhausted, your selected eligible fallback applies.
         </p>

@@ -43,6 +43,8 @@ $require_disposable_local_database$;
 SELECT extensions.dblink_connect('monthly_setup','host=supabase_db_SimplAssist port=5432 dbname=postgres user=postgres password=postgres');
 SELECT extensions.dblink_exec('monthly_setup',$setup$
 CREATE TEMP TABLE monthly_audit_before AS SELECT id FROM public.voice_commercial_audit;
+-- This concurrency fixture exercises the legacy meter without changing an admitted protocol.
+ALTER TABLE public.voice_sessions ALTER COLUMN disclosure_version SET DEFAULT 0;
 INSERT INTO auth.users(id,email) VALUES('00000000-0000-4000-a082-000000000001','monthly-race@example.test');
 INSERT INTO public.businesses(id,owner_id,name,business_type,slug) VALUES('10000000-0000-4000-a082-000000000001','00000000-0000-4000-a082-000000000001','Monthly race','general','monthly-race');
 INSERT INTO public.voice_rollout_businesses(business_id,enabled) VALUES('10000000-0000-4000-a082-000000000001',true);
@@ -87,9 +89,9 @@ SELECT extensions.dblink_disconnect('monthly_c');
 -- must fail promptly while unsettled, rather than wait on the ledger FK and
 -- deadlock the end event which is waiting for this history row.
 SELECT extensions.dblink_exec('monthly_setup',$prepare$
+ALTER TABLE public.voice_sessions ALTER COLUMN disclosure_version SET DEFAULT 1;
 DO $$ DECLARE s public.voice_customer_usage; BEGIN
   SELECT * INTO s FROM public.voice_customer_usage WHERE business_id='10000000-0000-4000-a082-000000000001' AND settled_at IS NULL;
-  UPDATE public.voice_sessions SET disclosure_version=0 WHERE id=s.call_key;
   PERFORM public.record_voice_customer_start(s.call_key,'race-first-audible',s.created_at);
   PERFORM public.acknowledge_voice_customer_start(s.call_key,'race-first-audible');
   PERFORM public.record_voice_customer_termination(s.call_key,'race-proven-termination',clock_timestamp());

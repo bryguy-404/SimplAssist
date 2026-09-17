@@ -30,7 +30,7 @@ export default function PrivacyPage() {
           address, phone number, hours, services). We collect customer contact information when
           customers call, text, or chat with the AI (names, email addresses, phone numbers,
           conversation content, and confirmed appointment details). Voice audio is processed to
-          conduct the conversation. We also store call transcripts, disclosed call recordings,
+          conduct the conversation. We also store call transcripts, call recordings,
           action results, and usage data to operate and improve the service.
         </p>
       </LegalSection>
@@ -138,10 +138,13 @@ export default function PrivacyPage() {
           request data deletion by contacting support.
         </p>
         <p className="mb-4">
-          Public voice callers hear an AI and recording notice before we begin saving call audio
-          or transcripts. If a caller interrupts that notice, the system may briefly process their
-          reply to handle an objection or repeat the notice. That opening input is not saved in
-          the call transcript. An approved private tester may have acknowledged recording in advance.
+          Our voice assistant identifies itself as AI at the beginning of a call. Voice calls
+          are recorded and transcribed. A spoken recording announcement may be enabled or disabled
+          by SimplAssist; recording and transcription continue when that announcement is disabled.
+          When the announcement is enabled, recording and transcript storage begin after it plays.
+          The system may briefly process an interruption to handle an objection or repeat the
+          announcement; that opening input is not saved in the call transcript. An approved
+          private tester may have acknowledged recording in advance.
         </p>
         <p>
           Call audio recordings are retained for 30 days and then deleted through our automated

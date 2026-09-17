@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildBusinessFacts, buildSystemPrompt } from "../ai/prompt";
 import { buildVoiceAnswerPrompt } from "./knowledge";
-import { buildLiveInstructions, LIVE_INSTRUCTIONS } from "./conversationStyle";
+import { buildLiveGreeting, buildLiveInstructions, LIVE_INSTRUCTIONS } from "./conversationStyle";
 import type {
   Business,
   AISettings,
@@ -40,6 +40,20 @@ const knowledge = [
 ] as BusinessKnowledgeItem[];
 
 describe("shared voice knowledge", () => {
+  it("uses one flexible business AI greeting without inventing recording notice evidence", () => {
+    const greeting = buildLiveGreeting();
+    expect(greeting).toContain("still give the brief business/AI identification");
+    expect(greeting).toContain("address it without another help question");
+    expect(Buffer.byteLength(greeting, "utf8")).toBeLessThanOrEqual(500);
+    const instructions = buildLiveInstructions("Lakeview Plumbing", false, true, true, false, true);
+    expect(instructions).toContain("Lakeview Plumbing’s AI assistant");
+    expect(instructions).toContain("Small phrasing variations are welcome");
+    expect(instructions).toContain("no recording announcement is configured");
+    expect(instructions).toContain("If asked about recording, explain it truthfully");
+    expect(instructions).not.toContain("already heard");
+    expect(instructions).not.toContain("previously acknowledged");
+    expect(instructions).not.toContain("public opening phase");
+  });
   it("distinguishes prior tester acknowledgment from a notice played on this call", () => {
     expect(buildLiveInstructions("Lakeview Plumbing", true)).toContain(
       "previously acknowledged",

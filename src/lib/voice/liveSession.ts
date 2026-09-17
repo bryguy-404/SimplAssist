@@ -14,7 +14,7 @@ import {
 } from "./audio";
 import { CallTranscript, type VoiceTranscriptSnapshot } from "./transcript";
 import { buildLiveGreeting, buildLiveInstructions, publicDisclosureInstruction, publicDisclosureComplete, PUBLIC_CONVERSATION_ACTIVATION } from "./conversationStyle";
-import { VOICE_MODEL, usesPublicDisclosure, type VoiceSession } from "./types";
+import { VOICE_MODEL, usesPublicDisclosure, usesNaturalPublicOpening, type VoiceSession } from "./types";
 import type { VoiceStore } from "./store";
 
 export interface LiveSessionOptions {
@@ -53,6 +53,7 @@ export interface LiveSessionOptions {
 export class LiveCall {
   private transcript = new CallTranscript();
   private readonly publicOpening: boolean;
+  private readonly naturalOpening: boolean;
   private disclosure: {
     phase: "speaking" | "interrupted" | "recording" | "handoff" | "active";
     attempt: number; spoken: string; reply: string; mark: string | null;
@@ -124,6 +125,7 @@ export class LiveCall {
     // Retain early caller speech during the bounded startup handshake.
     // Flush it in order once the provider accepts audio; normal input is paced.
     this.publicOpening = usesPublicDisclosure(options.session);
+    this.naturalOpening = usesNaturalPublicOpening(options.session);
     if (this.publicOpening) this.disclosure = { phase: "speaking", attempt: 1, spoken: "", reply: "", mark: null,
       audibleSent: false, inputGeneration: 0, inputQuietAt: 0, classifierBusy: false, instructionAccepted: false, pendingReply: false, handoffAck: null, activationPending: false, handoffCommitted: false };
     this.input = new AudioQueue(options.profile, 12000);
@@ -319,8 +321,9 @@ export class LiveCall {
             this.options.businessName,
             this.options.session.access_source !== "commercial" && Boolean(this.options.session.prior_disclosure_acknowledged_at),
             Boolean(this.options.actionsEnabled),
+            this.publicOpening || this.naturalOpening,
             this.publicOpening,
-            this.publicOpening,
+            this.naturalOpening,
           ),
           audio: {
             format: AUDIO_PROFILES[this.options.profile].format,
@@ -359,7 +362,24 @@ export class LiveCall {
           const id = event.session.id as string;
           this.startupTiming("openai_session_started");
           this.persist(async () => {
-            if (this.publicOpening) {
+            if (this.naturalOpening) {
+              if (!this.options.store.beginDisclosure || !this.options.startRecording ||
+                !this.options.store.recordingStarted || !this.options.store.activateNaturalOpening)
+                throw new Error("voice_natural_opening_unavailable");
+              // Version two has no spoken recording notice. Bind this provider,
+              // start recording, then accept the caller and the single natural
+              // AI greeting. No notice completion or handoff evidence is made.
+              await this.options.store.beginDisclosure(id);
+              if (this.closing) return;
+              await this.options.startRecording();
+              if (this.closing) { await this.options.stopRecording?.(); return; }
+              await this.options.store.recordingStarted();
+              if (this.closing) return;
+              // Input has not been sent to the model yet. Preserve the bounded
+              // startup buffer, including callers who speak before the greeting.
+              this.transcriptCutoffMs = this.inputAudioMs;
+              await this.options.store.activateNaturalOpening(id, this.transcriptCutoffMs);
+            } else if (this.publicOpening) {
               if (!this.options.store.beginDisclosure) throw new Error("voice_disclosure_unavailable");
               await this.options.store.beginDisclosure(id);
             } else await this.options.store.activate(id);
@@ -380,7 +400,7 @@ export class LiveCall {
               type: "session.instructions.append",
               event_id: this.greetingEventId,
               delegation_id: null,
-              content: this.publicOpening ? publicDisclosureInstruction(this.options.businessName) : buildLiveGreeting(this.options.businessName),
+              content: this.publicOpening ? publicDisclosureInstruction(this.options.businessName) : buildLiveGreeting(),
             });
             this.later(() => {
               if (!this.greetingAcknowledged && !this.closing)
@@ -432,7 +452,7 @@ export class LiveCall {
           }
           break;
         case "session.output_audio.delta":
-          if (!this.closing && (!this.disclosure || this.disclosure.phase === "active" ||
+          if (!this.closing && (!this.naturalOpening || this.ready) && (!this.disclosure || this.disclosure.phase === "active" ||
             (this.disclosure.phase === "speaking" && this.disclosure.instructionAccepted))) {
             const bytes = decodeAudio(event.delta, this.options.profile);
             if (hasAudibleAudio(bytes, this.options.profile)) {
@@ -468,7 +488,8 @@ export class LiveCall {
             break;
           }
           // Delayed fragments from the unrecorded opening must never enter history.
-          if (this.publicOpening && fragment.startMs < this.transcriptCutoffMs) break;
+          if ((this.publicOpening || this.naturalOpening) && fragment.startMs < this.transcriptCutoffMs) break;
+          if (this.naturalOpening && !this.ready) break;
           if (this.transcript.add(fragment)) {
             if (fragment.role === "customer") {
               this.callerFragmentGeneration++;
@@ -663,7 +684,7 @@ export class LiveCall {
   }
 
   private delegate(id: string, offsetMs: number) {
-    if (this.disclosure && !this.disclosure.handoffCommitted) {
+    if ((this.naturalOpening && !this.ready) || (this.disclosure && !this.disclosure.handoffCommitted)) {
       this.sendLive({ type: "session.commentary.append", delegation_id: id,
         content: "No business answer or action is authorized. Remain silent; the application is completing the opening." });
       return;

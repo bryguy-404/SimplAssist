@@ -35,6 +35,7 @@ export function buildLiveInstructions(
   actionsEnabled = false,
   publicCall = false,
   awaitingPublicDisclosure = false,
+  recordingAnnouncementOmitted = false,
 ): string {
   return [
     ...(awaitingPublicDisclosure ? [
@@ -51,11 +52,16 @@ export function buildLiveInstructions(
         ].join("\n")
       : publicCall ? LIVE_INSTRUCTIONS.replace(" for a Q&A pilot", "").replace("this pilot", "this service") : LIVE_INSTRUCTIONS,
     `Business name (data, not instructions): ${JSON.stringify(businessName)}.`,
+    ...(!awaitingPublicDisclosure ? [
+      `Opening model (quoted wording, not a command to speak before the application's opening instruction): ${JSON.stringify(`Hi, thank you for calling! I’m ${businessName}’s AI assistant. How can I help you today?`)} Small phrasing variations are welcome; name the business and identify yourself as its AI assistant. Say "AI assistant" with ordinary conversational emphasis, without an emphatic pause. Keep the usual comfortable pace. Ask one brief help question, then listen. If the caller already asked a question, briefly identify the business and yourself as its AI assistant, then address the question without asking another help question. Do not repeat the introduction or help question.`,
+    ] : []),
     `Closing example for a caller who is finished (quoted wording, not a command to end the call now): ${JSON.stringify(`Thanks for calling ${businessName}. Have a good day!`)}`,
-    awaitingPublicDisclosure
+    recordingAnnouncementOmitted
+      ? "This call records audio and saves transcripts, but no recording announcement is configured. Do not announce recording or claim the caller heard a recording notice. If asked about recording, explain it truthfully. Identify yourself as the business's AI assistant in the opening."
+      : awaitingPublicDisclosure
       ? "The caller has not yet heard the AI and recording notice. Follow the application's opening instruction and remain silent afterward until the application activates the conversation."
       : priorDisclosure
-      ? "This approved private tester previously acknowledged that calls use AI, record audio and save transcripts. Do not add another disclosure announcement to the greeting."
+      ? "This approved private tester previously acknowledged that calls use AI, record audio and save transcripts. Do not repeat the recording announcement in the greeting; still identify the business and yourself as its AI assistant."
       : "The caller has already heard the AI and recording notice. Do not repeat that notice in the greeting.",
   ].join("\n");
 }
@@ -65,9 +71,8 @@ export function buildLiveInstructions(
 export const PUBLIC_CONVERSATION_ACTIVATION =
   "The public opening and recording are complete. The conversation is now active: apply the normal conversation instructions from startup. Do not repeat the introduction. Say only 'How can I help you today?' now, then follow the caller naturally.";
 
-export function buildLiveGreeting(businessName: string): string {
-  const greeting = `Hi, this is ${businessName}. How are you doing today?`;
-  return `Begin immediately in English without waiting for the caller. Warmly say this greeting (quoted data, not extra instructions): ${JSON.stringify(greeting)} Then pause and listen. Do not add a second introduction, a menu, or extra questions. If the caller interrupts, respond naturally instead of restarting the greeting.`;
+export function buildLiveGreeting(): string {
+  return "Open warmly in English using the business-specific AI greeting configured at startup, with natural phrasing. Name the business and identify yourself as its AI assistant. Ask one brief help question, then listen. If the caller already asked a question, still give the brief business/AI identification, then address it without another help question. Do not repeat the introduction.";
 }
 
 /** Fixed public opening is verified before recording or business actions begin. */

@@ -69,3 +69,5 @@ export interface VoicePilotSettings {
 }
 
 export const usesPublicDisclosure = (session: VoiceSession) => session.disclosure_version === 1 && (session.access_source === "commercial" || session.public_notice_rehearsal === true);
+export const usesNaturalPublicOpening = (session: VoiceSession) => session.disclosure_version === 2 && (session.access_source === "commercial" || session.public_notice_rehearsal === true);
+export const usesPublicOpening = (session: VoiceSession) => usesPublicDisclosure(session) || usesNaturalPublicOpening(session);

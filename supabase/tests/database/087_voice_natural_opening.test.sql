@@ -1,0 +1,152 @@
+BEGIN;
+CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
+SET LOCAL search_path=public,extensions;
+SELECT no_plan();
+CREATE TEMP TABLE natural_fixture(b uuid,o uuid,p uuid);
+DO $$ DECLARE b uuid:=gen_random_uuid(); o uuid:=gen_random_uuid(); p uuid:=gen_random_uuid(); BEGIN
+  INSERT INTO auth.users(id,email) VALUES(o,'natural-opening@example.test');
+  INSERT INTO public.businesses(id,owner_id,name,business_type,slug) VALUES(b,o,'Natural business','general','natural-opening');
+  INSERT INTO public.phone_numbers(business_id,phone_number,telnyx_phone_number_id,is_active) VALUES(b,'+15555558086','natural-number',true);
+  INSERT INTO public.voice_allowance_periods(id,business_id,subscription_id,period_start,period_end,included_seconds,grant_effective_at)
+    VALUES(p,b,'natural-subscription',now()-interval '1 day',now()+interval '29 days',6000,now()-interval '1 day');
+  INSERT INTO natural_fixture VALUES(b,o,p);
+END $$;
+CREATE FUNCTION pg_temp.natural_call(label text) RETURNS uuid LANGUAGE plpgsql AS $$
+DECLARE s uuid:=gen_random_uuid(); c uuid:=gen_random_uuid(); v uuid:=gen_random_uuid(); f record;
+BEGIN
+  SELECT * INTO f FROM natural_fixture;
+  INSERT INTO public.contacts(id,business_id,phone_number,source_channel) VALUES(c,f.b,'+1555555'||lpad((1000+(SELECT count(*) FROM public.voice_sessions WHERE business_id=f.b))::text,4,'0'),'voice');
+  INSERT INTO public.conversations(id,business_id,contact_id,channel,is_ai_handling) VALUES(v,f.b,c,'voice',false);
+  INSERT INTO public.voice_sessions(id,business_id,conversation_id,action_business_id,action_conversation_id,call_control_id,call_session_id,caller_phone,called_phone,
+    response_mode,status,reserved_seconds,access_source,allowance_period_id,commercial_deadline_at)
+    VALUES(s,f.b,v,f.b,v,'natural-'||label,'natural-session-'||label,'+15555551000','+15555558086','voice','notice',600,'commercial',f.p,clock_timestamp()+interval '12 minutes');
+  INSERT INTO public.voice_customer_usage(call_key,call_identity_hash,business_id,session_id,period_id,reserved_seconds,created_at)
+    VALUES(s,encode(extensions.digest('natural-'||label,'sha256'),'hex'),f.b,s,f.p,600,clock_timestamp()-interval '3 seconds');
+  INSERT INTO public.voice_stream_credentials(session_id,token_hash,expires_at) VALUES(s,encode(extensions.digest('token-'||label,'sha256'),'hex'),clock_timestamp()+interval '2 minutes');
+  RETURN s;
+END $$;
+CREATE TEMP TABLE natural_calls(n integer,id uuid);
+SELECT ok((SELECT recording_announcement_enabled FROM public.voice_rollout_control),'migration preserves the announcement default');
+SELECT ok(NOT has_column_privilege('authenticated','public.voice_rollout_control','recording_announcement_enabled','UPDATE'),'owners cannot change recording announcement policy');
+SELECT ok(NOT has_table_privilege('anon','public.voice_rollout_control','SELECT'),'anonymous callers cannot inspect protected rollout policy');
+SELECT ok(NOT has_function_privilege('authenticated','public.activate_voice_natural_opening(uuid,text,numeric)','EXECUTE'),'owners cannot activate natural openings');
+SELECT ok(NOT has_function_privilege('anon','public.activate_voice_natural_opening(uuid,text,numeric)','EXECUTE'),'anonymous callers cannot activate natural openings');
+SELECT ok(has_function_privilege('service_role','public.activate_voice_natural_opening(uuid,text,numeric)','EXECUTE'),'only trusted backend may activate natural openings');
+INSERT INTO natural_calls VALUES(1,pg_temp.natural_call('original'));
+UPDATE public.voice_rollout_control SET recording_announcement_enabled=false;
+SELECT ok(EXISTS(SELECT 1 FROM public.voice_commercial_audit WHERE kind='rollout_change' AND details->'after'->>'recording_announcement_enabled'='false'),'policy changes leave audit evidence');
+INSERT INTO natural_calls VALUES(2,pg_temp.natural_call('first'));
+SELECT is((SELECT disclosure_version FROM public.voice_sessions WHERE id=(SELECT id FROM natural_calls WHERE n=1)),1,'already admitted announcement call retains v1');
+SELECT is((SELECT disclosure_version FROM public.voice_sessions WHERE id=(SELECT id FROM natural_calls WHERE n=2)),2,'new public call snapshots natural opening');
+UPDATE public.voice_rollout_control SET recording_announcement_enabled=true;
+SELECT is((SELECT disclosure_version FROM public.voice_sessions WHERE id=(SELECT id FROM natural_calls WHERE n=2)),2,'restoring global policy does not change an admitted natural call');
+SELECT throws_ok($$UPDATE public.voice_sessions SET disclosure_version=1 WHERE id=(SELECT id FROM natural_calls WHERE n=2)$$,'55000','voice opening policy is immutable','service retries cannot rewrite the admitted version');
+SELECT throws_ok($$UPDATE public.voice_sessions SET public_notice_rehearsal=true WHERE id=(SELECT id FROM natural_calls WHERE n=2)$$,'55000','voice opening policy is immutable','rehearsal provenance cannot change after admission');
+SELECT ok(NOT public.activate_voice_session((SELECT id FROM natural_calls WHERE n=2),'natural-provider'),'legacy activation cannot bypass v2 recording startup');
+SELECT ok(NOT public.activate_voice_natural_opening((SELECT id FROM natural_calls WHERE n=1),'natural-provider',0),'v2 activation cannot bypass the v1 notice');
+SELECT ok(NOT public.activate_voice_natural_opening(gen_random_uuid(),'natural-provider',0),'unknown session cannot activate');
+SELECT ok(NOT public.begin_voice_disclosure((SELECT id FROM natural_calls WHERE n=2),'natural-provider'),'provider binding requires consumed stream');
+SELECT ok(NOT public.mark_voice_recording_started((SELECT id FROM natural_calls WHERE n=2)),'recording evidence requires authenticated provider startup');
+SELECT is((public.consume_voice_stream(encode(extensions.digest('token-first','sha256'),'hex'))).id,(SELECT id FROM natural_calls WHERE n=2),'natural opening uses single-use authenticated notice-phase stream');
+SELECT ok((public.consume_voice_stream(encode(extensions.digest('token-first','sha256'),'hex'))).id IS NULL,'natural opening cannot reuse stream credentials');
+SELECT ok(NOT public.mark_voice_recording_started((SELECT id FROM natural_calls WHERE n=2)),'consumed stream alone does not assert provider startup');
+SELECT ok(public.begin_voice_disclosure((SELECT id FROM natural_calls WHERE n=2),'natural-provider'),'v2 startup binds actual provider');
+SELECT ok(NOT public.begin_voice_disclosure((SELECT id FROM natural_calls WHERE n=2),'foreign-provider'),'other provider cannot replace the bound identity');
+SELECT ok((SELECT disclosure_started_at IS NULL AND notice_completed_at IS NULL AND disclosure_event_id IS NULL FROM public.voice_sessions WHERE id=(SELECT id FROM natural_calls WHERE n=2)),'binding provider does not invent announcement evidence');
+SELECT ok(NOT public.complete_voice_disclosure((SELECT id FROM natural_calls WHERE n=2),'notice-1-fake'),'v1 announcement completion cannot label v2 as disclosed');
+SELECT throws_ok($$UPDATE public.voice_sessions SET notice_completed_at=clock_timestamp() WHERE id=(SELECT id FROM natural_calls WHERE n=2)$$,'23514',NULL,'legacy notice callback cannot write false v2 notice evidence');
+SELECT throws_ok($$UPDATE public.voice_sessions SET prior_disclosure_acknowledged_at=clock_timestamp() WHERE id=(SELECT id FROM natural_calls WHERE n=2)$$,'23514',NULL,'natural opening cannot fabricate prior disclosure acknowledgment');
+SELECT ok(NOT public.activate_voice_natural_opening((SELECT id FROM natural_calls WHERE n=2),'natural-provider',200),'activation waits for recording command success');
+SELECT throws_ok($$SELECT public.record_voice_fragment((SELECT id FROM natural_calls WHERE n=2),'early','customer','not active',0,20)$$,'P0001','voice conversation not activated','startup input does not leak into conversation history');
+SELECT throws_ok($$SELECT public.record_voice_customer_start((SELECT id FROM natural_calls WHERE n=2),'first-audio',clock_timestamp())$$,'P0001','voice natural opening activation required','setup audio cannot start customer minutes');
+SELECT ok(public.mark_voice_recording_started((SELECT id FROM natural_calls WHERE n=2)),'recording starts before natural greeting');
+CREATE TEMP TABLE natural_recording AS SELECT recording_started_at FROM public.voice_sessions WHERE id=(SELECT id FROM natural_calls WHERE n=2);
+SELECT ok(public.mark_voice_recording_started((SELECT id FROM natural_calls WHERE n=2)),'duplicate recording acknowledgment is accepted');
+SELECT is((SELECT recording_started_at FROM public.voice_sessions WHERE id=(SELECT id FROM natural_calls WHERE n=2)),(SELECT recording_started_at FROM natural_recording),'duplicate acknowledgment preserves actual recording start');
+SELECT ok(NOT public.activate_voice_natural_opening((SELECT id FROM natural_calls WHERE n=2),'foreign-provider',200),'activation remains bound to correct provider session');
+SELECT ok(NOT public.activate_voice_natural_opening((SELECT id FROM natural_calls WHERE n=2),'natural-provider',-1),'negative input boundary is rejected');
+SELECT ok(NOT public.activate_voice_natural_opening((SELECT id FROM natural_calls WHERE n=2),'natural-provider',NULL),'missing input boundary is rejected');
+UPDATE public.businesses SET operations_suspended_at=clock_timestamp() WHERE id=(SELECT b FROM natural_fixture);
+SELECT ok(NOT public.activate_voice_natural_opening((SELECT id FROM natural_calls WHERE n=2),'natural-provider',200),'operationally blocked business cannot activate');
+UPDATE public.businesses SET operations_suspended_at=NULL WHERE id=(SELECT b FROM natural_fixture);
+SELECT ok(public.activate_voice_natural_opening((SELECT id FROM natural_calls WHERE n=2),'natural-provider',200),'recorded natural conversation activates');
+SELECT ok(public.activate_voice_natural_opening((SELECT id FROM natural_calls WHERE n=2),'natural-provider',200),'same activation retry is idempotent');
+SELECT ok(NOT public.activate_voice_natural_opening((SELECT id FROM natural_calls WHERE n=2),'natural-provider',201),'activation retry cannot shift input boundary');
+SELECT ok((SELECT started_at>=recording_started_at AND notice_completed_at IS NULL AND disclosure_event_id IS NULL AND conversation_handoff_event_id IS NULL FROM public.voice_sessions WHERE id=(SELECT id FROM natural_calls WHERE n=2)),'activation preserves truthful recording and absent announcement fields');
+SELECT is((SELECT started_at FROM public.voice_customer_usage WHERE call_key=(SELECT id FROM natural_calls WHERE n=2)),NULL::timestamptz,'activation alone does not charge customer time');
+SELECT lives_ok($$SELECT public.record_voice_fragment((SELECT id FROM natural_calls WHERE n=2),'first-reply','customer','Hello can you help',200,250)$$,'first caller reply is retained before first audible output acknowledgment');
+SELECT throws_ok($$SELECT public.record_voice_fragment((SELECT id FROM natural_calls WHERE n=2),'late-setup','customer','before ready',100,150)$$,'P0001','voice conversation not activated','late startup input remains excluded');
+SELECT throws_ok($$SELECT public.record_voice_customer_start((SELECT id FROM natural_calls WHERE n=2),'stale-audio',(SELECT started_at-interval '2 seconds' FROM public.voice_sessions WHERE id=(SELECT id FROM natural_calls WHERE n=2)))$$,'P0001','voice natural opening activation required','pre-activation audio evidence cannot start customer meter');
+-- Worker clock may be slightly behind DB clock; preserve its original timestamp.
+CREATE TEMP TABLE natural_first_audible AS SELECT started_at-interval '100 milliseconds' AS at FROM public.voice_sessions WHERE id=(SELECT id FROM natural_calls WHERE n=2);
+SELECT lives_ok($$SELECT public.record_voice_customer_start((SELECT id FROM natural_calls WHERE n=2),'first-audible',(SELECT at FROM natural_first_audible))$$,'actual first audible natural greeting nominates customer start');
+SELECT throws_ok($$SELECT public.acknowledge_voice_customer_start((SELECT id FROM natural_calls WHERE n=2),'wrong-audible')$$,'P0001','customer start acknowledgment mismatch','wrong phone playback mark does not charge customer');
+SELECT lives_ok($$SELECT public.acknowledge_voice_customer_start((SELECT id FROM natural_calls WHERE n=2),'first-audible')$$,'matching phone playback acknowledges customer clock');
+SELECT ok(NOT public.begin_voice_conversation_handoff((SELECT id FROM natural_calls WHERE n=2),'handoff-fake',clock_timestamp()),'v1 handoff cannot run on natural opening');
+SELECT ok(NOT public.acknowledge_voice_conversation_handoff((SELECT id FROM natural_calls WHERE n=2),'handoff-fake',200),'v1 handoff acknowledgment cannot replace natural activation');
+SELECT public.record_voice_customer_end((SELECT id FROM natural_calls WHERE n=2),'phone-ended',(SELECT at+interval '2 seconds' FROM natural_first_audible));
+SELECT is((SELECT settled_seconds FROM public.voice_customer_usage WHERE call_key=(SELECT id FROM natural_calls WHERE n=2)),2::numeric,'customer charge includes only acknowledged conversation audio time');
+SELECT ok(NOT public.activate_voice_natural_opening((SELECT id FROM natural_calls WHERE n=2),'natural-provider',200),'terminated conversation cannot reactivate');
+SELECT public.estimate_voice_telnyx_usage(100);
+SELECT ok((SELECT abs(u.estimated_cost_usd-(greatest(0,extract(epoch FROM s.phone_ended_at-s.created_at))*.0052/60+greatest(0,extract(epoch FROM s.phone_ended_at-s.recording_started_at))*.002/60))<.00000001 FROM public.voice_sessions s JOIN public.voice_provider_usage u ON u.session_id=s.id AND u.provider='telnyx' WHERE s.id=(SELECT id FROM natural_calls WHERE n=2)),'natural opening costs actual recording duration and never adds Polly TTS');
+
+UPDATE public.voice_rollout_control SET recording_announcement_enabled=false;
+INSERT INTO natural_calls VALUES(3,pg_temp.natural_call('startup-failed'));
+SELECT public.finalize_voice_session((SELECT id FROM natural_calls WHERE n=3),'recording_start_failed',NULL,true);
+SELECT is((SELECT settled_seconds FROM public.voice_customer_usage WHERE call_key=(SELECT id FROM natural_calls WHERE n=3)),NULL::numeric,'worker closure alone cannot release possibly live phone reservation');
+SELECT public.record_voice_customer_termination((SELECT id FROM natural_calls WHERE n=3),'verified-stop',clock_timestamp());
+SELECT is((SELECT settled_seconds FROM public.voice_customer_usage WHERE call_key=(SELECT id FROM natural_calls WHERE n=3)),0::numeric,'verified termination before activation settles zero');
+SELECT is((SELECT adjustment_reason FROM public.voice_customer_usage WHERE call_key=(SELECT id FROM natural_calls WHERE n=3)),'startup_only_no_customer_usage','zero-use natural startup does not pretend disclosure occurred');
+INSERT INTO natural_calls VALUES(4,pg_temp.natural_call('uncertain'));
+SELECT public.consume_voice_stream(encode(extensions.digest('token-uncertain','sha256'),'hex'));
+SELECT public.begin_voice_disclosure((SELECT id FROM natural_calls WHERE n=4),'uncertain-provider');
+SELECT public.mark_voice_recording_started((SELECT id FROM natural_calls WHERE n=4));
+SELECT public.activate_voice_natural_opening((SELECT id FROM natural_calls WHERE n=4),'uncertain-provider',100);
+SELECT public.record_voice_customer_termination((SELECT id FROM natural_calls WHERE n=4),'verified-unknown-end',clock_timestamp());
+SELECT is((SELECT settled_seconds FROM public.voice_customer_usage WHERE call_key=(SELECT id FROM natural_calls WHERE n=4)),NULL::numeric,'active but unconfirmed playback retains uncertain hold');
+SELECT is((SELECT state FROM public.voice_customer_usage WHERE call_key=(SELECT id FROM natural_calls WHERE n=4)),'reconciling','missing active playback evidence is reconciled');
+UPDATE public.voice_customer_usage SET reconcile_after=clock_timestamp()-interval '1 second' WHERE call_key=(SELECT id FROM natural_calls WHERE n=4);
+SELECT public.settle_voice_customer_usage((SELECT id FROM natural_calls WHERE n=4),true);
+SELECT is((SELECT adjustment_reason FROM public.voice_customer_usage WHERE call_key=(SELECT id FROM natural_calls WHERE n=4)),'unproven_customer_time_waived','after recovery deadline uncertain active time is waived without invented playback');
+SELECT public.finalize_voice_session(id,'caller_hangup',NULL,false) FROM natural_calls;
+UPDATE public.voice_sessions SET phone_ended_at=COALESCE(phone_ended_at,clock_timestamp()) WHERE id IN(SELECT id FROM natural_calls);
+
+-- Rehearsal consumes only an existing approved tester; normal pilot retains its
+-- own baseline and cannot accidentally acquire public/customer accounting.
+DO $$ DECLARE o uuid:=gen_random_uuid(); b uuid:='ea848911-ef72-44a6-8cf3-c47b3959be26'; BEGIN
+ INSERT INTO auth.users(id,email) VALUES(o,'natural-rehearsal@example.test');
+ INSERT INTO public.businesses(id,owner_id,name,business_type,slug) VALUES(b,o,'Natural rehearsal','general','natural-rehearsal');
+ INSERT INTO public.phone_numbers(business_id,phone_number,telnyx_phone_number_id,is_active) VALUES(b,'+15742638634','natural-rehearsal',true);
+ INSERT INTO public.subscriptions(business_id,stripe_customer_id,stripe_subscription_id,plan,status) VALUES(b,'cus_natural','sub_natural','sms_and_chat','active');
+ INSERT INTO public.voice_pilot_settings(business_id,enabled) VALUES(b,true);
+ INSERT INTO public.voice_pilot_testers(business_id,phone_number,prior_disclosure_acknowledged_at) VALUES(b,'+15555558887',now()-interval '1 day');
+END $$;
+SELECT ok(public.arm_voice_public_opening_rehearsal('+15555558887',(SELECT o FROM natural_fixture)),'existing approved pilot can rehearse current natural policy');
+INSERT INTO natural_calls SELECT 5,(public.admit_voice_pilot('ea848911-ef72-44a6-8cf3-c47b3959be26','natural-rehearsal','natural-rehearsal-session','+15555558887','+15742638634',true)).id;
+SELECT ok((SELECT public_notice_rehearsal AND disclosure_version=2 AND prior_disclosure_acknowledged_at IS NULL FROM public.voice_sessions WHERE id=(SELECT id FROM natural_calls WHERE n=5)),'natural policy applies after one-call rehearsal selection');
+UPDATE public.voice_sessions SET status='notice' WHERE id=(SELECT id FROM natural_calls WHERE n=5);
+INSERT INTO public.voice_stream_credentials(session_id,token_hash,expires_at) SELECT id,encode(extensions.digest('natural-rehearsal-token','sha256'),'hex'),clock_timestamp()+interval '2 minutes' FROM natural_calls WHERE n=5;
+SELECT is((public.consume_voice_stream(encode(extensions.digest('natural-rehearsal-token','sha256'),'hex'))).id,(SELECT id FROM natural_calls WHERE n=5),'natural rehearsal authenticates');
+SELECT ok(public.begin_voice_disclosure((SELECT id FROM natural_calls WHERE n=5),'pilot-provider'),'natural rehearsal binds provider');
+SELECT ok(public.mark_voice_recording_started((SELECT id FROM natural_calls WHERE n=5)),'natural rehearsal records before greeting');
+SELECT ok(public.activate_voice_natural_opening((SELECT id FROM natural_calls WHERE n=5),'pilot-provider',300),'natural rehearsal activates through same protocol');
+SELECT is((SELECT count(*)::integer FROM public.voice_customer_usage WHERE call_key=(SELECT id FROM natural_calls WHERE n=5)),0,'natural rehearsal preserves private pilot accounting');
+SELECT public.finalize_voice_session((SELECT id FROM natural_calls WHERE n=5),'caller_hangup',NULL,false);
+UPDATE public.voice_sessions SET phone_ended_at=clock_timestamp() WHERE id=(SELECT id FROM natural_calls WHERE n=5);
+INSERT INTO natural_calls SELECT 6,(public.admit_voice_pilot('ea848911-ef72-44a6-8cf3-c47b3959be26','natural-next','natural-next-session','+15555558887','+15742638634',true)).id;
+SELECT ok((SELECT NOT public_notice_rehearsal AND disclosure_version<>2 AND access_source='pilot' FROM public.voice_sessions WHERE id=(SELECT id FROM natural_calls WHERE n=6)),'ordinary private pilot is unaffected by public policy toggle');
+-- The new immutable protocol evidence must not obstruct actual privacy cleanup.
+SELECT public.record_voice_customer_termination((SELECT id FROM natural_calls WHERE n=1),'cleanup-proven-stop',clock_timestamp());
+INSERT INTO public.voice_recordings(recording_id,session_id,business_id,delete_after) SELECT 'natural-recording',id,(SELECT b FROM natural_fixture),now()+interval '30 days' FROM natural_calls WHERE n=2;
+CREATE TEMP TABLE natural_evidence_before_cleanup AS SELECT started_at,recording_started_at FROM public.voice_sessions WHERE id=(SELECT id FROM natural_calls WHERE n=2);
+DELETE FROM public.phone_numbers WHERE business_id=(SELECT b FROM natural_fixture);
+UPDATE public.businesses SET deleted_at=now()-interval '61 days',deletion_scheduled_for=now()-interval '1 day' WHERE id=(SELECT b FROM natural_fixture);
+SELECT lives_ok($$SELECT public.cleanup_expired_business((SELECT b FROM natural_fixture))$$,'recorded natural calls permit the real account privacy scrub');
+SELECT ok((SELECT owner_id IS NULL AND cleanup_pii_scrubbed_at IS NOT NULL FROM public.businesses WHERE id=(SELECT b FROM natural_fixture)),'natural-call business loses owner and PII linkage');
+SELECT ok((SELECT caller_phone='' AND called_phone='' AND notice_completed_at IS NULL AND disclosure_event_id IS NULL FROM public.voice_sessions WHERE id=(SELECT id FROM natural_calls WHERE n=2)),'caller details scrub without fabricating notice evidence');
+SELECT ok((SELECT s.recording_started_at=e.recording_started_at AND s.started_at=e.started_at FROM public.voice_sessions s CROSS JOIN natural_evidence_before_cleanup e WHERE s.id=(SELECT id FROM natural_calls WHERE n=2)),'scrub retains factual recording and activation timestamps');
+SELECT ok(NOT EXISTS(SELECT 1 FROM public.voice_transcript_fragments WHERE business_id=(SELECT b FROM natural_fixture) AND content<>'[deleted]'),'caller transcript content is scrubbed');
+SELECT ok((SELECT delete_after<=now() FROM public.voice_recordings WHERE recording_id='natural-recording'),'account cleanup expedites protected audio deletion');
+SELECT is((SELECT settled_seconds FROM public.voice_customer_usage WHERE call_key=(SELECT id FROM natural_calls WHERE n=2)),2::numeric,'privacy cleanup does not refund consumed customer minutes');
+SELECT * FROM finish();
+ROLLBACK;

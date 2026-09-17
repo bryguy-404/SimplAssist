@@ -48,6 +48,7 @@ export interface VoiceStore {
   beginDisclosure?(openaiId: string): Promise<void>;
   completeDisclosure?(eventId: string): Promise<void>;
   recordingStarted?(): Promise<void>;
+  activateNaturalOpening?(openaiId: string, inputStartMs: number): Promise<void>;
   handoffStarted?(eventId: string, startedAt: string): Promise<void>;
   handoffAcknowledged?(eventId: string, inputStartMs: number): Promise<void>;
   fragment(fragment: TranscriptFragment): Promise<void>;
@@ -94,6 +95,9 @@ export function createVoiceStore(
     },
     async recordingStarted() {
       if (!(await rpc("mark_voice_recording_started", {}))) throw new Error("voice_recording_start_blocked");
+    },
+    async activateNaturalOpening(openaiId, inputStartMs) {
+      if (!(await rpc("activate_voice_natural_opening", { p_openai_id: openaiId, p_input_start_ms: inputStartMs }))) throw new Error("voice_natural_opening_blocked");
     },
     async handoffStarted(eventId, startedAt) {
       if (!(await rpc("begin_voice_conversation_handoff", { p_event_id: eventId, p_started_at: startedAt }))) throw new Error("voice_handoff_blocked");

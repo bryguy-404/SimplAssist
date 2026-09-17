@@ -116,6 +116,12 @@ describe("provider preparation", () => {
     expect(socket.sent.filter((e) => e.type === "session.start")).toHaveLength(
       1,
     );
+    const instructions = (socket.sent.find((e) => e.type === "session.start")?.session as { instructions: string }).instructions;
+    expect(instructions).toContain("I’m Test’s AI assistant. How can I help you today?");
+    expect(instructions).toContain("Small phrasing variations are welcome");
+    expect(instructions).toContain("Wait silently for the application's fresh opening instruction");
+    expect(instructions).toContain("Do not repeat the recording announcement");
+    expect(socket.sent.some((e) => e.type === "session.instructions.append")).toBe(false);
     expect(
       socket.sent.some((e) => e.type === "session.input_audio.append"),
     ).toBe(true);

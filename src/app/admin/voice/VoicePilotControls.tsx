@@ -134,8 +134,9 @@ export function VoicePilotControls(props: {
           />
           <span className="mt-2 block text-xs font-normal text-stone-500">
             One international number per line, starting with +. An optional name
-            follows a comma. These callers consent by staying on the line after
-            the recording notice.
+            follows a comma. Tester eligibility does not establish acknowledgment
+            of AI use or recording. Prior acknowledgments and spoken notices are
+            tracked separately for each call.
           </span>
         </label>
         <button

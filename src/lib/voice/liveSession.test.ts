@@ -71,6 +71,7 @@ function harness(
     beginDisclosure: vi.fn().mockResolvedValue(undefined),
     completeDisclosure: vi.fn().mockResolvedValue(undefined),
     recordingStarted: vi.fn().mockResolvedValue(undefined),
+    activateNaturalOpening: vi.fn().mockResolvedValue(undefined),
     handoffStarted: vi.fn().mockResolvedValue(undefined),
     handoffAcknowledged: vi.fn().mockResolvedValue(undefined),
     fragment: vi.fn().mockResolvedValue(undefined),
@@ -630,9 +631,10 @@ describe("continuous phone bridge", () => {
       (e) => e.type === "session.instructions.append",
     );
     expect(openings).toHaveLength(1);
-    expect(openings[0].content).toContain(
-      "Hi, this is Lakeview Plumbing. How are you doing today?",
+    expect(instructions).toContain(
+      "Hi, thank you for calling! I’m Lakeview Plumbing’s AI assistant. How can I help you today?",
     );
+    expect(openings[0].content).toContain("business-specific AI greeting configured at startup");
     await vi.advanceTimersByTimeAsync(8100);
     expect(h.hangup).not.toHaveBeenCalled();
     await h.finish();
@@ -1467,6 +1469,122 @@ describe("audio and transcript ordering", () => {
   });
 });
 
+
+describe("natural public opening without a recording announcement", () => {
+  beforeEach(() => { vi.useFakeTimers(); vi.spyOn(console, "info").mockImplementation(() => {}); });
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+  const naturalSession = { ...session, access_source: "commercial", disclosure_version: 2,
+    notice_completed_at: null, prior_disclosure_acknowledged_at: null } as VoiceSession;
+  function setup(profile: "pcm16" | "pcmu8" = "pcm16", extra: Partial<LiveSessionOptions> = {}) {
+    const startRecording = vi.fn().mockResolvedValue(undefined);
+    const stopRecording = vi.fn().mockResolvedValue(undefined);
+    const classifyDisclosureReply = vi.fn().mockResolvedValue("repeat");
+    return { ...harness(profile, true, { session: naturalSession, startRecording, stopRecording, classifyDisclosureReply, ...extra }),
+      startRecording, stopRecording, classifyDisclosureReply };
+  }
+  it.each(["pcm16", "pcmu8"] as const)("records before one natural AI greeting and meters only audible acknowledged output (%s)", async (profile) => {
+    const f = setup(profile, { actionsEnabled: true });
+    f.live.appendByteLimit = 500;
+    await f.start(true);
+    expect(f.startRecording).toHaveBeenCalledOnce();
+    expect(f.store.activateNaturalOpening).toHaveBeenCalledExactlyOnceWith("openai-session", 0);
+    expect(f.store.beginDisclosure.mock.invocationCallOrder[0]).toBeLessThan(f.startRecording.mock.invocationCallOrder[0]);
+    expect(f.startRecording.mock.invocationCallOrder[0]).toBeLessThan(f.store.recordingStarted.mock.invocationCallOrder[0]);
+    expect(f.store.recordingStarted.mock.invocationCallOrder[0]).toBeLessThan(f.store.activateNaturalOpening.mock.invocationCallOrder[0]);
+    expect(f.store.completeDisclosure).not.toHaveBeenCalled();
+    expect(f.store.handoffStarted).not.toHaveBeenCalled(); expect(f.store.handoffAcknowledged).not.toHaveBeenCalled();
+    const instructions = (f.live.sent.find((e) => e.type === "session.start")?.session as { instructions: string }).instructions;
+    expect(instructions).toContain("Lakeview Plumbing’s AI assistant. How can I help you today?");
+    expect(instructions).toContain(VOICE_RECEPTIONIST_FLOW);
+    expect(instructions).toContain("no recording announcement is configured");
+    expect(instructions).not.toContain("already heard");
+    const greeting = f.live.sent.filter((e) => e.type === "session.instructions.append");
+    expect(greeting).toHaveLength(1); expect(greeting[0].content).toContain("natural phrasing");
+    expect(f.live.sent.filter((e) => e.type === "session.commentary.append")).toHaveLength(1);
+    f.live.event({ type: "session.instructions.appended", client_event_id: greeting[0].event_id });
+    expect(f.live.sent.filter((e) => e.type === "session.commentary.append")).toHaveLength(1);
+    expect(f.store.customerAudioStarted).not.toHaveBeenCalled();
+    f.live.event({ type: "session.output_audio.delta", delta: Buffer.alloc(new AudioQueue(profile).frameBytes * 10, AUDIO_PROFILES[profile].silence).toString("base64") });
+    await vi.advanceTimersByTimeAsync(250);
+    expect(f.store.customerAudioStarted).not.toHaveBeenCalled();
+    expect(f.stopConnectingRingback).not.toHaveBeenCalled();
+    f.live.event({ type: "session.output_audio.delta", delta: Buffer.alloc(new AudioQueue(profile).frameBytes * 5, 23).toString("base64") });
+    await vi.advanceTimersByTimeAsync(160);
+    expect(f.stopConnectingRingback).toHaveBeenCalledOnce();
+    expect(f.store.customerAudioStarted).toHaveBeenCalledOnce();
+    const mark = (f.phone.sent.find((e) => e.event === "mark" && String((e.mark as { name: string }).name).startsWith("customer-start-"))?.mark as { name: string }).name;
+    expect(f.store.customerPlaybackAcknowledged).not.toHaveBeenCalled();
+    f.phone.event({ event: "mark", stream_id: "other", mark: { name: mark } });
+    await vi.advanceTimersByTimeAsync(1); expect(f.store.customerPlaybackAcknowledged).not.toHaveBeenCalled();
+    f.phone.event({ event: "mark", stream_id: "stream", mark: { name: mark } });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.store.customerPlaybackAcknowledged).toHaveBeenCalledExactlyOnceWith(mark);
+    expect(f.hangup).not.toHaveBeenCalled(); await f.finish();
+  });
+  it("preserves the first caller request through slow recording startup and does not run the transient notice classifier", async () => {
+    const f = setup();
+    let completeRecording!: () => void;
+    f.startRecording.mockImplementation(() => new Promise<void>((resolve) => { completeRecording = resolve; }));
+    await f.start(true, false);
+    expect(f.live.sent.some((e) => e.type === "session.input_audio.append")).toBe(false);
+    expect(f.live.sent.some((e) => e.type === "session.instructions.append")).toBe(false);
+    // No provider output or delegation can pass before the recording gate.
+    f.live.event({ type: "session.output_audio.delta", delta: Buffer.alloc(new AudioQueue("pcm16").frameBytes, 23).toString("base64") });
+    f.live.event({ type: "session.delegation.created", delegation: { id: "too-early", target: "client" }, offset_ms: 0 });
+    await vi.advanceTimersByTimeAsync(100); expect(f.answer).not.toHaveBeenCalled();
+    expect(f.phone.sent.filter((e) => e.event === "media")).toHaveLength(0);
+    completeRecording(); await vi.advanceTimersByTimeAsync(1);
+    const input = f.live.sent.find((e) => e.type === "session.input_audio.append");
+    expect(Buffer.from(input?.audio as string, "base64").length).toBeGreaterThanOrEqual(new AudioQueue("pcm16").frameBytes * 100);
+    const opening = f.live.sent.find((e) => e.type === "session.instructions.append")!;
+    f.live.event({ type: "session.instructions.appended", client_event_id: opening.event_id });
+    f.live.event({ type: "session.input_transcript.delta", event_id: "early-request", delta: "Can I get the signup link?", start_ms: 0, end_ms: 500 });
+    f.live.event({ type: "session.delegation.created", delegation: { id: "first-request", target: "client" }, offset_ms: 500 });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(f.store.fragment).toHaveBeenCalledWith(expect.objectContaining({ eventId: "early-request", startMs: 0 }));
+    expect(f.answer).toHaveBeenCalledOnce();
+    expect(f.answer.mock.calls[0][2].fragments).toEqual([expect.objectContaining({ eventId: "early-request", text: "Can I get the signup link?" })]);
+    expect(f.classifyDisclosureReply).not.toHaveBeenCalled();
+    expect(f.live.sent.filter((e) => e.type === "session.instructions.append")).toHaveLength(1);
+    expect(f.live.sent.some((e) => e.content === "Continue with the first question now.")).toBe(false);
+    await f.finish();
+  });
+  it("fails closed on recording failure before opening, transcript storage, actions or customer usage", async () => {
+    const f = setup(); f.startRecording.mockRejectedValue(new Error("provider_unavailable")); await f.start();
+    expect(f.hangup).toHaveBeenCalledOnce(); expect(f.store.recordingStarted).not.toHaveBeenCalled();
+    expect(f.store.activateNaturalOpening).not.toHaveBeenCalled(); expect(f.store.completeDisclosure).not.toHaveBeenCalled();
+    expect(f.store.fragment).not.toHaveBeenCalled(); expect(f.answer).not.toHaveBeenCalled();
+    expect(f.store.customerAudioStarted).not.toHaveBeenCalled();
+    expect(f.live.sent.filter((e) => e.type === "session.instructions.append")).toHaveLength(0);
+    await f.finish(); expect(f.store.finish).toHaveBeenCalledWith("persistence_failed", "persistence_failed", true);
+  });
+  it.each(["recordingStarted", "activateNaturalOpening"] as const)("fails closed when %s persistence rejects after provider recording acceptance", async (step) => {
+    const f = setup(); f.store[step].mockRejectedValue(new Error("database_unavailable")); await f.start();
+    expect(f.startRecording).toHaveBeenCalledOnce(); expect(f.hangup).toHaveBeenCalledOnce();
+    expect(f.store.completeDisclosure).not.toHaveBeenCalled(); expect(f.store.fragment).not.toHaveBeenCalled();
+    expect(f.store.customerAudioStarted).not.toHaveBeenCalled(); expect(f.answer).not.toHaveBeenCalled();
+    expect(f.live.sent.filter((e) => e.type === "session.instructions.append")).toHaveLength(0);
+    if (step === "recordingStarted") expect(f.store.activateNaturalOpening).not.toHaveBeenCalled();
+    await f.finish(); expect(f.store.finish).toHaveBeenCalledWith("persistence_failed", "persistence_failed", true);
+  });
+  it("stops recording if hangup arrives while recording startup is pending", async () => {
+    const f = setup(); let completeRecording!: () => void;
+    f.startRecording.mockImplementation(() => new Promise<void>((resolve) => { completeRecording = resolve; }));
+    await f.start(false, false);
+    const ending = f.call.close("caller_hangup", false); completeRecording();
+    f.live.event({ type: "session.closed", usage: { seconds: 1 } }); await ending;
+    expect(f.stopRecording).toHaveBeenCalledOnce(); expect(f.store.activateNaturalOpening).not.toHaveBeenCalled();
+  });
+  it("uses natural rehearsal startup while preserving pilot accounting", async () => {
+    const f = setup("pcm16", { session: { ...naturalSession, access_source: "pilot", public_notice_rehearsal: true } });
+    await f.start();
+    f.live.event({ type: "session.output_audio.delta", delta: Buffer.alloc(new AudioQueue("pcm16").frameBytes * 5, 23).toString("base64") });
+    await vi.advanceTimersByTimeAsync(150);
+    expect(f.store.activateNaturalOpening).toHaveBeenCalledOnce();
+    expect(f.store.customerAudioStarted).not.toHaveBeenCalled(); expect(f.store.completeDisclosure).not.toHaveBeenCalled();
+    await f.finish();
+  });
+});
 
 describe("public same-Marin disclosure", () => {
   beforeEach(() => vi.useFakeTimers());

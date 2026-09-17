@@ -7,6 +7,7 @@ import {
   pilotClientState,
   admitCommercialVoice,
   startCommercialVoice,
+  checkVoiceWorkerReady,
   type PilotRoutingDependencies,
 } from "./routing";
 import { PILOT_BUSINESS_ID, PILOT_PHONE, type VoiceSession } from "./types";
@@ -116,6 +117,40 @@ function fixture(status: VoiceSession["status"] = "ringing") {
 }
 
 describe("existing-number voice routing", () => {
+  it.each([undefined, 0, 1])("requires natural-opening capability only for stored v2 calls (capability %s)", async (capability) => {
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({
+      ready: true, model: "gpt-live-1", profile: "pcm16", commercialProtocol: 2, actionProtocol: 1,
+      naturalOpeningProtocol: capability,
+    })));
+    try {
+      expect(await checkVoiceWorkerReady("https://voice.example", "x".repeat(32), true)).toBe(true);
+      expect(await checkVoiceWorkerReady("https://voice.example", "x".repeat(32), true, true)).toBe(capability === 1);
+    } finally { fetch.mockRestore(); }
+  });
+  it("routes a natural opening to its capable worker without claiming notice or starting recording in the app", async () => {
+    const f = fixture(); Object.assign(f.session, { access_source: "commercial", disclosure_version: 2 });
+    await startCommercialVoice(f.deps, f.session);
+    expect(f.deps.commercialWorkerReady).toHaveBeenCalledExactlyOnceWith(true);
+    expect(f.actions.startStreaming).toHaveBeenCalledOnce();
+    expect(new URL(f.actions.startStreaming.mock.calls[0][1].stream_url).searchParams.get("opening_ringback")).toBe("v1");
+    expect(f.actions.startRecording).not.toHaveBeenCalled(); expect(f.actions.speak).not.toHaveBeenCalled();
+    expect(f.session.notice_completed_at).toBeUndefined();
+    await handlePilotEvent(f.deps, "call.speak.ended", f.payload("notice", { status: "completed" }), true);
+    expect(f.session.notice_completed_at).toBeUndefined(); expect(f.actions.startRecording).not.toHaveBeenCalled();
+  });
+  it("keeps v2 closed before media when the worker lacks natural-opening support", async () => {
+    const f = fixture(); Object.assign(f.session, { access_source: "commercial", disclosure_version: 2 });
+    vi.mocked(f.deps.commercialWorkerReady!).mockImplementation(async (natural) => !natural);
+    await expect(startCommercialVoice(f.deps, f.session)).rejects.toThrow("voice_worker_unavailable");
+    expect(f.actions.startStreaming).not.toHaveBeenCalled(); expect(f.actions.speak).not.toHaveBeenCalled();
+  });
+  it("uses the same natural opening capability for a protected pilot rehearsal", async () => {
+    const f = fixture(); Object.assign(f.session, { access_source: "pilot", disclosure_version: 2, public_notice_rehearsal: true });
+    await handlePilotEvent(f.deps, "call.playback.ended", f.payload("ringing", { status: "completed" }), true);
+    expect(f.deps.commercialWorkerReady).toHaveBeenCalledExactlyOnceWith(true);
+    expect(f.actions.startStreaming).toHaveBeenCalledOnce(); expect(f.actions.startRecording).not.toHaveBeenCalled();
+    expect(f.actions.speak).not.toHaveBeenCalled(); expect(f.session.notice_completed_at).toBeUndefined();
+  });
   it("requires a matching commercial admission identity and the upgraded worker", async () => {
     const f = fixture();
     f.session.access_source = "commercial";

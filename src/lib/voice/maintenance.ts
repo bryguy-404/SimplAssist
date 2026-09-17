@@ -101,6 +101,8 @@ export async function maintainVoicePilot(
 
   // Recording callbacks can be lost. Reconcile by the provider's exact call
   // identity, then retain the discovered recording only until the same expiry.
+  // A v2 provider binding also covers recording requests accepted remotely when
+  // their response or the local recording-start timestamp write was lost.
   const { data: unchecked, error: uncheckedError } = await db
     .from("voice_sessions")
     .select("*")
@@ -108,7 +110,7 @@ export async function maintainVoicePilot(
     .eq("response_mode", "voice")
     .eq("status", "closed")
     .or(
-      `and(notice_completed_at.not.is.null,or(recording_checked_at.is.null,recording_checked_at.lt.${new Date(now - 3600_000).toISOString()})),and(prior_disclosure_acknowledged_at.not.is.null,or(recording_checked_at.is.null,recording_checked_at.lt.${new Date(now - 3600_000).toISOString()}))`,
+      `and(recording_started_at.not.is.null,or(recording_checked_at.is.null,recording_checked_at.lt.${new Date(now - 3600_000).toISOString()})),and(disclosure_version.eq.2,openai_session_id.not.is.null,or(recording_checked_at.is.null,recording_checked_at.lt.${new Date(now - 3600_000).toISOString()})),and(notice_completed_at.not.is.null,or(recording_checked_at.is.null,recording_checked_at.lt.${new Date(now - 3600_000).toISOString()})),and(prior_disclosure_acknowledged_at.not.is.null,or(recording_checked_at.is.null,recording_checked_at.lt.${new Date(now - 3600_000).toISOString()}))`,
     )
     .lt("ended_at", new Date(now - 30000).toISOString())
     .limit(4);

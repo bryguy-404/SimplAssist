@@ -4,7 +4,8 @@ import {
   PILOT_BUSINESS_ID,
   PILOT_PHONE,
   RECORDING_NOTICE,
-  usesPublicDisclosure,
+  usesPublicOpening,
+  usesNaturalPublicOpening,
   type VoiceSession,
 } from "./types";
 import { issueStreamToken } from "./store";
@@ -19,7 +20,7 @@ export interface PilotRoutingDependencies {
     claim: () => Promise<boolean>,
   ) => Promise<void>;
   workerReady: () => Promise<boolean>;
-  commercialWorkerReady?: () => Promise<boolean>;
+  commercialWorkerReady?: (naturalOpening?: boolean) => Promise<boolean>;
   prepareWorker?: (sessionId: string) => Promise<void>;
   appUrl: string;
   workerUrl: string;
@@ -31,6 +32,7 @@ export async function checkVoiceWorkerReady(
   workerUrl: string,
   token: string,
   commercial = false,
+  naturalOpening = false,
 ): Promise<boolean> {
   if (!workerUrl || token.length < 32) return false;
   try {
@@ -46,6 +48,7 @@ export async function checkVoiceWorkerReady(
     return (
       body.ready === true &&
       (!commercial || (body.commercialProtocol === 2 && body.actionProtocol === 1)) &&
+      (!naturalOpening || body.naturalOpeningProtocol === 1) &&
       (process.env.VOICE_ACTIONS_ROLLOUT !== "true" ||
         body.actionProtocol === 1) &&
       body.model === "gpt-live-1" &&
@@ -81,8 +84,8 @@ export async function admitCommercialVoice(
 export async function startCommercialVoice(deps: PilotRoutingDependencies, session: VoiceSession) {
   if (session.access_source !== "commercial" || session.response_mode !== "voice")
     throw new Error("voice_commercial_identity_invalid");
-  if (session.disclosure_version === 1) {
-    if (!(await deps.commercialWorkerReady?.())) throw new Error("voice_worker_unavailable");
+  if (usesPublicOpening(session)) {
+    if (!(await deps.commercialWorkerReady?.(usesNaturalPublicOpening(session)))) throw new Error("voice_worker_unavailable");
     await transition(deps, session, ["ringing", "notice"], {
       status: "notice", media_start_requested_at: session.media_start_requested_at ?? new Date().toISOString(),
     });
@@ -333,7 +336,7 @@ export async function handlePilotEvent(
       );
       // Request preparation after ringing is queued. The worker independently
       // checks the default-off switch and prior tester disclosure.
-      if (session.access_source !== "commercial" && !usesPublicDisclosure(session) && deps.prepareWorker)
+      if (session.access_source !== "commercial" && !usesPublicOpening(session) && deps.prepareWorker)
         await deps.prepareWorker(session.id).catch(() => {});
     } else if (
       eventType === "call.playback.ended" &&
@@ -350,8 +353,8 @@ export async function handlePilotEvent(
         return true;
       if (payload.status !== "completed")
         throw new Error("voice_ringback_failed");
-      if (session.public_notice_rehearsal && usesPublicDisclosure(session)) {
-        if (!(await deps.commercialWorkerReady?.())) throw new Error("voice_worker_unavailable");
+      if (session.public_notice_rehearsal && usesPublicOpening(session)) {
+        if (!(await deps.commercialWorkerReady?.(usesNaturalPublicOpening(session)))) throw new Error("voice_worker_unavailable");
         await transition(deps, session, ["ringing", "notice"], { status: "notice",
           media_start_requested_at: session.media_start_requested_at ?? new Date().toISOString() });
         await startMedia(deps, session);
@@ -406,7 +409,7 @@ export async function handlePilotEvent(
       );
     } else if (
       eventType === "call.speak.ended" &&
-      !usesPublicDisclosure(session) &&
+      !usesPublicOpening(session) &&
       state.voicePilotPhase === "notice" &&
       ["notice", "starting"].includes(session.status)
     ) {
@@ -464,11 +467,11 @@ async function startMedia(
   if (url.protocol !== "https:") throw new Error("voice_worker_url_invalid");
   url.protocol = "wss:";
   url.searchParams.set("token", token);
-  if ((session.access_source !== "commercial" && session.prior_disclosure_acknowledged_at) || usesPublicDisclosure(session))
+  if ((session.access_source !== "commercial" && session.prior_disclosure_acknowledged_at) || usesPublicOpening(session))
     url.searchParams.set("opening_ringback", "v1");
-  // Recording starts after the notice or verified prior tester acknowledgment.
-  // Store only the provider recording ID when its callback arrives.
-  if (!usesPublicDisclosure(session)) await deps.telnyx.calls.actions.startRecording(
+  // Versioned public openings start recording in the authenticated worker.
+  // Legacy private recording follows its notice or prior acknowledgment.
+  if (!usesPublicOpening(session)) await deps.telnyx.calls.actions.startRecording(
     session.call_control_id,
     {
       channels: "dual",

@@ -24,6 +24,19 @@ function fixture() {
 }
 
 describe("commercial voice persistence", () => {
+  it("activates the recorded natural opening without claiming a notice or starting customer minutes", async () => {
+    const f = fixture();
+    await f.store.beginDisclosure!("provider");
+    await f.store.recordingStarted!();
+    await f.store.activateNaturalOpening!("provider", 0);
+    expect(f.rpc.mock.calls).toEqual([
+      ["begin_voice_disclosure", { p_session_id: "call", p_openai_id: "provider" }],
+      ["mark_voice_recording_started", { p_session_id: "call" }],
+      ["activate_voice_natural_opening", { p_session_id: "call", p_openai_id: "provider", p_input_start_ms: 0 }],
+    ]);
+    f.rpc.mockResolvedValue({ data: false, error: null });
+    await expect(f.store.activateNaturalOpening!("wrong-provider", 0)).rejects.toThrow("voice_natural_opening_blocked");
+  });
   it("uses the admitted continuation grant rather than rechecking a changed preference or subscription", async () => {
     const f = fixture();
     expect(await f.store.heartbeat()).toBe(true);

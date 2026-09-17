@@ -5,6 +5,7 @@ import { maintainVoicePilot } from "./maintenance";
 
 function harness(rows: unknown[][], cleanup: unknown[] = []) {
   const writes: { table: string; value: unknown }[] = [];
+  const filters: string[] = [];
   const from = vi.fn((table: string) => {
     const result = { data: rows.shift() ?? [], error: null };
     const q = {
@@ -26,7 +27,8 @@ function harness(rows: unknown[][], cleanup: unknown[] = []) {
       not() {
         return this;
       },
-      or() {
+      or(value: string) {
+        filters.push(value);
         return this;
       },
       limit() {
@@ -60,6 +62,7 @@ function harness(rows: unknown[][], cleanup: unknown[] = []) {
   const fallback = vi.fn().mockResolvedValue(undefined);
   return {
     writes,
+    filters,
     rpc,
     hangup,
     retrieveStatus,
@@ -79,6 +82,20 @@ function harness(rows: unknown[][], cleanup: unknown[] = []) {
 }
 
 describe("durable voice maintenance", () => {
+  it.each([null, "2026-09-17T10:00:00Z"])("recovers v2 recordings without notice evidence, including uncertain recording-start acceptance (%s)", async (recordingStartedAt) => {
+    const h = harness([[], [], [{ id: "natural", access_source: "commercial", disclosure_version: 2,
+      openai_session_id: "provider", notice_completed_at: null, prior_disclosure_acknowledged_at: null,
+      recording_started_at: recordingStartedAt, business_id: "business", call_control_id: "control", call_session_id: "session",
+      created_at: "2026-09-17T10:00:00Z" }], [], [], []]);
+    h.list.mockResolvedValue({ data: [{ id: "recording", call_control_id: "control", call_session_id: "session" }] });
+    await h.run();
+    expect(h.filters.some((filter) => filter.includes("and(recording_started_at.not.is.null,"))).toBe(true);
+    expect(h.filters.some((filter) => filter.includes("and(disclosure_version.eq.2,openai_session_id.not.is.null,"))).toBe(true);
+    expect(h.list).toHaveBeenCalledWith(expect.objectContaining({ filter: { call_control_id: "control" } }), expect.anything());
+    expect(h.writes).toContainEqual({ table: "voice_recordings", value: {
+      recording_id: "recording", session_id: "natural", business_id: "business", delete_after: "2026-10-17T10:00:00.000Z",
+    } });
+  });
   it("does not release a commercial hold merely because hangup was accepted", async () => {
     const h = harness([[], [{ id: "customer", access_source: "commercial", call_control_id: "control", call_session_id: "session" }], [], []]);
     h.retrieveStatus.mockResolvedValue({ data: { call_control_id: "control", call_session_id: "session", is_alive: true } });

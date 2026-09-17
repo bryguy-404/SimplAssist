@@ -1,3 +1,5 @@
+import { isBookingConfirmationEnabled } from '@/lib/booking/draft';
+import { reconcileBookingDrafts } from '@/lib/booking/recovery.server';
 import { recoverVoiceActions } from "@/lib/voice/actionRecovery.server";
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
@@ -23,6 +25,7 @@ export async function POST(request: NextRequest) {
     );
     if (process.env.VOICE_ACTIONS_ROLLOUT === "true")
       await recoverVoiceActions();
+    if (isBookingConfirmationEnabled()) await reconcileBookingDrafts();
     return NextResponse.json(
       { ok: true },
       { headers: { "Cache-Control": "no-store" } },

@@ -1,3 +1,7 @@
+import { isBookingConfirmationEnabled } from '@/lib/booking/draft';
+import { bookingConfirmationTools, bookingAvailabilityTool, BOOKING_CONFIRMATION_INSTRUCTIONS } from '@/lib/booking/tools';
+import { getBookingModelContext } from '@/lib/booking/modelContext.server';
+import { prepareBookingDraft, confirmBookingDraft, acknowledgeBookingSummary, BookingInputError } from '@/lib/booking/drafts.server';
 import { loadBusinessContextResults } from "./businessContext";
 import { createHash, randomUUID } from "node:crypto";
 import { meteredAnthropic as anthropic } from "@/lib/anthropic/client";
@@ -210,6 +214,7 @@ export interface ProcessIncomingMessageOptions {
 }
 
 export interface ProcessIncomingMessageResult {
+  bookingReview?: { draftId: string; revision: number };
   text: string;
   knowledgeGapDetected: boolean;
   conversationId: string | null;
@@ -686,7 +691,7 @@ async function executeCalendarTool(
   try {
     if (toolName === "check_availability") {
       const date = toolInput.date as string;
-      const slots = await checkAvailability(businessId, date, timezone);
+      const slots = await checkAvailability(businessId, date, timezone, undefined, typeof toolInput.serviceId === "string" ? toolInput.serviceId : undefined);
 
       if (slots.length === 0) {
         return "No available slots on that date. The business may be closed or fully booked.";
@@ -1454,6 +1459,9 @@ export async function processIncomingMessageDetailed(
         : [],
     };
 
+    const bookingV2 = isBookingConfirmationEnabled() && !isSignupGoal && effectiveAiSettings.booking_enabled && canBookDirectly;
+    const bookingContext = bookingV2 ? await getBookingModelContext(businessId, conversation.id) : null;
+    let bookingReview: { draftId: string; revision: number; summary: string } | undefined;
     const buildModelSurface = (bookingAvailable: boolean) => {
       const approvedKnowledge = businessKnowledge;
       // Preserve the exact legacy prompt call surface when no richer knowledge
@@ -1499,6 +1507,14 @@ export async function processIncomingMessageDetailed(
         )
       ) {
         requestTools.push(...calendarTools);
+      }
+      if (bookingV2 && bookingAvailable) {
+        const tools = requestTools.filter(tool => !['create_booking','record_booking_request','check_availability'].includes(tool.name));
+        if (effectiveAiSettings.booking_mode === 'collect_info' || hasCalendar) {
+          tools.push(...bookingConfirmationTools);
+          if (effectiveAiSettings.booking_mode === 'schedule_direct') tools.push(bookingAvailabilityTool);
+        }
+        return { system: `${system}\n${BOOKING_CONFIRMATION_INSTRUCTIONS}\nVerified booking state: ${JSON.stringify(bookingContext)}`, tools };
       }
       return { system, tools: requestTools };
     };
@@ -1644,6 +1660,27 @@ export async function processIncomingMessageDetailed(
             },
             turnDeadlineAt,
           );
+        } else if (toolUseBlock.name === 'prepare_booking' || toolUseBlock.name === 'confirm_booking') {
+          toolExecutions++;
+          if (!bookingV2 || !enabledToolNames.has(toolUseBlock.name) || !sourceMessageId || options.isPreview || options.persistBookingRequests === false) {
+            toolResult = 'Booking actions are not available here. Do not claim an appointment or request was saved.';
+          } else {
+            await assertAIProcessingOperationallyAllowed(businessId, channel);
+            const input = toolUseBlock.input as Record<string, unknown>;
+            try {
+              if (toolUseBlock.name === 'prepare_booking') {
+                const draft = await prepareBookingDraft({ businessId, conversationId: conversation.id, contactId: contact.id, sourceMessageId, input: { ...input, ...(contactPhone ? { phone: contactPhone } : {}) } });
+                if (draft.status === 'preparing' || draft.status === 'awaiting_confirmation') {
+                  bookingReview = { draftId: draft.id, revision: draft.revision, summary: draft.summary_text };
+                  toolResult = `Read this review and wait for a NEW customer message before confirming: ${draft.summary_text} Draft ${draft.id}, revision ${draft.revision}.`;
+                } else toolResult = JSON.stringify(draft.result ?? { status: draft.status, instruction: 'Do not submit this appointment again.' });
+              } else if (typeof input.draftId === 'string' && Number.isInteger(input.revision)) {
+                toolResult = JSON.stringify(await confirmBookingDraft({ businessId, draftId: input.draftId, revision: input.revision as number, confirmationMessageId: sourceMessageId }));
+              } else toolResult = 'Choose the current reviewed draft before confirming.';
+            } catch (error) {
+              toolResult = error instanceof BookingInputError ? error.message : 'The current details could not be authorized. Check the required details and current revision. Nothing new is confirmed; do not promise success or invent an appointment.';
+            }
+          }
         } else if (toolUseBlock.name === "record_booking_request") {
           toolExecutions++;
           const bookingRequestResult = await awaitWithinAITurnDeadline(
@@ -1790,7 +1827,7 @@ export async function processIncomingMessageDetailed(
         "Anthropic returned no customer-visible web chat reply text.",
       );
     }
-    const responseText = parsedResponse.text || channelFallback;
+    const responseText = bookingReview?.summary ?? (parsedResponse.text || channelFallback);
     const actions: GoalLinkOfferedAction[] =
       isSignupGoal &&
       signupGoalUrl &&
@@ -1875,6 +1912,9 @@ export async function processIncomingMessageDetailed(
       replyFinalized = true;
     }
 
+    if (bookingReview && assistantMessageId && channel === 'web_chat') {
+      await acknowledgeBookingSummary({ businessId, draftId: bookingReview.draftId, revision: bookingReview.revision, messageId: assistantMessageId });
+    }
     const leadScoreIncrease = scoreMessage(message);
     if (leadScoreIncrease > 0) {
       if (replyFinalized) {
@@ -1909,6 +1949,7 @@ export async function processIncomingMessageDetailed(
       await assertAIProcessingOperationallyAllowed(businessId, channel);
     }
     return {
+      ...(bookingReview ? { bookingReview: { draftId: bookingReview.draftId, revision: bookingReview.revision } } : {}),
       text: responseText,
       knowledgeGapDetected: parsedResponse.knowledgeGapDetected,
       conversationId: conversation.id,

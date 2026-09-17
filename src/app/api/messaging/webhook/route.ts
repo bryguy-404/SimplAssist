@@ -1,3 +1,4 @@
+import { acknowledgeBookingSummary } from '@/lib/booking/drafts.server';
 import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { telnyx } from "@/lib/messaging/client";
@@ -529,6 +530,9 @@ async function processAndReply(
     finalReply,
     "sms"
   );
+  if (aiResult.bookingReview && result.data?.id) {
+    await acknowledgeBookingSummary({ businessId: context.businessId, draftId: aiResult.bookingReview.draftId, revision: aiResult.bookingReview.revision, messageId: assistantMessage.id, providerMessageId: result.data.id });
+  }
   for (const action of aiResult.actions ?? []) {
     try {
       await finalizeGoalLinkEvent({

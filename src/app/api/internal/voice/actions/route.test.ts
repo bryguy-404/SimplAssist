@@ -1,3 +1,4 @@
+vi.mock('server-only', () => ({}));
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { NextRequest } from "next/server";
 const m = vi.hoisted(() => ({

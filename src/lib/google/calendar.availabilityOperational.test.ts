@@ -13,10 +13,12 @@ const mocks = vi.hoisted(() => ({
   hoursSelect: vi.fn(),
   hoursEq: vi.fn(),
   hoursSingle: vi.fn(),
+  offering: vi.fn(),
   freeBusyQuery: vi.fn()
 }));
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/lib/booking/settings.server", () => ({ getEffectiveBookingOffering: mocks.offering }));
 vi.mock("./bookingOperational.server", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("./bookingOperational.server")>();
@@ -445,5 +447,32 @@ describe("availability operational races", () => {
     await expect(availability).rejects.toBe(blocked);
     expect(mocks.assertBookingOperationallyAllowed).toHaveBeenCalledTimes(3);
     expect(mocks.freeBusyQuery).toHaveBeenCalledOnce();
+  });
+});
+
+
+describe("configured appointment duration", () => {
+  it("checks the whole 90 minute interval against Google busy time", async () => {
+    mocks.offering.mockResolvedValue({ durationMinutes: 90 });
+    mocks.hoursSingle.mockResolvedValue({ data: { ...BUSINESS_HOURS, close_time: "12:00:00" }, error: null });
+    mocks.freeBusyQuery.mockResolvedValue({ data: { calendars: { [CALENDAR_ID]: { busy: [{ start: "2026-03-02T15:00:00Z", end: "2026-03-02T15:30:00Z" }] } } } });
+    const original = mocks.from.getMockImplementation()!;
+    const local: Record<string, unknown> = { then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: [], error: null }).then(resolve) };
+    for (const method of ['select','eq','in','lt','gt']) local[method] = () => local;
+    mocks.from.mockImplementation((table: string) => table === 'calendar_bookings' ? local : original(table));
+    expect(await checkAvailability(BUSINESS_ID, "2026-03-02", BUSINESS_TIMEZONE, undefined, "service")).toEqual(["10:30 AM"]);
+  });
+  it("does not advertise a slot blocked by a local pending reservation", async () => {
+    mocks.offering.mockResolvedValue({ durationMinutes: 60 });
+    const original = mocks.from.getMockImplementation()!;
+    const local: Record<string, unknown> = { then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: [{ starts_at: '2026-03-02T14:30:00Z', ends_at: '2026-03-02T15:00:00Z' }], error: null }).then(resolve) };
+    for (const method of ['select','eq','in','lt','gt']) local[method] = () => local;
+    mocks.from.mockImplementation((table: string) => table === 'calendar_bookings' ? local : original(table));
+    expect(await checkAvailability(BUSINESS_ID, "2026-03-02", BUSINESS_TIMEZONE, undefined, "service")).toEqual([]);
+  });
+  it("requires service identity when new confirmations are enabled", async () => {
+    vi.stubEnv('BOOKING_CONFIRMATION_V2_ENABLED', 'true');
+    await expect(checkAvailability(BUSINESS_ID, "2026-03-02", BUSINESS_TIMEZONE)).rejects.toThrow('Choose a service');
+    expect(mocks.freeBusyQuery).not.toHaveBeenCalled();
   });
 });

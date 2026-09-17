@@ -18,6 +18,7 @@ export const modelVoiceDecision = z.discriminatedUnion("intent", [
   z
     .object({
       intent: z.literal("availability"),
+      serviceId: z.string().uuid().optional(),
       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     })
     .strict(),
@@ -68,6 +69,7 @@ export function modelActionContext(
   transcript: ModelTranscript,
 ) {
   return {
+    ...(context.bookingContext ? { bookingContext: context.bookingContext } : {}),
     capabilities: context.capabilities,
     goal: context.goal,
     bookingMode: context.bookingMode,

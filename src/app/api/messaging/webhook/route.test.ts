@@ -1,3 +1,4 @@
+vi.mock('server-only', () => ({}));
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";

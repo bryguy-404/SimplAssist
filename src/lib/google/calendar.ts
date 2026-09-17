@@ -1,3 +1,6 @@
+import { validateBookingDraftAuthority, type BookingDraftAuthority } from '@/lib/booking/authorization.server';
+import { getEffectiveBookingOffering } from '@/lib/booking/settings.server';
+import { isBookingConfirmationEnabled } from '@/lib/booking/draft';
 import { validateVoiceBookingAccess, VoiceBookingNotSubmittedError, type VoiceBookingAuthority } from "@/lib/voice/bookingAccess.server";
 import { createHash, randomUUID } from "node:crypto";
 import type { calendar_v3 } from "googleapis";
@@ -795,7 +798,8 @@ export async function checkAvailability(
   businessId: string,
   date: string, // YYYY-MM-DD
   timezone: string,
-  voiceAuthority?: VoiceBookingAuthority
+  voiceAuthority?: VoiceBookingAuthority,
+  offeringId?: string
 ): Promise<string[]> {
   const businessTimezone = requireBusinessTimeZone(
     timezone,
@@ -812,6 +816,10 @@ export async function checkAvailability(
   ) {
     throw new RangeError("A valid appointment date is required.");
   }
+  if (isBookingConfirmationEnabled() && !offeringId) throw new Error('Choose a service before checking availability.');
+  const offering = offeringId ? await getEffectiveBookingOffering(businessId, offeringId) : null;
+  if (offeringId && !offering) throw new Error('This service is unavailable for direct booking.');
+  const duration = offering?.durationMinutes ?? SLOT_DURATION_MINUTES;
   const policy = bookingWindowPolicy();
   const now = new Date();
   const normalizedDate = normalizeDate(date, businessTimezone);
@@ -888,6 +896,11 @@ export async function checkAvailability(
   await assertBookingOperationallyAllowed(businessId);
 
   const busySlots = validatedBusyPeriods(freeBusy, calendarId);
+  if (offeringId) {
+    const local = await supabaseAdmin.from('calendar_bookings').select('starts_at,ends_at').eq('business_id', businessId).in('status', ['pending','confirmed']).lt('starts_at', maxDate.toISOString()).gt('ends_at', minDate.toISOString());
+    if (local.error) throw new Error('Local appointment availability is unavailable.');
+    for (const reserved of local.data ?? []) busySlots.push({ start: Date.parse(reserved.starts_at), end: Date.parse(reserved.ends_at) });
+  }
   const earliestStart = new Date(
     now.getTime() + policy.minimumLeadMinutes * 60 * 1000
   );
@@ -907,7 +920,7 @@ export async function checkAvailability(
     Math.ceil(openMinutes / SLOT_DURATION_MINUTES) * SLOT_DURATION_MINUTES;
   for (
     let m = firstAlignedSlot;
-    m + SLOT_DURATION_MINUTES <= closeMinutes;
+    m + duration <= closeMinutes;
     m += SLOT_DURATION_MINUTES
   ) {
     let slotStart: Date;
@@ -925,10 +938,10 @@ export async function checkAvailability(
     }
 
     const slotEnd = new Date(
-      slotStart.getTime() + SLOT_DURATION_MINUTES * 60 * 1000
+      slotStart.getTime() + duration * 60 * 1000
     );
 
-    if (slotStart < earliestStart || slotStart > latestStart) continue;
+    if (slotStart < earliestStart || slotStart > latestStart || slotEnd > maxDate) continue;
 
     // Check if this slot overlaps with any busy period
     const isBusy = busySlots.some((busy) => {
@@ -954,7 +967,8 @@ export async function createBooking(
   params: BookingParams,
   timezone: string,
   linkage: BookingLinkage,
-  voiceAuthority?: VoiceBookingAuthority
+  voiceAuthority?: VoiceBookingAuthority,
+  draftAuthority?: BookingDraftAuthority
 ): Promise<BookingResult> {
   const businessTimezone = requireBusinessTimeZone(
     timezone,
@@ -965,7 +979,9 @@ export async function createBooking(
     ? await validateVoiceBookingAccess(businessId, voiceAuthority, linkage.sourceMessageId, params)
     : null;
   if (!voiceAuthority) await requireDirectBooking(businessId);
-  const normalizedParams = normalizeBookingParams(params, linkage);
+  if (isBookingConfirmationEnabled() && !draftAuthority) throw new Error('A confirmed booking draft is required.');
+  const draftSnapshot = draftAuthority ? await validateBookingDraftAuthority(businessId, draftAuthority, linkage, params) : null;
+  const normalizedParams = normalizeBookingParams(draftSnapshot ? { ...params, durationMinutes: draftSnapshot.offering.durationMinutes } : params, linkage);
   const startDate = parseBookingStartTime(
     normalizedParams.startTime,
     businessTimezone
@@ -1028,7 +1044,7 @@ export async function createBooking(
     linkage.contactId,
     localStart,
     normalizedParams.customerEmail,
-    voiceConfirmation?.email
+    draftSnapshot?.email ?? voiceConfirmation?.email
   );
   assertWithinBusinessHours(
     startDate,
@@ -1061,7 +1077,7 @@ export async function createBooking(
   if (!preflightClient) {
     throw new Error("Google Calendar not connected");
   }
-  const requestedSummary = `${canonicalParams.serviceName} - ${canonicalParams.customerName}`;
+  const requestedSummary = `${draftSnapshot ? `${draftSnapshot.offering.label}: ` : ""}${canonicalParams.serviceName} - ${canonicalParams.customerName}`;
   const requestFingerprint = bookingRequestFingerprint(
     params,
     businessTimezone,
@@ -1220,6 +1236,13 @@ export async function createBooking(
     }
   };
 
+  if (draftSnapshot) {
+    const location = draftSnapshot.offering.format === 'business_visit' ? draftSnapshot.offering.businessAddress : draftSnapshot.offering.format === 'customer_site' ? draftSnapshot.customerAddress : null;
+    if (location) requestBody.location = location;
+    descriptionParts.push(`Appointment format: ${draftSnapshot.offering.format}`);
+    if (draftSnapshot.offering.format === 'phone_callback') descriptionParts.push('The business will call the customer.');
+    requestBody.description = descriptionParts.join('\n');
+  }
   // Add customer as attendee so Google sends them a calendar invite
   if (canonicalParams.customerEmail) {
     requestBody.attendees = [{ email: canonicalParams.customerEmail }];
@@ -1291,6 +1314,10 @@ export async function createBooking(
       }
       throw new VoiceBookingNotSubmittedError();
     }
+  }
+  if (draftAuthority) {
+    try { await validateBookingDraftAuthority(businessId, draftAuthority, linkage, params); }
+    catch (error) { await stopCalendarBookingBeforeProviderSubmission(submissionReservation, claimToken); throw error; }
   }
   try {
     event = await calendar.events.insert(

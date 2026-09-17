@@ -1,3 +1,4 @@
+vi.mock('server-only', () => ({}));
 import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -46,6 +47,7 @@ const mocks = vi.hoisted(() => ({
   AIReplyIdempotencyConflictError: class AIReplyIdempotencyConflictError extends Error {},
   AIReplyMeteringStateError: class AIReplyMeteringStateError extends Error {},
   WebChatMessageIdempotencyConflictError: class WebChatMessageIdempotencyConflictError extends Error {},
+  bookingContext: vi.fn(), prepareDraft: vi.fn(), confirmDraft: vi.fn(), acknowledgeDraft: vi.fn(),
   anthropicCreate: vi.fn(),
   from: vi.fn(),
   resolveBusinessOperationalControls: vi.fn(),
@@ -76,6 +78,8 @@ const mocks = vi.hoisted(() => ({
   recordAnthropicProviderCall: vi.fn(),
 }));
 
+vi.mock('@/lib/booking/modelContext.server', () => ({ getBookingModelContext: mocks.bookingContext }));
+vi.mock('@/lib/booking/drafts.server', () => ({ prepareBookingDraft: mocks.prepareDraft, confirmBookingDraft: mocks.confirmDraft, acknowledgeBookingSummary: mocks.acknowledgeDraft, BookingInputError: class extends Error {} }));
 vi.mock("@/lib/anthropic/client", () => ({
   meteredAnthropic: { messages: { create: mocks.anthropicCreate } },
 }));
@@ -4433,5 +4437,41 @@ describe("processIncomingMessageDetailed goal-aware behavior", () => {
     expect(firstKey).not.toContain(sourceMessageId);
     expect(firstKey).not.toContain("example.com");
     expect(firstKey).not.toContain("pat@example.com");
+  });
+});
+
+
+describe("revisioned booking tools", () => {
+  async function turn(tool: string, input: Record<string, unknown>, options = {}) {
+    vi.stubEnv('BOOKING_CONFIRMATION_V2_ENABLED', 'true');
+    setBusinessGoal('book'); setAiSettings({ booking_enabled: true, booking_mode: 'schedule_direct' });
+    mocks.bookingContext.mockResolvedValue({ offerings: [], currentDraft: null });
+    mocks.prepareDraft.mockResolvedValue({ id: 'draft', revision: 2, status: 'preparing', summary_text: 'Review the corrected appointment details?' });
+    mocks.confirmDraft.mockResolvedValue({ status: 'confirmed', summary: 'Booked.' });
+    mocks.anthropicCreate.mockResolvedValueOnce({ stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 'new-booking', name: tool, input }] });
+    const preview = (options as { isPreview?: boolean }).isPreview === true;
+    if (preview) { mocks.findOrCreateContact.mockResolvedValue(WEB_CONTACT); mocks.getOrCreateConversation.mockResolvedValue(WEB_CONVERSATION); }
+    try { return await processIncomingMessageDetailed(BUSINESS_ID, preview ? null : '+15745550100', preview ? WEB_CONTACT.email : null, 'Yes please', preview ? 'web_chat' : 'sms', preview ? WEB_CONTACT.session_id : null, { persistAssistant: false, ...options }); }
+    finally { vi.unstubAllEnvs(); }
+  }
+  it('returns the stored review and its revision for SMS transport acknowledgment', async () => {
+    const result = await turn('prepare_booking', { emailAsked: true, name: 'Pat' });
+    expect(result.text).toBe('Review the corrected appointment details?');
+    expect(result.bookingReview).toEqual({ draftId: 'draft', revision: 2 });
+    expect(mocks.acknowledgeDraft).not.toHaveBeenCalled();
+    expect(mocks.createBooking).not.toHaveBeenCalled();
+  });
+  it('uses only the durable current inbound message as confirmation evidence', async () => {
+    await turn('confirm_booking', { draftId: 'draft', revision: 2 });
+    expect(mocks.confirmDraft).toHaveBeenCalledWith(expect.objectContaining({ businessId: BUSINESS_ID, draftId: 'draft', revision: 2, confirmationMessageId: 'message_1' }));
+    expect(mocks.createBooking).not.toHaveBeenCalled();
+  });
+  it('rejects the legacy direct mutation tool when revisioned booking is enabled', async () => {
+    await turn('create_booking', { customer_name: 'Pat', service_name: 'Estimate', start_time: '2026-09-23T10:00:00' });
+    expect(mocks.createBooking).not.toHaveBeenCalled(); expect(mocks.confirmDraft).not.toHaveBeenCalled();
+  });
+  it('does not execute booking tools in previews', async () => {
+    await turn('confirm_booking', { draftId: 'draft', revision: 2 }, { isPreview: true, persistBookingRequests: false });
+    expect(mocks.confirmDraft).not.toHaveBeenCalled(); expect(mocks.createBooking).not.toHaveBeenCalled();
   });
 });

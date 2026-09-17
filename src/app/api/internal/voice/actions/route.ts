@@ -1,3 +1,5 @@
+import { isBookingConfirmationEnabled } from '@/lib/booking/draft';
+import { getBookingModelContext } from '@/lib/booking/modelContext.server';
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -64,6 +66,7 @@ export async function POST(request: NextRequest) {
       const c = await loadVoiceActionContext(input.sessionId);
       return NextResponse.json(
         {
+          ...(isBookingConfirmationEnabled() && c.capabilities.booking ? { bookingContext: await getBookingModelContext(c.session.action_business_id || c.session.business_id, c.session.action_conversation_id || c.session.conversation_id!) } : {}),
           sessionId: c.session.id,
           actionBusinessId:
             c.session.action_business_id || c.session.business_id,

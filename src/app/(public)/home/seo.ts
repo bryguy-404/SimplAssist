@@ -48,7 +48,7 @@ const VOICE_FAQS = [
   },
 ] as const satisfies readonly HomepageFaq[];
 
-export const HOME_FAQS = [
+const BASE_HOME_FAQS = [
   {
     question: "What is missed call text back?",
     answer:
@@ -93,11 +93,18 @@ export const HOME_FAQS = [
     answer:
       "Yes — you can cancel anytime, and there are no contracts. The one-time $25 setup fee is non-refundable once carrier registration begins, since it covers that registration process itself.",
   },
+] as const satisfies readonly HomepageFaq[];
+
+export const HOME_FAQS = [
+  BASE_HOME_FAQS[1],
+  BASE_HOME_FAQS[3],
   ...VOICE_FAQS,
+  BASE_HOME_FAQS[0],
+  BASE_HOME_FAQS[2],
+  ...BASE_HOME_FAQS.slice(4),
 ] as const satisfies readonly HomepageFaq[];
 
 export const CHAT_ONLY_HOME_FAQS = [
-  HOME_FAQS[0],
   {
     question: "What is SimplAssist?",
     answer:
@@ -108,20 +115,22 @@ export const CHAT_ONLY_HOME_FAQS = [
     answer:
       "Chat Only is $10/month and includes a website chat widget, 200 completed AI replies per month, web-chat lead capture, a contact and conversation inbox, AI answer and tone customization, Google Calendar connection, and AI appointment booking. It has no phone number, SMS, MMS, Telnyx activation, or setup fee.",
   },
-  HOME_FAQS[2],
   {
     question: "How much does SimplAssist cost?",
     answer:
       `Chat Only is $10/month with 200 completed website-chat AI replies and no setup fee. SMS Only is $25/month with 500 included SMS parts, and SMS + Web Chat is $45/month with 1,500 included SMS parts. Paid SMS activation has a one-time $25 setup fee per business for carrier registration. ${fullSuitePricingCopy}`,
   },
-  HOME_FAQS[4],
+  ...VOICE_FAQS,
+  BASE_HOME_FAQS[0],
+  BASE_HOME_FAQS[2],
+  BASE_HOME_FAQS[4],
   {
     question: "Does the AI answer with my business's real information?",
     answer:
       "Yes — on Chat Only and SMS + Web Chat, your AI loads your business profile, active services, saved FAQs, business hours, and AI settings before every answer, and it is instructed never to invent facts about your business.",
   },
   {
-    ...HOME_FAQS[6],
+    ...BASE_HOME_FAQS[6],
     answer:
       "Chat Only can launch without phone or carrier registration after billing and core setup are complete. SMS registrations are usually approved within a few business days of payment, though additional carrier review can sometimes take a few weeks. Texting goes live after carrier approval and phone-number assignment. Learn more about what the one-time $25 SMS setup fee covers.",
     answerLink: {
@@ -129,8 +138,7 @@ export const CHAT_ONLY_HOME_FAQS = [
       href: "/support/setup-fee",
     },
   },
-  HOME_FAQS[7],
-  ...VOICE_FAQS,
+  BASE_HOME_FAQS[7],
 ] as const satisfies readonly HomepageFaq[];
 
 export function getHomepageSeoContent(

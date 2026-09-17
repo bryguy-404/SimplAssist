@@ -84,6 +84,8 @@ export class LiveCall {
     lastAssistantEvent: string | null;
     callerEnd: number;
     marked: boolean;
+    audibleFrameSent: boolean;
+    audibleGenerationAtArm: number;
   } | null = null;
   private actionMarks = new Map<
     string,
@@ -680,6 +682,8 @@ export class LiveCall {
               lastAssistantEvent: null,
               callerEnd: this.transcript.latestCallerEndMs,
               marked: false,
+              audibleFrameSent: false,
+              audibleGenerationAtArm: this.audibleOutputGeneration,
             };
           this.sendLive({
             type: "session.commentary.append",
@@ -719,6 +723,8 @@ export class LiveCall {
             event: "media",
             media: { payload: frame.toString("base64") },
           });
+          if (this.pendingAction && hasAudibleAudio(frame, this.options.profile))
+            this.pendingAction.audibleFrameSent = true;
           if (!this.audioSent) {
             this.audioSent = true;
             this.startupTiming("first_audio_sent");
@@ -737,9 +743,15 @@ export class LiveCall {
           this.pendingAction &&
           !this.pendingAction.marked &&
           this.pendingAction.lastAssistantEvent &&
+          this.pendingAction.audibleFrameSent &&
+          this.audibleOutputGeneration >
+            this.pendingAction.audibleGenerationAtArm &&
           this.transcript.latestCallerEndMs <= this.pendingAction.callerEnd &&
-          this.output.pendingMs === 0 &&
-          Date.now() - this.lastAudibleOutputAt > 200
+          Date.now() - this.lastAudibleOutputAt > 200 &&
+          // Continuous provider silence must not prevent a playback mark for
+          // speech already sent. The phone still has to acknowledge the mark;
+          // full readback and caller permission are checked separately.
+          !this.output.hasPendingAudibleAudio
         ) {
           const name = `action-${randomUUID()}`;
           this.pendingAction.marked = true;
@@ -747,6 +759,12 @@ export class LiveCall {
             id: this.pendingAction.id,
             eventId: this.pendingAction.lastAssistantEvent,
             callerEnd: this.pendingAction.callerEnd,
+          });
+          console.info("[voice-playback] action_mark_queued", {
+            sessionId: this.options.session.id,
+            actionId: this.pendingAction.id,
+            callerEndMs: this.pendingAction.callerEnd,
+            pendingAudioMs: this.output.pendingMs,
           });
           if (this.actionMarks.size > 20)
             throw new Error("action_playback_stalled");

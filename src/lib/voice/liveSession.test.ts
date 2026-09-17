@@ -282,6 +282,142 @@ describe("continuous phone bridge", () => {
     );
     await h.finish();
   });
+  async function prepareActionReadback(h: ReturnType<typeof harness>) {
+    h.answer.mockResolvedValue({
+      text: "May I text the signup link?",
+      confirmationActionId: "action-id",
+    });
+    h.live.event({ type: "session.input_transcript.delta", event_id: "request", delta: "Send the signup link", start_ms: 100, end_ms: 400 });
+    h.live.event({ type: "session.delegation.created", offset_ms: 400, delegation: { id: "proposal", target: "client" } });
+    await vi.advanceTimersByTimeAsync(300);
+    h.live.event({ type: "session.output_transcript.delta", event_id: "readback", delta: "May I text the signup link?", start_ms: 500, end_ms: 900 });
+  }
+  function actionPlaybackMarks(phone: Socket) {
+    return phone.sent.filter((event) => event.event === "mark" && String((event.mark as { name: string }).name).startsWith("action-"));
+  }
+  function emitOutput(live: Socket, bytes: Buffer) {
+    live.event({ type: "session.output_audio.delta", delta: bytes.toString("base64") });
+  }
+  it.each(["pcm16", "pcmu8"] as const)(
+    "persists %s action playback despite continuous silence and supplies it to the next clear assent",
+    async (profile) => {
+      let releaseWrite!: () => void;
+      const writeReady = new Promise<void>((resolve) => { releaseWrite = resolve; });
+      let persistedPlayback: { actionId: string; eventId: string; callerEndMs: number } | null = null;
+      const acknowledged = vi.fn(async (actionId: string, eventId: string, callerEndMs: number) => {
+        await writeReady;
+        persistedPlayback = { actionId, eventId, callerEndMs };
+      });
+      const h = harness(profile, false, { actionsEnabled: true, acknowledgeActionPlayback: acknowledged });
+      await h.start();
+      await prepareActionReadback(h);
+      const frameBytes = new AudioQueue(profile).frameBytes;
+      const speech = Buffer.alloc(frameBytes, 17);
+      const silence = Buffer.alloc(frameBytes, AUDIO_PROFILES[profile].silence);
+      // Provider stays 200 ms ahead of phone playback, even after its speech
+      // ends. Appending one silent frame per paced tick never empties the queue.
+      emitOutput(h.live, Buffer.concat([speech, ...Array<Buffer>(9).fill(silence)]));
+      for (let frame = 1; frame <= 12; frame++) {
+        emitOutput(h.live, silence);
+        await vi.advanceTimersByTimeAsync(20);
+        const sentFrames = h.phone.sent.filter((event) => event.event === "media").length;
+        expect(10 + frame - sentFrames).toBe(10);
+      }
+      const marks = actionPlaybackMarks(h.phone);
+      expect(marks).toHaveLength(1);
+      expect(console.info).toHaveBeenCalledWith("[voice-playback] action_mark_queued", expect.objectContaining({ pendingAudioMs: 200 }));
+      expect(acknowledged).not.toHaveBeenCalled();
+      h.phone.event({ event: "mark", mark: marks[0].mark });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(acknowledged).toHaveBeenCalledWith("action-id", "readback", 400);
+      expect(persistedPlayback).toBeNull();
+
+      let evidenceAtAnswer: unknown;
+      h.answer.mockImplementationOnce(async (_session, _id, transcript) => {
+        evidenceAtAnswer = { playback: persistedPlayback, callerReply: transcript.fragments.at(-1)?.text };
+        return "The existing action can now be checked against the caller's reply.";
+      });
+      h.live.event({ type: "session.input_transcript.delta", event_id: "yes", delta: "Yes, please.", start_ms: 1000, end_ms: 1200 });
+      h.live.event({ type: "session.delegation.created", offset_ms: 1200, delegation: { id: "confirmation", target: "client" } });
+      await vi.advanceTimersByTimeAsync(300);
+      // A queued transport acknowledgment alone is insufficient: delegation
+      // waits for its durable write before reading the action state.
+      expect(h.answer).toHaveBeenCalledTimes(1);
+      releaseWrite();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(h.answer).toHaveBeenCalledTimes(2);
+      expect(evidenceAtAnswer).toEqual({ playback: { actionId: "action-id", eventId: "readback", callerEndMs: 400 }, callerReply: "Yes, please." });
+      expect(acknowledged).toHaveBeenCalledTimes(1);
+      await h.finish();
+    },
+  );
+  it.each([
+    ["pcm16", "none"], ["pcmu8", "none"],
+    ["pcm16", "silence"], ["pcmu8", "silence"],
+  ] as const)("does not mark %s readback text with %s audio", async (profile, output) => {
+    const acknowledged = vi.fn().mockResolvedValue(undefined);
+    const h = harness(profile, false, { actionsEnabled: true, acknowledgeActionPlayback: acknowledged });
+    await h.start();
+    await prepareActionReadback(h);
+    if (output === "silence") emitOutput(h.live, Buffer.alloc(new AudioQueue(profile).frameBytes * 10, AUDIO_PROFILES[profile].silence));
+    await vi.advanceTimersByTimeAsync(500);
+    expect(actionPlaybackMarks(h.phone)).toEqual([]);
+    expect(acknowledged).not.toHaveBeenCalled();
+    await h.finish();
+  });
+  it.each(["pcm16", "pcmu8"] as const)(
+    "does not use %s audio received before the action was armed as new readback evidence",
+    async (profile) => {
+      const acknowledged = vi.fn().mockResolvedValue(undefined);
+      const h = harness(profile, false, { actionsEnabled: true, acknowledgeActionPlayback: acknowledged });
+      await h.start();
+      const speech = Buffer.alloc(new AudioQueue(profile).frameBytes, 17);
+      emitOutput(h.live, Buffer.concat(Array<Buffer>(25).fill(speech)));
+      await prepareActionReadback(h);
+      // Some old speech is sent after arming, but no new audible output has
+      // arrived for this readback. Generated text must not authorize a mark.
+      await vi.advanceTimersByTimeAsync(400);
+      expect(actionPlaybackMarks(h.phone)).toEqual([]);
+      expect(acknowledged).not.toHaveBeenCalled();
+      emitOutput(h.live, speech);
+      await vi.advanceTimersByTimeAsync(240);
+      expect(actionPlaybackMarks(h.phone)).toHaveLength(1);
+      expect(acknowledged).not.toHaveBeenCalled();
+      await h.finish();
+    },
+  );
+  it.each(["pcm16", "pcmu8"] as const)(
+    "waits for a quiet %s audible tail hidden between silent frames before queuing the action mark",
+    async (profile) => {
+      const acknowledged = vi.fn().mockResolvedValue(undefined);
+      const h = harness(profile, false, { actionsEnabled: true, acknowledgeActionPlayback: acknowledged });
+      await h.start();
+      await prepareActionReadback(h);
+      const frameBytes = new AudioQueue(profile).frameBytes;
+      const silence = Buffer.alloc(frameBytes, AUDIO_PROFILES[profile].silence);
+      const quietTail = Buffer.alloc(frameBytes, 250);
+      if (profile === "pcm16") for (let offset = 0; offset < frameBytes; offset += 2) quietTail.writeInt16LE(40, offset);
+      const tailWithSilence = Buffer.concat([...Array<Buffer>(25).fill(silence), quietTail, ...Array<Buffer>(9).fill(silence)]);
+      expect(hasAudibleAudio(quietTail, profile)).toBe(true);
+      expect(hasAudibleAudio(tailWithSilence, profile)).toBe(false);
+      emitOutput(h.live, Buffer.alloc(frameBytes, 17));
+      emitOutput(h.live, tailWithSilence);
+      await vi.advanceTimersByTimeAsync(300);
+      expect(actionPlaybackMarks(h.phone)).toEqual([]);
+      expect(acknowledged).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(280);
+      const marks = actionPlaybackMarks(h.phone);
+      expect(marks).toHaveLength(1);
+      const tailSentIndex = h.phone.sent.findIndex((event) => event.event === "media" && (event.media as { payload: string }).payload === quietTail.toString("base64"));
+      expect(tailSentIndex).toBeGreaterThanOrEqual(0);
+      expect(h.phone.sent.indexOf(marks[0])).toBeGreaterThan(tailSentIndex);
+      expect(acknowledged).not.toHaveBeenCalled();
+      h.phone.event({ event: "mark", mark: marks[0].mark });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(acknowledged).toHaveBeenCalledWith("action-id", "readback", 400);
+      await h.finish();
+    },
+  );
   it.each([
     ["accepted", "playback_acknowledged", 400],
     ["caller_advanced", "caller_advanced", 1200],

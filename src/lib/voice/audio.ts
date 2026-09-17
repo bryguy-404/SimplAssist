@@ -49,7 +49,7 @@ export function decodeAudio(value: unknown, profile: AudioProfileName): Buffer {
 
 /** Detect output energy, not merely a received packet (Live also emits silence).
  * A low -60 dBFS RMS threshold preserves quiet opening consonants. This is only
- * a startup playback gate, never a caller speech/turn detector.
+ * an output playback gate, never a caller speech/turn detector or proof of consent.
  */
 export function hasAudibleAudio(
   bytes: Buffer,
@@ -107,6 +107,20 @@ export class AudioQueue {
   }
   get pendingMs() {
     return (this.bytes.length / this.frameBytes) * 20;
+  }
+  get hasPendingAudibleAudio() {
+    // Live continues emitting silence between spoken responses. Test each
+    // paced frame so a long silent tail cannot dilute a quiet spoken frame.
+    for (let offset = 0; offset < this.bytes.length; offset += this.frameBytes) {
+      if (
+        hasAudibleAudio(
+          this.bytes.subarray(offset, offset + this.frameBytes),
+          this.profile,
+        )
+      )
+        return true;
+    }
+    return false;
   }
   restrictToNormalBuffer() {
     if (this.pendingMs <= 1500) this.maxMs = 1500;

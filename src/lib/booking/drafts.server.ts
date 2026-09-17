@@ -78,3 +78,8 @@ export async function confirmBookingDraft(args: { businessId: string; draftId: s
     return { status: 'uncertain', summary: 'The booking result is still being checked. Do not say it failed or succeeded, and do not submit another appointment.' };
   }
 }
+
+export async function recoverBookingChatSummary(businessId: string, conversationId: string) {
+  const result = await db.rpc('recover_booking_chat_summary', { p_business_id: businessId, p_conversation_id: conversationId });
+  if (result.error) throw new Error('booking_chat_summary_recovery_failed');
+}

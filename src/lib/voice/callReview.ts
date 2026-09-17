@@ -121,6 +121,13 @@ export function actionReviewStatus(action: Pick<ReviewActionRow, "kind" | "statu
     case "succeeded": break;
     default: return { label: "Result unavailable", detail: "The final result could not be verified.", tone: "warning" };
   }
+  if (["booking_review_text", "booking_confirmation_text"].includes(action.kind)) {
+    const delivery = record(action.result).deliveryStatus;
+    if (delivery === "delivered") return { label: "Booking text delivered", detail: "Review appointment details below for the booking result.", tone: "success" };
+    if (delivery === "failed" || delivery === "cancelled") return { label: "Booking text not delivered", detail: "This does not cancel a confirmed appointment or saved request.", tone: "warning" };
+    if (delivery === "accepted") return { label: "Booking text sent", detail: "Delivery pending; see appointment details for current status.", tone: "neutral" };
+    return { label: "Booking text result needs review", detail: "Do not send another copy while the result is uncertain.", tone: "warning" };
+  }
   if (action.kind === "signup") {
     if (!reviewText(record(action.result).providerMessageId, 200)) return { label: "Signup text result needs review", detail: "Provider acceptance could not be verified. Do not repeat the request.", tone: "warning" };
     const delivery = record(action.result).deliveryStatus;
@@ -140,5 +147,5 @@ export function actionReviewStatus(action: Pick<ReviewActionRow, "kind" | "statu
 }
 
 export function actionReviewTitle(kind: string): string {
-  return ({ contact: "Contact details", signup: "Signup link", booking: "Appointment", booking_request: "Appointment request" } as Record<string, string>)[kind] || "Call action";
+  return ({ contact: "Contact details", signup: "Signup link", booking: "Appointment", booking_request: "Appointment request", booking_review_text: "Review text", booking_confirmation_text: "Confirmation text" } as Record<string, string>)[kind] || "Call action";
 }

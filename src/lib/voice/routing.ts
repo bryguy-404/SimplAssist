@@ -47,6 +47,7 @@ export async function checkVoiceWorkerReady(
     const body = await response.json();
     return (
       body.ready === true &&
+      (process.env.BOOKING_CONFIRMATION_V2_ENABLED !== "true" || body.bookingProtocol === 1) &&
       (!commercial || (body.commercialProtocol === 2 && body.actionProtocol === 1)) &&
       (!naturalOpening || body.naturalOpeningProtocol === 1) &&
       (process.env.VOICE_ACTIONS_ROLLOUT !== "true" ||

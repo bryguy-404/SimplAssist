@@ -1,4 +1,5 @@
-import { acknowledgeBookingSummary } from '@/lib/booking/drafts.server';
+import { isBookingConfirmationEnabled } from '@/lib/booking/draft';
+import { claimBookingSummarySend, recordBookingSummaryAcceptance, markBookingSummaryUncertain, finalizeBookingSummarySend } from '@/lib/booking/summarySend.server';
 import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { telnyx } from "@/lib/messaging/client";
@@ -420,7 +421,11 @@ async function processAndReply(
   );
   let aiResult;
   try {
-    aiResult = await processIncomingMessageDetailed(
+    const liveReview = isBookingConfirmationEnabled()
+      ? await supabaseAdmin.rpc('has_live_booking_review', { p_business_id: context.businessId, p_caller: context.from })
+      : { data: false, error: null };
+    if (liveReview.error) throw new Error('booking_review_lookup_failed');
+    aiResult = liveReview.data ? { text: 'Please tell the assistant on your call what needs correcting, so we can review the latest details together.', actions: [], knowledgeGapDetected: false, sourceMessageId: context.sourceMessageId, bookingReview: undefined } : await processIncomingMessageDetailed(
       context.businessId,
       context.from,
       null,
@@ -497,13 +502,34 @@ async function processAndReply(
 
   if (!(await canStillSendAutomatedReply(context, "ai_reply"))) return;
 
-  const result = await telnyx.messages.send({
-    from: context.to,
-    to: context.from,
-    text: finalReply,
-    messaging_profile_id: sendContext.messagingProfileId,
-    type: "SMS",
-  });
+  // A booking read-back has a durable claim before the provider boundary.
+  // Unknown acceptance is never retried as another send.
+  const summaryClaim = aiResult.bookingReview ? await claimBookingSummarySend({
+    businessId: context.businessId, draftId: aiResult.bookingReview.draftId,
+    revision: aiResult.bookingReview.revision, sender: context.to,
+    destination: context.from, content: finalReply,
+  }) : null;
+  if (summaryClaim && !summaryClaim.send) {
+    if (summaryClaim.record.status === 'accepted') await finalizeBookingSummarySend(summaryClaim.record);
+    return;
+  }
+  let result;
+  let summaryMessage: { id: string } | null = null;
+  try {
+    const sendPayload = {
+      from: context.to, to: context.from, text: finalReply,
+      messaging_profile_id: sendContext.messagingProfileId, type: "SMS" as const,
+    };
+    result = summaryClaim ? await telnyx.messages.send(sendPayload, { maxRetries: 0, timeout: 10000 }) : await telnyx.messages.send(sendPayload);
+    if (summaryClaim) {
+      if (!result.data?.id) throw new Error('booking_summary_acceptance_unknown');
+      const accepted = await recordBookingSummaryAcceptance(summaryClaim.record, result.data.id, new Date().toISOString());
+      summaryMessage = await finalizeBookingSummarySend(accepted);
+    }
+  } catch (error) {
+    if (summaryClaim) await markBookingSummaryUncertain(summaryClaim.record);
+    throw error;
+  }
   const occurredAt = new Date();
   try {
     recordBusinessMetricEventBestEffort({
@@ -523,16 +549,13 @@ async function processAndReply(
       metricKey: "ai_conversation_engaged",
     });
   }
-  const assistantMessage = await addMessage(
+  const assistantMessage = summaryMessage ?? await addMessage(
     context.conversation.id,
     context.businessId,
     "assistant",
     finalReply,
     "sms"
   );
-  if (aiResult.bookingReview && result.data?.id) {
-    await acknowledgeBookingSummary({ businessId: context.businessId, draftId: aiResult.bookingReview.draftId, revision: aiResult.bookingReview.revision, messageId: assistantMessage.id, providerMessageId: result.data.id });
-  }
   for (const action of aiResult.actions ?? []) {
     try {
       await finalizeGoalLinkEvent({
@@ -554,7 +577,7 @@ async function processAndReply(
       );
     }
   }
-  await recordOutboundSmsUsage({
+  if (!summaryClaim) await recordOutboundSmsUsage({
     businessId: context.businessId,
     text: finalReply,
     source: "ai_reply",

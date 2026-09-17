@@ -24,6 +24,7 @@ export interface CalendarEvent {
   end: string;
   allDay: boolean;
   description: string | null;
+  location?: string | null;
 }
 
 export type CalendarEventCreationState =
@@ -497,6 +498,7 @@ export default function CalendarView({
             </span>
           </div>
 
+          {viewEvent?.location ? <p className={`text-sm ${ink}`}>Location: {viewEvent.location}</p> : null}
           {viewEvent?.description && (
             <div>
               <p className={`text-xs font-medium uppercase mb-1 ${body}`}>Description</p>

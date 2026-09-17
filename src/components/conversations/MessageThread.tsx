@@ -17,6 +17,7 @@ import {
   getConversationAccessState,
   smsPlanLockedMessage,
 } from "./accessState";
+import { BookingReviewPanel } from "./BookingReview";
 import { VoiceCallReviewPanel } from "./VoiceCallReview";
 import { VoiceTranscriptPanel } from "./VoiceTranscript";
 
@@ -384,6 +385,7 @@ export function MessageThread({
 
       {/* Messages */}
       <div ref={messageScrollRef} className="min-w-0 flex-1 overflow-y-auto px-4 py-4">
+        {!demoMessages ? <BookingReviewPanel key={`booking-${conversation.id}`} conversationId={conversation.id} /> : null}
         {conversation.channel === "voice" && !demoMessages ? (
           <div className="space-y-8"><VoiceCallReviewPanel key={conversation.id} conversationId={conversation.id} />
             <VoiceTranscriptPanel key={`transcript-${conversation.id}`} conversationId={conversation.id} />

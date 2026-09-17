@@ -1,3 +1,5 @@
+import { reconcileBookingSummarySends } from '@/lib/booking/summarySend.server';
+import { reconcileBookingNotifications } from '@/lib/booking/notifications.server';
 import { isBookingConfirmationEnabled } from '@/lib/booking/draft';
 import { reconcileBookingDrafts } from '@/lib/booking/recovery.server';
 import { recoverVoiceActions } from "@/lib/voice/actionRecovery.server";
@@ -25,7 +27,7 @@ export async function POST(request: NextRequest) {
     );
     if (process.env.VOICE_ACTIONS_ROLLOUT === "true")
       await recoverVoiceActions();
-    if (isBookingConfirmationEnabled()) await reconcileBookingDrafts();
+    if (isBookingConfirmationEnabled()) { await reconcileBookingDrafts(); await reconcileBookingNotifications(); await reconcileBookingSummarySends(); }
     return NextResponse.json(
       { ok: true },
       { headers: { "Cache-Control": "no-store" } },

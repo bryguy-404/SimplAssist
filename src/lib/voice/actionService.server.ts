@@ -1,3 +1,4 @@
+import { getBookingNotificationDraft, sendBookingNotification } from '@/lib/booking/notifications.server';
 import { getBookingSettings } from '@/lib/booking/settings.server';
 import { isBookingConfirmationEnabled } from '@/lib/booking/draft';
 import { buildBookingDraft, prepareBookingDraft, confirmBookingDraft } from '@/lib/booking/drafts.server';
@@ -111,6 +112,17 @@ async function completedActionAnswer(
   action: VoiceAction,
   summary: string,
 ): Promise<VoiceAnswer> {
+  if (isBookingConfirmationEnabled() && ['booking','booking_request'].includes(action.kind) && action.status === 'succeeded') {
+    try {
+      const [draft, evidence] = await Promise.all([
+        db.from('booking_drafts').select('id,revision,status').eq('business_id', action.business_id).eq('voice_action_id', action.id).maybeSingle(),
+        db.from('voice_actions').select('request_event_ids').eq('id', action.id).eq('business_id', action.business_id).single(),
+      ]);
+      if (draft.error || evidence.error || !draft.data || !['confirmed','requested'].includes(draft.data.status) || !evidence.data?.request_event_ids?.length) return { text: summary };
+      const permission = await runVoiceDecision(sessionId, { intent: 'propose', payload: { kind: 'booking_confirmation_text', draftId: draft.data.id, revision: draft.data.revision }, requestEventIds: evidence.data.request_event_ids });
+      return { ...permission, text: `${summary} If the caller has declined texts, respect that. Otherwise offer this next step naturally now: ${permission.text}` };
+    } catch { return { text: `${summary} Offer further help naturally.` }; }
+  }
   if (action.kind !== "contact" || action.status !== "succeeded")
     return { text: summary };
   // Saving contact details and preparing the next permission question are
@@ -203,6 +215,10 @@ export async function runVoiceDecision(
   if (decision.intent === "propose") {
     const payload = voiceActionPayload.parse(decision.payload);
     assertCapability(ctx, payload.kind);
+    if (payload.kind === 'booking_review_text' || payload.kind === 'booking_confirmation_text') {
+      if (!isBookingConfirmationEnabled()) throw new Error('booking_text_disabled');
+      await getBookingNotificationDraft(ctx.session.action_business_id || ctx.session.business_id, (ctx.session.action_conversation_id || ctx.session.conversation_id)!, payload.draftId, payload.revision, payload.kind === 'booking_review_text' ? 'review' : 'confirmation');
+    }
     if ("email" in payload && payload.email)
       payload.email = payload.email.toLowerCase();
     if ("phone" in payload && payload.phone !== ctx.session.caller_phone)
@@ -398,9 +414,14 @@ async function executeVoiceAction(
     delete body.approvedUrl;
     const payload = voiceActionPayload.parse(body);
     await assertCurrentAction(a.id);
-    const link = await saveConfirmedContact({ ...a, payload });
+    const notification = payload.kind === 'booking_review_text' || payload.kind === 'booking_confirmation_text';
+    const link = notification ? { contactId: '', conversationId: (ctx.session.action_conversation_id || ctx.session.conversation_id)!, conflicts: [] as string[] } : await saveConfirmedContact({ ...a, payload });
     let result: Record<string, unknown> & { summary: string };
-    if (payload.kind === "contact")
+    if (payload.kind === 'booking_review_text' || payload.kind === 'booking_confirmation_text') {
+      if (!isBookingConfirmationEnabled()) throw new Error('booking_text_disabled');
+      submitted = true;
+      result = await sendBookingNotification({ ...a, payload }, ctx.session, fresh.business.name);
+    } else if (payload.kind === "contact")
       result = {
         summary:
           "The caller's confirmed contact details were saved with this call.",
@@ -529,12 +550,13 @@ async function executeVoiceAction(
       if (saved.error) throw new Error("voice_sms_result_save_failed");
       await persistVoiceSmsBookkeeping(a, result);
     }
+    const finalStatus = notification && result.deliveryStatus === 'uncertain' ? 'uncertain' : notification && ['failed','cancelled'].includes(String(result.deliveryStatus)) ? 'failed' : 'succeeded';
     const { error } = await db
       .from("voice_actions")
       .update({
-        status: "succeeded",
+        status: finalStatus,
         result,
-        recovery_complete: payload.kind !== "signup",
+        recovery_complete: payload.kind !== "signup" && finalStatus !== "uncertain",
         updated_at: new Date().toISOString(),
       })
       .eq("id", a.id)
@@ -542,7 +564,7 @@ async function executeVoiceAction(
     if (error) throw new Error("voice_result_save_failed");
     return await completedActionAnswer(
       ctx.session.id,
-      { ...a, status: "succeeded", result },
+      { ...a, status: finalStatus, result },
       result.summary,
     );
   } catch (failure) {

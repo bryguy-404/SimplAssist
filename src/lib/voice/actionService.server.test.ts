@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const m = vi.hoisted(() => ({
   from: vi.fn(),
   rpc: vi.fn(),
@@ -11,6 +11,7 @@ const m = vi.hoisted(() => ({
   calendar: vi.fn(),
   book: vi.fn(),
   requestBooking: vi.fn(),
+  buildDraft: vi.fn(), prepareDraft: vi.fn(), confirmDraft: vi.fn(), bookingSettings: vi.fn(), notificationDraft: vi.fn(), notificationSend: vi.fn(),
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/admin", () => ({
@@ -34,6 +35,9 @@ vi.mock("@/lib/google/calendar", () => ({
   createBooking: m.book,
 }));
 vi.mock("@/lib/ai/bookingRequests", () => ({ recordBookingRequest: m.requestBooking }));
+vi.mock('@/lib/booking/drafts.server', () => ({ buildBookingDraft: m.buildDraft, prepareBookingDraft: m.prepareDraft, confirmBookingDraft: m.confirmDraft }));
+vi.mock('@/lib/booking/settings.server', () => ({ getBookingSettings: m.bookingSettings }));
+vi.mock('@/lib/booking/notifications.server', () => ({ getBookingNotificationDraft: m.notificationDraft, sendBookingNotification: m.notificationSend }));
 import { runVoiceDecision } from "./actionService.server";
 import { VoiceBookingNotSubmittedError } from "./bookingAccess.server";
 import type { ActionDecision } from "./actions";
@@ -48,6 +52,7 @@ function query(table: string) {
   const q = {
     select: () => q,
     order: () => q,
+    limit: () => q,
     eq: (k: string, v: unknown) => {
       filters.push((r) => r[k] === v);
       return q;
@@ -944,4 +949,46 @@ describe("saved-contact signup continuation", () => {
       expect(m.send).not.toHaveBeenCalled();
     },
   );
+});
+
+
+describe('revisioned voice booking and separate text permission', () => {
+  const draftId='44444444-4444-4444-8444-444444444444';
+  const serviceId='55555555-5555-4555-8555-555555555555';
+  beforeEach(()=>{
+    vi.stubEnv('BOOKING_CONFIRMATION_V2_ENABLED','true');
+    tables.businesses[0].primary_goal='book';
+    Object.assign(tables.ai_settings[0],{booking_enabled:true,booking_mode:'schedule_direct'});
+    tables.voice_availability=[{session_id:sid,date:'2026-10-01',slots:['10:00 AM'],checked_at:new Date().toISOString(),service_id:serviceId,settings_revision:1}];
+    tables.booking_drafts=[{id:draftId,business_id:'business',voice_action_id:aid,revision:1,status:'preparing'}];
+    m.bookingSettings.mockResolvedValue({revision:1});
+    m.buildDraft.mockResolvedValue({snapshot:{offering:{serviceName:'Estimate'}},summary:'May I book the confirmed callback details?'});
+    m.prepareDraft.mockResolvedValue({id:draftId,revision:1});
+    m.confirmDraft.mockImplementation(async()=>{tables.booking_drafts[0].status='confirmed';return{status:'confirmed',summary:'Your callback appointment is confirmed.'};});
+    m.notificationDraft.mockResolvedValue({id:draftId,revision:1,status:'confirmed'});
+    m.notificationSend.mockResolvedValue({summary:'Text accepted; let me know when it arrives.',deliveryStatus:'accepted'});
+  });
+  afterEach(()=>vi.unstubAllEnvs());
+  it('books once then prepares, but does not send, the final text offer',async()=>{
+    const p:ActionDecision={intent:'propose',payload:{kind:'booking',name:'Caller',phone:'+15555550101',service:'Estimate',serviceId,emailAsked:true,startTime:'2026-10-01T10:00:00'},requestEventIds:['request']};
+    await runVoiceDecision(sid,p);
+    const result=await runVoiceDecision(sid,confirm);
+    expect(m.confirmDraft).toHaveBeenCalledTimes(1);
+    expect(result.text).toContain('callback appointment is confirmed');
+    expect(tables.voice_actions[1].kind).toBe('booking_confirmation_text');
+    expect(result.confirmationActionId).toBe(tables.voice_actions[1].id);
+    expect(m.notificationSend).not.toHaveBeenCalled();
+    await runVoiceDecision(sid,{...confirm,actionId:String(tables.voice_actions[1].id)});
+    expect(m.notificationSend).toHaveBeenCalledTimes(1);
+    expect(m.confirmDraft).toHaveBeenCalledTimes(1);
+    expect(m.rpc.mock.calls.filter(([name])=>name==='save_voice_action_contact')).toHaveLength(1);
+  });
+  it('text permission does not execute the pending booking or overwrite caller details',async()=>{
+    tables.booking_drafts[0].status='preparing';
+    await runVoiceDecision(sid,{intent:'propose',payload:{kind:'booking_review_text',draftId,revision:1},requestEventIds:['request']});
+    await runVoiceDecision(sid,confirm);
+    expect(m.notificationSend).toHaveBeenCalledTimes(1);
+    expect(m.confirmDraft).not.toHaveBeenCalled();
+    expect(m.rpc.mock.calls.some(([name])=>name==='save_voice_action_contact')).toBe(false);
+  });
 });

@@ -1,7 +1,7 @@
 import { isBookingConfirmationEnabled } from '@/lib/booking/draft';
 import { bookingConfirmationTools, bookingAvailabilityTool, BOOKING_CONFIRMATION_INSTRUCTIONS } from '@/lib/booking/tools';
 import { getBookingModelContext } from '@/lib/booking/modelContext.server';
-import { prepareBookingDraft, confirmBookingDraft, acknowledgeBookingSummary, BookingInputError } from '@/lib/booking/drafts.server';
+import { prepareBookingDraft, confirmBookingDraft, acknowledgeBookingSummary, recoverBookingChatSummary, BookingInputError } from '@/lib/booking/drafts.server';
 import { loadBusinessContextResults } from "./businessContext";
 import { createHash, randomUUID } from "node:crypto";
 import { meteredAnthropic as anthropic } from "@/lib/anthropic/client";
@@ -1121,6 +1121,7 @@ export async function processIncomingMessageDetailed(
       }
 
       if (recovery.outcome === "completed") {
+        if (isBookingConfirmationEnabled()) await recoverBookingChatSummary(businessId, recovery.conversationId);
         const text = await loadCompletedAssistantReply({
           businessId,
           assistantMessageId: recovery.assistantMessageId,
@@ -1460,6 +1461,7 @@ export async function processIncomingMessageDetailed(
     };
 
     const bookingV2 = isBookingConfirmationEnabled() && !isSignupGoal && effectiveAiSettings.booking_enabled && canBookDirectly;
+    if (bookingV2 && channel === 'web_chat') await recoverBookingChatSummary(businessId, conversation.id);
     const bookingContext = bookingV2 ? await getBookingModelContext(businessId, conversation.id) : null;
     let bookingReview: { draftId: string; revision: number; summary: string } | undefined;
     const buildModelSurface = (bookingAvailable: boolean) => {

@@ -185,6 +185,7 @@ export async function GET(request: NextRequest) {
         end: event.end?.dateTime ?? event.end?.date ?? "",
         allDay,
         description: event.description ?? null,
+        location: event.location ?? null,
       };
     });
 

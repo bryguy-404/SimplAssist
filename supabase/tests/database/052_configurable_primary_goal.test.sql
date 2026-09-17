@@ -121,7 +121,11 @@ SELECT is(
     'channel', 'text',
     'occurred_at', 'timestamp with time zone',
     'idempotency_key', 'text',
-    'created_at', 'timestamp with time zone'
+    'created_at', 'timestamp with time zone',
+    'origin_kind', 'text',
+    'voice_action_id', 'uuid',
+    'source_conversation_id', 'uuid',
+    'time_source', 'text'
   ),
   'goal events expose exactly the approved column types'
 );
@@ -144,7 +148,9 @@ SELECT is(
     'goal_at_event',
     'id',
     'idempotency_key',
-    'occurred_at'
+    'occurred_at',
+    'origin_kind',
+    'time_source'
   ]::name[],
   'only durable event fields are required after provenance retention'
 );
@@ -218,7 +224,9 @@ SELECT is(
     'goal_events_business_id_fkey:c',
     'goal_events_contact_id_fkey:n',
     'goal_events_conversation_id_fkey:n',
-    'goal_events_source_message_id_fkey:n'
+    'goal_events_source_conversation_id_fkey:n',
+    'goal_events_source_message_id_fkey:n',
+    'goal_events_voice_action_id_fkey:n'
   ]::text[],
   'business deletion cascades while provenance deletions retain events'
 );

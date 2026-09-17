@@ -505,16 +505,17 @@ export function assertDatabaseContainerInspection(
 
 }
 
+export function databaseContainerInspectArguments(dockerEndpoint) {
+  // A stopped stack preserves a volume with this exact name. Unqualified
+  // `docker inspect` resolves that volume and hides the missing container.
+  return ["--host", dockerEndpoint, "inspect", "--type", "container", DATABASE_CONTAINER];
+}
+
 function inspectDatabaseContainer(
   dockerEndpoint,
   { allowMissing = false } = {}
 ) {
-  const dockerArguments = [
-    "--host",
-    dockerEndpoint,
-    "inspect",
-    DATABASE_CONTAINER,
-  ];
+  const dockerArguments = databaseContainerInspectArguments(dockerEndpoint);
   const result = runCommand("docker", dockerArguments, {
     allowFailure: allowMissing,
     dockerEndpoint,

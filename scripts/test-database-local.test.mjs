@@ -10,6 +10,7 @@ import {
   combineHarnessFailures,
   commandFailure,
   databaseCleanlinessDifferences,
+  databaseContainerInspectArguments,
   didProcessFailNormally,
   didProcessSucceed,
   dockerUnixSocketPathFromContextInspection,
@@ -22,6 +23,12 @@ import {
 const VERIFIED_DOCKER_ENDPOINT = "unix:///private/docker.sock";
 
 describe("local database harness target isolation", () => {
+  it("inspects only containers when the stopped stack retains a same-named backup volume", () => {
+    expect(databaseContainerInspectArguments(VERIFIED_DOCKER_ENDPOINT)).toEqual([
+      "--host", VERIFIED_DOCKER_ENDPOINT, "inspect", "--type", "container", "supabase_db_SimplAssist",
+    ]);
+  });
+
   it("accepts only explicitly local database commands and local-only startup", () => {
     expect(() => assertSafeLocalCliArguments(["--version"])).not.toThrow();
     expect(() => assertSafeLocalCliArguments(["start"])).not.toThrow();

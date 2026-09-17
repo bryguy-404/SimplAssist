@@ -37,18 +37,14 @@ export type HomepageFaq = {
 
 const VOICE_FAQS = [
   {
-    question: "What is an AI voice receptionist, and which plan includes it?",
+    question: "What is SimplAssist Voice, and which plan includes it?",
     answer:
-      `An AI voice receptionist speaks with callers over the phone when you can't answer. It uses your business information to answer questions, collect contact details, and help book appointments. Webchat handles typed conversations on your website, while voice lets callers talk with the AI. ${fullSuitePricingCopy}`,
+      `SimplAssist Voice is an AI phone receptionist that speaks with callers when you can't answer. It uses your business information to answer questions, collect contact details, and help book appointments. Webchat handles typed conversations on your website, while voice lets callers talk with SimplAssist over the phone. ${fullSuitePricingCopy}`,
   },
   {
-    question: "Can I call SimplAssist and try a conversation?",
+    question: "How does SimplAssist Voice work during a call?",
     answer:
-      "Yes. Call (574) 263-8634 to speak with SimplAssist live. Our AI assistant will answer questions about SimplAssist and our plans. Ask a follow-up to hear how the conversation works. This demonstrates the phone answering available with Full Suite. You can also try our website chat to experience a typed conversation.",
-    answerLink: {
-      text: "(574) 263-8634",
-      href: "tel:+15742638634",
-    },
+      "With Full Suite and Voice mode enabled, SimplAssist answers calls you can't pick up and has a spoken conversation with the caller. It introduces itself as your business's AI assistant, asks what the caller needs, and answers using your services, hours, FAQs, and other saved business information. Callers can ask follow-up questions, and SimplAssist can collect their name and contact details. If Google Calendar booking is connected and enabled, it can check availability and help book an appointment after confirming the details with the caller. You can review saved call transcripts and recordings in your dashboard.",
   },
 ] as const satisfies readonly HomepageFaq[];
 

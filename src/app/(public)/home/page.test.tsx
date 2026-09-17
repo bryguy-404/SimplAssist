@@ -448,7 +448,7 @@ describe("canonical homepage static HTML", () => {
     const faqSection = html.match(/<section id="faq"[\s\S]*?<\/section>/)?.[0];
     const launched = getHomepageSeoContent(true);
 
-    expect(html).toContain(launched.definition);
+    expect(visibleText(html)).toContain(launched.definition);
     expect(launched.faqs).toBe(CHAT_ONLY_HOME_FAQS);
     expect(faqSection?.match(/<h3\b/g)).toHaveLength(
       CHAT_ONLY_HOME_FAQS.length,

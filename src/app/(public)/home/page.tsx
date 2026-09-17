@@ -63,9 +63,9 @@ const features = [
   },
   {
     icon: PhoneCall,
-    title: "AI Voice Receptionist",
+    title: "SimplAssist can talk, too.",
     description:
-      "Full Suite speaks with callers when you can't answer — answering questions, collecting details, and helping book appointments by phone.",
+      "Give callers a natural, back-and-forth conversation when you're unavailable. SimplAssist answers questions, collects details, and helps book appointments. Included with Full Suite.",
   },
   {
     icon: Inbox,
@@ -732,16 +732,17 @@ export default function HomePage() {
               <p className={`text-[clamp(17px,2.3vw,20px)] leading-[1.7] ${body} max-w-[680px] mb-7`}>
                 {publicChatOnlyAvailable ? (
                   <>
-                    Start with AI website chat for {formattedPlanPrice("chat_only")}/month
-                    to answer questions, capture leads, and book appointments. Add
-                    texting and, with Full Suite, an AI voice receptionist that
-                    speaks with callers when you can&apos;t answer.
+                    Start with website chat for {formattedPlanPrice("chat_only")}/month
+                    to answer questions, capture leads, and book appointments. With
+                    Full Suite, SimplAssist can also talk with callers, answer their
+                    questions, and help book appointments when you can&apos;t pick up.
                   </>
                 ) : (
                   <>
                     SimplAssist texts missed callers back, chats with website visitors,
-                    and helps book appointments. Full Suite adds an AI voice
-                    receptionist that speaks with callers when you can&apos;t answer.
+                    and helps book appointments. With Full Suite, SimplAssist can
+                    also talk with callers and answer their questions when you
+                    can&apos;t pick up.
                   </>
                 )}
               </p>
@@ -754,7 +755,7 @@ export default function HomePage() {
                     : "Get Started"}
                 </Link>
                 <a href="#try-it-live" className={btnSecondary}>
-                  Try Chat or Voice
+                  Try Chat or Call
                 </a>
               </div>
 
@@ -808,7 +809,7 @@ export default function HomePage() {
                 <span className={accentText}>bigger presence</span>.
               </>
             }
-            subtitle="Start with the coverage you need: website chat, text conversations, or an AI receptionist that speaks with your callers."
+            subtitle="Let SimplAssist answer website visitors, keep text conversations going, or talk with callers when you can't pick up. Choose the plan that fits your business."
           />
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -914,7 +915,7 @@ export default function HomePage() {
                 Try SimplAssist. <span className={accentText}>Chat or call.</span>
               </>
             }
-            subtitle="Type a question in webchat or speak with our AI receptionist by phone. Experience how SimplAssist helps customers in the way they prefer."
+            subtitle="Type a question in webchat or talk with SimplAssist by phone. Try a conversation the same way your customers would."
           />
 
           <div className="grid gap-5 sm:grid-cols-2">
@@ -954,17 +955,17 @@ export default function HomePage() {
                   Live voice demo · Full Suite
                 </p>
                 <h3 className={`text-xl font-bold sm:text-[22px] ${ink}`}>
-                  Talk to our AI receptionist.
+                  Call SimplAssist. Start a conversation.
                 </h3>
                 <p className={`${body} mt-3 leading-[1.7]`}>
-                  Call the number below and SimplAssist&apos;s AI will answer live.
-                  Ask about our plans or how it works, then ask a follow-up —
-                  you&apos;ll hear its response over the phone.
+                  Call the number below to speak with SimplAssist live. Our AI
+                  assistant will answer. Ask about our plans or how it works, then
+                  ask a follow-up to hear how SimplAssist responds.
                 </p>
                 <p className={`${body} mt-4 leading-[1.7]`}>
-                  For your business, Full Suite can answer questions using your
-                  business information, collect callers&apos; details, and help book
-                  appointments when you can&apos;t pick up.
+                  With Full Suite, SimplAssist can do the same for your callers:
+                  answer questions using your business information, collect their
+                  details, and help book appointments when you can&apos;t pick up.
                 </p>
                 <p className={`${body} mt-5 border-t border-[#ece4d8] pt-5 text-sm leading-[1.65] dark:border-white/[0.10]`}>
                   Try asking: &ldquo;What does SimplAssist do?&rdquo; Then ask:
@@ -973,13 +974,13 @@ export default function HomePage() {
                 <div className="mt-auto pt-7">
                   <a
                     href="tel:+15742638634"
-                    aria-label="Call our live AI receptionist at (574) 263-8634"
+                    aria-label="Call SimplAssist's live AI assistant at (574) 263-8634"
                     className={`block w-fit whitespace-nowrap rounded-lg text-[clamp(25px,3.5vw,38px)] font-extrabold leading-none tracking-[-0.04em] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ea580c]/60 focus-visible:ring-offset-4 dark:focus-visible:ring-[#ff914d]/60 dark:focus-visible:ring-offset-[#050505] ${accentText}`}
                   >
                     (574) 263-8634
                   </a>
                   <p className={`${body} mt-3 text-sm leading-[1.55]`}>
-                    AI phone answering in English is included in{" "}
+                    Phone conversations in English are included in{" "}
                     <a href="#pricing-card-full" className={`${inlineLink} font-semibold hover:underline`}>
                       Full Suite — {formattedPlanPrice("full")}/month
                     </a>
@@ -1305,7 +1306,7 @@ export default function HomePage() {
               </h2>
               <p className={`${body} leading-[1.7] max-w-[560px]`}>
                 Meet customers where they reach out — with website chat, missed-call
-                texting, and AI phone answering on Full Suite.
+                texting, and natural phone conversations with SimplAssist on Full Suite.
               </p>
               <div className="mt-7 flex-1">
                 <CtaRace />
@@ -1321,7 +1322,7 @@ export default function HomePage() {
                     ? `AI website chat from ${formattedPlanPrice("chat_only")}/month — no setup fee`
                     : "AI website chat with SMS + Web Chat",
                   "Automatic missed-call texts with SMS plans",
-                  "An AI voice receptionist with Full Suite",
+                  "SimplAssist talks with callers on Full Suite",
                   "Every lead and conversation in one dashboard",
                 ].map((item) => (
                   <li key={item} className="flex items-center gap-2.5 text-stone-700 dark:text-[#ececec]">

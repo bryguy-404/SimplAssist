@@ -15,7 +15,7 @@ export const HOME_DESCRIPTION =
   "SimplAssist provides small businesses with missed call text back from $25/month, plus AI conversations, website chat, and appointment booking at $45/month.";
 
 export const HOME_DEFINITION =
-  "SimplAssist is a missed call text back service for small businesses, with plans starting at $25/month. Its $45/month plan adds an AI receptionist for SMS and web chat, a website chat widget, and Google Calendar appointment booking. Full Suite adds an AI voice receptionist that speaks with callers, collects their details, and helps book appointments when you can't answer.";
+  "SimplAssist is a missed call text back service for small businesses, with plans starting at $25/month. Its $45/month plan adds an AI receptionist for SMS and web chat, a website chat widget, and Google Calendar appointment booking. With Full Suite, SimplAssist can also talk with callers, answer questions, collect their details, and help book appointments when you can't pick up.";
 
 export const CHAT_ONLY_HOME_TITLE =
   "SimplAssist — $10 AI Website Chat for Small Businesses";
@@ -24,7 +24,7 @@ export const CHAT_ONLY_HOME_DESCRIPTION =
   "AI website chat for $10/month: answer questions, capture leads, and book appointments. No setup fee. Explore texting plans and Full Suite AI phone answering.";
 
 export const CHAT_ONLY_HOME_DEFINITION =
-  "SimplAssist helps small businesses answer customers and book appointments. Start with Chat Only at $10/month for 200 completed website-chat AI replies, lead capture, a conversation inbox, AI customization, and Google Calendar booking, with no phone, texting, or setup fee. SMS plans add missed-call texting, while Full Suite adds an AI voice receptionist that speaks with callers and helps book appointments by phone.";
+  "SimplAssist helps small businesses answer customers and book appointments. Start with Chat Only at $10/month for 200 completed website-chat AI replies, lead capture, a conversation inbox, AI customization, and Google Calendar booking, with no phone, texting, or setup fee. SMS plans add missed-call texting. With Full Suite, SimplAssist can also talk with callers, answer questions, and help book appointments when you can't pick up.";
 
 export type HomepageFaq = {
   question: string;
@@ -42,9 +42,9 @@ const VOICE_FAQS = [
       `An AI voice receptionist speaks with callers over the phone when you can't answer. It uses your business information to answer questions, collect contact details, and help book appointments. Webchat handles typed conversations on your website, while voice lets callers talk with the AI. ${fullSuitePricingCopy}`,
   },
   {
-    question: "Can I try SimplAssist's AI voice receptionist?",
+    question: "Can I call SimplAssist and try a conversation?",
     answer:
-      "Yes. Call (574) 263-8634 to speak with SimplAssist's AI receptionist live. Ask what SimplAssist does, ask about our plans, and try a follow-up question to hear how it responds. This demonstrates the phone answering available with Full Suite. You can also try our website chat to experience a typed conversation.",
+      "Yes. Call (574) 263-8634 to speak with SimplAssist live. Our AI assistant will answer questions about SimplAssist and our plans. Ask a follow-up to hear how the conversation works. This demonstrates the phone answering available with Full Suite. You can also try our website chat to experience a typed conversation.",
     answerLink: {
       text: "(574) 263-8634",
       href: "tel:+15742638634",

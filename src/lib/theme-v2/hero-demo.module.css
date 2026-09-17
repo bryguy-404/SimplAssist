@@ -197,13 +197,8 @@
 .journey > svg { color: #b8a28c; }
 .journey > span[data-active="true"] { color: #a7552c; }
 .journey > .journeyBooked[data-active="true"] { color: #608047; }
-.pause { display: flex; align-items: center; justify-content: center; gap: 5px; min-height: 32px; min-width: 95px; padding: 5px 8px; border-radius: 8px; color: #937a65; font-size: 9px; transition: color .2s, background .2s; }
-.pause[hidden] { display: none; }
-.pause:hover { color: #a7552c; background: rgb(163 99 48 / .06); }
-.pause:focus-visible { outline: 2px solid #bd784b; outline-offset: 3px; }
 .staticLabel { min-height: 32px; padding: 5px 8px; color: #937a65; font-size: 9px; }
 .demo [data-faded="true"] { opacity: 0; }
-.demo[data-paused="true"] *, .demo[data-paused="true"] *::before, .demo[data-paused="true"] *::after { animation-play-state: paused !important; }
 
 :global(.dark) .demo {
   --screen: #26221f;
@@ -230,8 +225,7 @@
 :global(.dark) .journey > span { color: #a59482; }
 :global(.dark) .journey > span[data-active="true"] { color: #ecc09a; }
 :global(.dark) .journey > .journeyBooked[data-active="true"] { color: #bad0a2; }
-:global(.dark) .pause, :global(.dark) .staticLabel { color: #b09a85; }
-:global(.dark) .pause:hover { color: #f5d0ad; background: rgb(255 219 187 / .05); }
+:global(.dark) .staticLabel { color: #b09a85; }
 
 @keyframes messageIn { from { grid-template-rows: 0fr; opacity: 0; transform: translateY(6px); } to { grid-template-rows: 1fr; opacity: 1; transform: translateY(0); } }
 @keyframes typing { 0%, 80%, 100% { opacity: .3; } 40% { opacity: 1; } }

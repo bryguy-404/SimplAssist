@@ -3,14 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft, ArrowUp, ArrowUpRight, BatteryFull, CalendarCheck2,
-  Check, ChevronRight, MessageCircle, MoreHorizontal, Pause,
-  PhoneMissed, Play, Plus, Signal, Wifi,
+  Check, ChevronRight, MessageCircle, MoreHorizontal,
+  PhoneMissed, Plus, Signal, Wifi,
 } from "lucide-react";
 import styles from "./hero-demo.module.css";
 
 /** A clay-like device around the original, scripted conversation demo.
  * The shell stays still as messages and outcome cards change. Reduced motion
- * shows the completed first conversation; the pause control preserves progress.
+ * shows the completed first conversation; otherwise the demo loops automatically.
  */
 
 type Sender = "banner" | "ai" | "customer";
@@ -105,8 +105,6 @@ function TypingBubble({ from }: { from: "ai" | "customer" }) {
 
 export function HeroDemo() {
   const [reduceMotion, setReduceMotion] = useState(false);
-  const [paused, setPaused] = useState(false);
-  const pausedRef = useRef(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [visible, setVisible] = useState(0);
   const [typing, setTyping] = useState<"ai" | "customer" | null>(null);
@@ -155,7 +153,7 @@ export function HeroDemo() {
 
     let alive = true;
     let timer = 0;
-    // Count only active viewing time, so pausing or switching tabs doesn't
+    // Count only active viewing time, so switching tabs doesn't
     // skip the conversation. Only one timeout is active at a time.
     const wait = (duration: number) => new Promise<void>((resolve) => {
       let remaining = duration;
@@ -163,7 +161,7 @@ export function HeroDemo() {
       const tick = () => {
         if (!alive) return;
         const now = performance.now();
-        if (!pausedRef.current && !document.hidden) remaining -= Math.min(now - previous, 120);
+        if (!document.hidden) remaining -= Math.min(now - previous, 120);
         previous = now;
         if (remaining <= 0) resolve();
         else timer = window.setTimeout(tick, 100);
@@ -213,13 +211,8 @@ export function HeroDemo() {
   const engaged = booked || typing !== null || visible >= 2;
   const SourceIcon = activeIndex === 2 ? MessageCircle : PhoneMissed;
 
-  function togglePause() {
-    pausedRef.current = !pausedRef.current;
-    setPaused(pausedRef.current);
-  }
-
   return (
-    <div className={styles.demo} data-paused={paused} data-reduced-motion={reduceMotion} role="group" aria-label="Animated example of an enquiry becoming a booking">
+    <div className={styles.demo} data-reduced-motion={reduceMotion} role="group" aria-label="Animated example of an enquiry becoming a booking">
       <div className={styles.scene}>
         <div className={styles.backdrop} aria-hidden="true" />
         <div className={styles.floorShadow} aria-hidden="true" />
@@ -283,9 +276,6 @@ export function HeroDemo() {
           <span data-active={engaged}><MessageCircle size={13} aria-hidden="true" />Replied</span><ChevronRight size={12} aria-hidden="true" />
           <span data-active={booked} className={styles.journeyBooked}><Check size={13} aria-hidden="true" />{activeIndex === 2 ? "Quote set" : "Booked"}</span>
         </div>
-        <button className={styles.pause} onClick={togglePause} aria-label={paused ? "Play conversation demo" : "Pause conversation demo"} aria-pressed={paused} hidden={reduceMotion}>
-          {paused ? <Play size={12} aria-hidden="true" /> : <Pause size={12} aria-hidden="true" />}<span>{paused ? "Play demo" : "Pause demo"}</span>
-        </button>
         {reduceMotion && <span className={styles.staticLabel}>Example conversation</span>}
       </div>
     </div>

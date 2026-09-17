@@ -2,7 +2,6 @@ import "server-only";
 import { supabaseAdmin as db } from "@/lib/supabase/admin";
 import { telnyx } from "@/lib/messaging/client";
 import { recordOutboundSmsUsage } from "@/lib/billing/usage";
-import { getOrCreateConversation } from "@/lib/ai/conversations";
 import type { VoiceAction } from "./actions";
 
 export async function persistVoiceSmsBookkeeping(
@@ -14,36 +13,17 @@ export async function persistVoiceSmsBookkeeping(
     typeof result.smsBody !== "string"
   )
     throw new Error("voice_sms_bookkeeping_missing");
-  const { data: s, error: se } = await db
-    .from("voice_sessions")
-    .select("conversation_id,action_conversation_id")
-    .eq("id", a.session_id)
-    .single();
-  if (se || !s) throw new Error("voice_sms_call_missing");
-  const { data: c, error: ce } = await db
-    .from("conversations")
-    .select("contact_id")
-    .eq("id", s.action_conversation_id || s.conversation_id)
-    .eq("business_id", a.business_id)
-    .single();
-  if (ce || !c) throw new Error("voice_sms_contact_missing");
-  const conversation = await getOrCreateConversation(
-    a.business_id,
-    c.contact_id,
-    "sms",
-  );
-  const message = await db.from("messages").upsert(
-    {
-      id: a.id,
-      business_id: a.business_id,
-      conversation_id: conversation.id,
-      role: "assistant",
-      channel: "sms",
-      content: result.smsBody,
-    },
-    { onConflict: "id", ignoreDuplicates: true },
-  );
-  if (message.error) throw new Error("voice_sms_message_log_failed");
+  // The database validates the stored acceptance and finalizes the message,
+  // cross-channel lead and links atomically. No provider send happens here.
+  const { data, error } = await db.rpc("finalize_voice_signup_bookkeeping", {
+    p_action_id: a.id,
+  });
+  if (error || !Array.isArray(data) || data.length !== 1)
+    throw new Error("voice_sms_bookkeeping_finalize_failed");
+  if (a.sms_logged_at) return;
+
+  // Usage has its own stable key. A failure here is retried independently of
+  // both lead finalization and the provider's delivery status.
   await recordOutboundSmsUsage({
     businessId: a.business_id,
     text: result.smsBody,
@@ -54,10 +34,57 @@ export async function persistVoiceSmsBookkeeping(
   const updated = await db
     .from("voice_actions")
     .update({ sms_logged_at: new Date().toISOString() })
-    .eq("id", a.id);
-  if (updated.error) throw new Error("voice_sms_bookkeeping_finalize_failed");
+    .eq("id", a.id)
+    .eq("business_id", a.business_id)
+    .is("sms_logged_at", null);
+  if (updated.error) throw new Error("voice_sms_usage_finalize_failed");
 }
+
+export async function recoverVoiceSignupBookkeeping() {
+  // Legacy sends without a recorded acceptance time require the explicit,
+  // reviewed historical restoration. Never give them a new event timestamp.
+  const { data: rows, error } = await db
+    .from("voice_actions")
+    .select("*")
+    .eq("kind", "signup")
+    .eq("status", "succeeded")
+    .not("sms_accepted_at", "is", null)
+    .or("goal_event_recorded_at.is.null,sms_logged_at.is.null")
+    .order("bookkeeping_attempted_at", { nullsFirst: true })
+    .order("created_at")
+    .limit(8);
+  if (error) throw new Error("voice_signup_bookkeeping_lookup_failed");
+  for (const row of rows || []) {
+    if (
+      row.bookkeeping_attempted_at &&
+      Date.now() - Date.parse(row.bookkeeping_attempted_at) < 60000
+    ) continue;
+    const a = row as VoiceAction;
+    try {
+      await persistVoiceSmsBookkeeping(a, a.result || {});
+    } catch {
+      // Durable acceptance remains successful. Never replay the send.
+    } finally {
+      const attempted = await db.from("voice_actions")
+        .update({ bookkeeping_attempted_at: new Date().toISOString() })
+        .eq("id", a.id)
+        .eq("business_id", a.business_id);
+      if (attempted.error) throw new Error("voice_signup_bookkeeping_rotation_failed");
+    }
+  }
+}
+
 export async function recoverVoiceActions() {
+  // Bookkeeping and delivery each make progress even if the other lookup fails.
+  const results = await Promise.allSettled([
+    recoverVoiceSignupBookkeeping(),
+    recoverVoiceProviderResults(),
+  ]);
+  const failed = results.find((result) => result.status === "rejected");
+  if (failed?.status === "rejected") throw failed.reason;
+}
+
+async function recoverVoiceProviderResults() {
   // Provider reads only: uncertain effects are never blindly resubmitted.
   const { data: rows, error } = await db
     .from("voice_actions")
@@ -80,7 +107,6 @@ export async function recoverVoiceActions() {
       continue;
     try {
       if (a.kind === "signup" && a.result?.providerMessageId) {
-        if (!row.sms_logged_at) await persistVoiceSmsBookkeeping(a, a.result);
         const message = await telnyx.messages.retrieve(
           String(a.result.providerMessageId),
           { maxRetries: 0, timeout: 5000 },

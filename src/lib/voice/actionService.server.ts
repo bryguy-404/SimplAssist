@@ -483,12 +483,15 @@ async function executeVoiceAction(
         smsBody: sms,
       };
       // Persist provider acceptance before any optional bookkeeping can fail.
+      const acceptedAt = new Date().toISOString();
       const saved = await db
         .from("voice_actions")
         .update({
           result,
           status: "succeeded",
-          updated_at: new Date().toISOString(),
+          sms_provider_message_id: response.data.id,
+          sms_accepted_at: acceptedAt,
+          updated_at: acceptedAt,
         })
         .eq("id", a.id);
       if (saved.error) throw new Error("voice_sms_result_save_failed");

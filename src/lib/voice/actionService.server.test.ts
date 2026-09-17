@@ -336,7 +336,11 @@ describe("voice signup execution", () => {
     m.bookkeeping.mockRejectedValue(new Error("db lost"));
     await runVoiceDecision(sid, confirm);
     expect(tables.voice_actions[0].status).toBe("succeeded");
+    expect(tables.voice_actions[0].sms_provider_message_id).toBeTruthy();
+    expect(tables.voice_actions[0].sms_accepted_at).toEqual(expect.any(String));
+    const acceptedAt = tables.voice_actions[0].sms_accepted_at;
     await runVoiceDecision(sid, confirm);
+    expect(tables.voice_actions[0].sms_accepted_at).toBe(acceptedAt);
     expect(m.send).toHaveBeenCalledTimes(1);
   });
   it("stops before sending if the caller changes details after confirmation", async () => {

@@ -21,6 +21,11 @@ export interface VoiceAction {
   playback_caller_end_ms: number | null;
   playback_event_id: string | null; source_message_id: string | null;
   status: "awaiting_confirmation" | "executing" | "succeeded" | "failed" | "superseded" | "uncertain";
+  sms_logged_at?: string | null;
+  sms_provider_message_id?: string | null;
+  sms_accepted_at?: string | null;
+  goal_event_recorded_at?: string | null;
+  bookkeeping_attempted_at?: string | null;
   result: { summary: string; [key: string]: unknown } | null;
 }
 export interface VoiceAnswer {

@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "businessId": "ea848911-ef72-44a6-8cf3-c47b3959be26",
+  "actions": [
+    {
+      "actionId": "2ebedbb6-c779-4af9-9f7f-d76ac6583591",
+      "sessionId": "dc508f0b-64ef-4bbf-9eb0-4831be1b00b2"
+    },
+    {
+      "actionId": "3c86f915-4511-4f7f-b29b-6357acc0cd77",
+      "sessionId": "367809cc-37f4-4966-af0f-fe8ba3f39f69"
+    },
+    {
+      "actionId": "4cd65089-7096-49d4-951b-f3de490736d3",
+      "sessionId": "cfa3fa6f-b25c-4c60-b982-933dfb0e47f3"
+    }
+  ]
+}

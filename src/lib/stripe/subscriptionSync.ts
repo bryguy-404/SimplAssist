@@ -11,6 +11,7 @@ import {
   expireChatOnlyCheckoutAttempt,
 } from "./chatOnlyCheckoutAttempt.server";
 import type { SubscriptionPlan, SubscriptionStatus } from "@/types/database";
+import { prepareVoiceSubscription, type VoiceSubscriptionSnapshot } from "./voiceSubscription.server";
 
 export type SyncedCheckout = {
   businessId: string;
@@ -224,6 +225,25 @@ export async function syncStripeSubscription(
     expectedPlan?: SubscriptionPlan;
   } = {},
 ): Promise<SyncedCheckout | null> {
+  // Preserve unconditional status validation. Commercial voice additionally
+  // versions a fresh provider read, so event arrival order cannot mint minutes.
+  normalizeStripeSubscriptionStatus(subscription.status);
+  const voice = await prepareVoiceSubscription(subscription, options.businessId ?? subscription.metadata?.business_id);
+  if (voice.ignored) return null;
+  return syncSubscriptionSnapshot(voice.subscription, options, voice);
+}
+
+async function syncSubscriptionSnapshot(
+  subscription: Stripe.Subscription,
+  options: {
+    businessId?: string | null;
+    checkoutSessionId?: string | null;
+    setupFeePaidAt?: string | null;
+    setupFeePriceId?: string | null;
+    expectedPlan?: SubscriptionPlan;
+  },
+  voice: VoiceSubscriptionSnapshot,
+): Promise<SyncedCheckout | null> {
   const businessId = options.businessId ?? subscription.metadata?.business_id;
   const customerId =
     typeof subscription.customer === "string" ? subscription.customer : null;
@@ -296,6 +316,17 @@ export async function syncStripeSubscription(
   if (!businessId || !customerId || !subscriptionId || !plan) {
     return null;
   }
+  // Plan-family rules prohibit Full -> Chat Only. Do not bypass its dedicated
+  // checkout-attempt authority to repair a malformed commercial voice binding.
+  if (voice.revision !== null && chatAttempt) throw new Error("voice_billing_plan_family_mismatch");
+  if (voice.revision !== null && plan === "full") {
+    const price = primaryItem?.price;
+    if (price?.currency !== "usd" || price.unit_amount !== 6500 || price.type !== "recurring" ||
+        price.recurring?.interval !== "month" || price.recurring.interval_count !== 1 ||
+        price.recurring.usage_type !== "licensed" || primaryItem.quantity !== 1) {
+      throw new Error("voice_billing_package_mismatch");
+    }
+  }
   const setupFeePriceId =
     plan === "chat_only" ? null : (options.setupFeePriceId ?? null);
   const setupFeePaidAt =
@@ -325,7 +356,7 @@ export async function syncStripeSubscription(
         p_updated_at: now,
       })
     : await supabaseAdmin.rpc(
-        "sync_stripe_subscription_if_business_active",
+        voice.revision === null ? "sync_stripe_subscription_if_business_active" : "sync_voice_stripe_subscription",
         {
           p_business_id: businessId,
           p_stripe_customer_id: customerId,
@@ -340,6 +371,7 @@ export async function syncStripeSubscription(
           p_setup_fee_paid_at: setupFeePaidAt,
           p_cancel_at_period_end: Boolean(subscription.cancel_at_period_end),
           p_updated_at: now,
+          ...(voice.revision === null ? {} : { p_revision: voice.revision, p_effective_at: voice.observedAt }),
         },
       );
 

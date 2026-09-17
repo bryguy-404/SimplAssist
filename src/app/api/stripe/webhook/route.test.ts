@@ -946,15 +946,13 @@ describe("POST /api/stripe/webhook", () => {
       const response = await stripeWebhook(request());
 
       expect(response.status).toBe(200);
-      // Only a live past_due blind-marks; everything else (recovered OR
-      // terminally unpaid) flows through the normalizer — single source of
-      // status classification.
+      // Linked invoices use the authoritative synchronizer, including recovery.
       expect(mocks.rpc).not.toHaveBeenCalled();
       expect(mocks.syncStripeSubscription).toHaveBeenCalledWith(live);
     },
   );
 
-  it("marks past_due only while the live subscription is still past_due", async () => {
+  it("synchronizes live past_due through the same versioned subscription authority", async () => {
     mocks.constructEvent.mockReturnValue(
       event("invoice.payment_failed", {
         customer: CUSTOMER_ID,
@@ -970,11 +968,8 @@ describe("POST /api/stripe/webhook", () => {
     const response = await stripeWebhook(request());
 
     expect(response.status).toBe(200);
-    expect(mocks.rpc).toHaveBeenCalledWith(
-      "mark_stripe_subscription_past_due_if_business_active",
-      expect.objectContaining({ p_stripe_customer_id: CUSTOMER_ID }),
-    );
-    expect(mocks.syncStripeSubscription).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.syncStripeSubscription).toHaveBeenCalledWith({ id: SUBSCRIPTION_ID, status: "past_due" });
   });
 
   it("marks past_due directly when the invoice has no subscription", async () => {

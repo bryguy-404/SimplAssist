@@ -159,10 +159,11 @@ async function processStripeEvent(
       if (failedSubscriptionId) {
         const liveSubscription =
           await stripe.subscriptions.retrieve(failedSubscriptionId);
-        if (liveSubscription.status !== "past_due") {
-          await syncStripeSubscription(liveSubscription);
-          return null;
-        }
+        // The synchronizer also versions commercial voice billing. Always use
+        // it for a linked subscription, including past_due, rather than an
+        // unversioned status write racing a successful payment webhook.
+        await syncStripeSubscription(liveSubscription);
+        return null;
       }
 
       const { data: updated, error } = await supabaseAdmin.rpc(

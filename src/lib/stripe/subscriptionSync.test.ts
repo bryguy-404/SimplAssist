@@ -4,9 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
   retrieve: vi.fn(),
+  prepareVoice: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
+vi.mock("./voiceSubscription.server", () => ({ prepareVoiceSubscription: mocks.prepareVoice }));
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { rpc: mocks.rpc },
 }));
@@ -102,6 +104,7 @@ function chatOnlySubscription(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.prepareVoice.mockImplementation(async (subscription) => ({ subscription, revision: null, observedAt: null }));
   vi.stubEnv("STRIPE_PRICE_SMS_ONLY", "price_sms_only_test");
   vi.stubEnv("STRIPE_PRICE_SMS_AND_CHAT", "price_sms_chat_test");
   vi.stubEnv("STRIPE_PRICE_FULL", "price_full_test");
@@ -114,6 +117,47 @@ afterEach(() => {
 });
 
 describe("syncStripeSubscription", () => {
+  it("ignores a noncanonical commercial source without any legacy subscription write", async () => {
+    mocks.prepareVoice.mockResolvedValue({ subscription: subscription(), revision: null, observedAt: null, ignored: true });
+    await expect(syncStripeSubscription(subscription())).resolves.toBeNull();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([{ unit_amount: 6600 }, { currency: "cad" }, { recurring: { interval: "year", interval_count: 1, usage_type: "licensed" } }])("rejects mismatched commercial Full terms %#", async (overrides) => {
+    const fresh = subscription({ items: { data: [{ quantity: 1, price: {
+      id: "price_full_test", currency: "usd", unit_amount: 6500, type: "recurring",
+      recurring: { interval: "month", interval_count: 1, usage_type: "licensed" }, ...overrides,
+    }, current_period_start: 1_700_000_000, current_period_end: 1_702_592_000 }] } });
+    mocks.prepareVoice.mockResolvedValue({ subscription: fresh, revision: 1, observedAt: "2026-09-17T00:00:00Z" });
+    await expect(syncStripeSubscription(fresh)).rejects.toThrow("voice_billing_package_mismatch");
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it("atomically applies commercial voice with the fresh state and reconciliation version", async () => {
+    const fresh = subscription({ status: "past_due" });
+    mocks.prepareVoice.mockResolvedValue({ subscription: fresh, revision: 12, observedAt: "2026-09-17T00:00:00Z" });
+    mocks.rpc.mockResolvedValue({ data: true, error: null });
+    await syncStripeSubscription(subscription());
+    expect(mocks.rpc).toHaveBeenCalledWith("sync_voice_stripe_subscription", expect.objectContaining({
+      p_revision: 12, p_effective_at: "2026-09-17T00:00:00Z", p_status: "past_due", p_stripe_subscription_id: SUBSCRIPTION_ID,
+    }));
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry a stale voice version through the unguarded legacy writer", async () => {
+    mocks.prepareVoice.mockResolvedValue({ subscription: subscription(), revision: 11, observedAt: "2026-09-17T00:00:00Z" });
+    mocks.rpc.mockResolvedValue({ data: false, error: null });
+    await expect(syncStripeSubscription(subscription())).resolves.toBeNull();
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+    expect(mocks.rpc.mock.calls[0][0]).toBe("sync_voice_stripe_subscription");
+  });
+
+  it("propagates freshness failures so the signed billing event remains retryable", async () => {
+    mocks.prepareVoice.mockRejectedValue(new Error("voice_billing_reconciliation_unavailable"));
+    await expect(syncStripeSubscription(subscription())).rejects.toThrow("voice_billing_reconciliation_unavailable");
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
   it("atomically syncs an active business and returns the launch identity", async () => {
     mocks.rpc.mockResolvedValue({ data: true, error: null });
 

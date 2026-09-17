@@ -56,6 +56,7 @@ const EXPECTED_FEATURES = {
     "review_requests",
     "follow_up_automation",
     "priority_support",
+    "ai_voice_answering",
   ],
 } as const satisfies Record<SubscriptionPlan, readonly FeatureKey[]>;
 
@@ -77,6 +78,7 @@ const EXPECTED_DISPLAY_REQUIRED_PLAN = {
   review_requests: "full",
   follow_up_automation: "full",
   priority_support: "full",
+  ai_voice_answering: "full",
 } as const satisfies Record<FeatureKey, SubscriptionPlan>;
 
 describe("feature plan matrix", () => {
@@ -127,6 +129,7 @@ describe("feature plan matrix", () => {
       "review_requests",
       "follow_up_automation",
       "priority_support",
+      "ai_voice_answering",
     ];
 
     for (const feature of reserved) {

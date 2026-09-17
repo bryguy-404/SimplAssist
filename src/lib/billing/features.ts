@@ -26,6 +26,7 @@ export const ALL_FEATURES = [
   "review_requests",
   "follow_up_automation",
   "priority_support",
+  "ai_voice_answering",
 ] as const;
 
 export type FeatureKey = (typeof ALL_FEATURES)[number];
@@ -64,6 +65,7 @@ export const PLAN_CAPABILITY_MATRIX = {
     review_requests: false,
     follow_up_automation: false,
     priority_support: false,
+    ai_voice_answering: false,
   },
   sms_only: {
     missed_call_sms: true,
@@ -83,6 +85,7 @@ export const PLAN_CAPABILITY_MATRIX = {
     review_requests: false,
     follow_up_automation: false,
     priority_support: false,
+    ai_voice_answering: false,
   },
   sms_and_chat: {
     missed_call_sms: true,
@@ -102,6 +105,7 @@ export const PLAN_CAPABILITY_MATRIX = {
     review_requests: false,
     follow_up_automation: false,
     priority_support: false,
+    ai_voice_answering: false,
   },
   full: {
     missed_call_sms: true,
@@ -121,6 +125,7 @@ export const PLAN_CAPABILITY_MATRIX = {
     review_requests: true,
     follow_up_automation: true,
     priority_support: true,
+    ai_voice_answering: true,
   },
 } as const satisfies Readonly<Record<SubscriptionPlan, PlanCapabilityVector>>;
 
@@ -152,6 +157,7 @@ export const FEATURE_MINIMUM_PLAN = {
   review_requests: "full",
   follow_up_automation: "full",
   priority_support: "full",
+  ai_voice_answering: "full",
 } as const satisfies Readonly<Record<FeatureKey, SubscriptionPlan>>;
 
 const EMPTY_ELIGIBLE_PLANS = Object.freeze([]) as readonly SubscriptionPlan[];

@@ -66,6 +66,7 @@ const EXISTING_PLAN_BASELINE = {
       "review_requests",
       "follow_up_automation",
       "priority_support",
+      "ai_voice_answering",
     ],
   },
 } as const satisfies Record<

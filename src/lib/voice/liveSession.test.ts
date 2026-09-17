@@ -12,13 +12,27 @@ import {
 import { CallTranscript } from "./transcript";
 import type { VoiceSession } from "./types";
 import type { VoiceStore } from "./store";
+import { VOICE_RECEPTIONIST_FLOW } from "./actionInstructions";
 
 class Socket extends EventEmitter {
   readyState = 1;
   bufferedAmount = 0;
   sent: Record<string, unknown>[] = [];
+  appendByteLimit: number | null = null;
   send(raw: string) {
-    this.sent.push(JSON.parse(raw));
+    const event = JSON.parse(raw);
+    this.sent.push(event);
+    // Fixed public control messages use a conservative UTF-8 byte budget:
+    // <=500 bytes cannot exceed the provider's 500 byte-BPE token limit.
+    // session.start has its own larger instruction budget and is not an append.
+    if (this.appendByteLimit !== null &&
+      ["session.instructions.append", "session.commentary.append"].includes(event.type) &&
+      Buffer.byteLength(event.content, "utf8") > this.appendByteLimit) {
+      queueMicrotask(() => this.event({ type: "error", error: {
+        code: "content_too_long", type: "invalid_request_error", param: "content",
+        client_event_id: event.event_id,
+      } }));
+    }
   }
   close() {
     if (this.readyState === 3) return;
@@ -1456,7 +1470,7 @@ describe("audio and transcript ordering", () => {
 
 describe("public same-Marin disclosure", () => {
   beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
   const publicSession = { ...session, access_source: "commercial", disclosure_version: 1 } as VoiceSession;
   const notice = "Hi, thanks for calling Lakeview Plumbing. I’m the AI assistant, and this call will be recorded.";
   function setup(profile: "pcm16" | "pcmu8" = "pcm16", extra: Partial<LiveSessionOptions> = {}) {
@@ -1472,6 +1486,79 @@ describe("public same-Marin disclosure", () => {
     await vi.advanceTimersByTimeAsync(500);
     return (f.phone.sent.filter((e) => e.event === "mark" && String((e.mark as { name?: string } | undefined)?.name).startsWith("notice-")).at(-1)?.mark as { name: string } | undefined)?.name;
   }
+  async function completePhoneOpening(f: ReturnType<typeof setup>, profile: "pcm16" | "pcmu8" = "pcm16") {
+    const noticeMark = await sayNotice(f, profile);
+    f.phone.event({ event: "mark", stream_id: "stream", mark: { name: noticeMark } });
+    await vi.advanceTimersByTimeAsync(1);
+    const handoff = (f.phone.sent.find((e) => e.event === "mark" && String((e.mark as { name?: string } | undefined)?.name).startsWith("handoff-"))?.mark as { name: string }).name;
+    f.phone.event({ event: "mark", stream_id: "stream", mark: { name: handoff } });
+    await vi.advanceTimersByTimeAsync(30);
+  }
+  it.each(["pcm16", "pcmu8"] as const)("keeps the full policy at startup and rejects oversized runtime appends through public handoff (%s)", async (profile) => {
+    const f = setup(profile, { actionsEnabled: true });
+    f.live.appendByteLimit = 500;
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await f.start();
+    const instructions = (f.live.sent.find((e) => e.type === "session.start")?.session as { instructions: string }).instructions;
+    expect(Buffer.byteLength(instructions, "utf8")).toBeGreaterThan(500);
+    expect(instructions).toContain(VOICE_RECEPTIONIST_FLOW);
+    expect(instructions).toContain("normal conversation instructions below apply only after that activation");
+    expect(instructions).toContain("The caller has not yet heard the AI and recording notice");
+    expect(instructions).not.toContain("The caller has already heard");
+    await completePhoneOpening(f, profile);
+    const activation = f.live.sent.filter((e) => e.type === "session.instructions.append").at(-1)!;
+    expect(activation.content).toContain("The conversation is now active");
+    expect(activation.content).not.toContain(VOICE_RECEPTIONIST_FLOW);
+    for (const e of f.live.sent.filter((e) => ["session.instructions.append", "session.commentary.append"].includes(String(e.type))))
+      expect(Buffer.byteLength(e.content as string, "utf8")).toBeLessThanOrEqual(500);
+    expect(f.hangup).not.toHaveBeenCalled();
+    expect(warnings).not.toHaveBeenCalled();
+    const firstQuestion = () => f.live.sent.filter((e) => e.type === "session.commentary.append" && e.content === "Continue with the first question now.");
+    expect(firstQuestion()).toHaveLength(0);
+    f.live.event({ type: "session.instructions.appended", client_event_id: "unrelated" });
+    f.live.event({ type: "session.instructions.appended", client_event_id: f.live.sent.find((e) => e.type === "session.instructions.append")?.event_id });
+    expect(firstQuestion()).toHaveLength(0);
+    f.live.event({ type: "session.instructions.appended", client_event_id: activation.event_id });
+    f.live.event({ type: "session.instructions.appended", client_event_id: activation.event_id });
+    expect(firstQuestion()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(8050);
+    expect(f.hangup).not.toHaveBeenCalled();
+    await f.finish();
+  });
+  it("closes within the activation acknowledgment bound without an unacknowledged first-question nudge", async () => {
+    const f = setup(); await f.start(); await completePhoneOpening(f);
+    const activation = f.live.sent.filter((e) => e.type === "session.instructions.append").at(-1)!;
+    await vi.advanceTimersByTimeAsync(8050);
+    expect(f.hangup).toHaveBeenCalledOnce();
+    f.live.event({ type: "session.instructions.appended", client_event_id: activation.event_id });
+    expect(f.live.sent.some((e) => e.type === "session.commentary.append" && e.content === "Continue with the first question now.")).toBe(false);
+    await f.finish();
+    expect(f.store.finish).toHaveBeenCalledWith("activation_instruction_timeout", "activation_instruction_timeout", true);
+  });
+  it("logs only bounded protocol metadata, excluding provider messages and caller content", async () => {
+    const f = setup(); const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await f.start(); await completePhoneOpening(f);
+    const activation = f.live.sent.filter((e) => e.type === "session.instructions.append").at(-1)!;
+    f.live.event({ type: "error", client_event_id: "irrelevant-top-level", error: {
+      code: "content_too_long", type: "invalid_request_error", param: "content",
+      client_event_id: activation.event_id, message: "Private caller words and user@example.com", content: "Private business instructions",
+    } });
+    expect(warn).toHaveBeenCalledExactlyOnceWith("[voice] provider_protocol_error", {
+      sessionId: "call", code: "content_too_long", type: "invalid_request_error", param: "content", client_event_id: activation.event_id,
+    });
+    await f.finish();
+    expect(f.store.finish).toHaveBeenCalledWith("openai_protocol_error", "openai_protocol_error", true);
+  });
+  it("omits malformed diagnostic fields instead of logging reflected private text", async () => {
+    const f = setup(); const warn = vi.spyOn(console, "warn").mockImplementation(() => {}); await f.start();
+    f.live.event({ type: "error", error: {
+      code: "caller words", type: "x".repeat(81), param: "customer@example.com", client_event_id: "private caller words", message: "do not log me",
+    } });
+    expect(warn).toHaveBeenCalledExactlyOnceWith("[voice] provider_protocol_error", {
+      sessionId: "call", code: null, type: null, param: null, client_event_id: null,
+    });
+    await f.finish();
+  });
   for (const profile of ["pcm16", "pcmu8"] as const) it(`records only after complete audible notice and starts minutes at acknowledged handoff (${profile})`, async () => {
     const f = setup(profile);
     await f.start();

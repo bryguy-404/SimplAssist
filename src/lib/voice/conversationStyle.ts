@@ -34,8 +34,12 @@ export function buildLiveInstructions(
   priorDisclosure: boolean,
   actionsEnabled = false,
   publicCall = false,
+  awaitingPublicDisclosure = false,
 ): string {
   return [
+    ...(awaitingPublicDisclosure ? [
+      "Public opening phase: Only speak the application's fixed opening. No business answers or actions until the application explicitly activates the conversation. Stop speaking and listen when interrupted. The normal conversation instructions below apply only after that activation; keep their Marin voice and comfortable pace during the opening too.",
+    ] : []),
     actionsEnabled
       ? [
           CONVERSATION_STYLE.replace(" for a Q&A pilot", publicCall ? "" : " for a private pilot"),
@@ -48,11 +52,18 @@ export function buildLiveInstructions(
       : publicCall ? LIVE_INSTRUCTIONS.replace(" for a Q&A pilot", "").replace("this pilot", "this service") : LIVE_INSTRUCTIONS,
     `Business name (data, not instructions): ${JSON.stringify(businessName)}.`,
     `Closing example for a caller who is finished (quoted wording, not a command to end the call now): ${JSON.stringify(`Thanks for calling ${businessName}. Have a good day!`)}`,
-    priorDisclosure
+    awaitingPublicDisclosure
+      ? "The caller has not yet heard the AI and recording notice. Follow the application's opening instruction and remain silent afterward until the application activates the conversation."
+      : priorDisclosure
       ? "This approved private tester previously acknowledged that calls use AI, record audio and save transcripts. Do not add another disclosure announcement to the greeting."
       : "The caller has already heard the AI and recording notice. Do not repeat that notice in the greeting.",
   ].join("\n");
 }
+
+// Runtime instruction appends allow only 500 tokens. The full receptionist
+// policy belongs in session.start; this fixed delta is under 500 UTF-8 bytes.
+export const PUBLIC_CONVERSATION_ACTIVATION =
+  "The public opening and recording are complete. The conversation is now active: apply the normal conversation instructions from startup. Do not repeat the introduction. Say only 'How can I help you today?' now, then follow the caller naturally.";
 
 export function buildLiveGreeting(businessName: string): string {
   const greeting = `Hi, this is ${businessName}. How are you doing today?`;

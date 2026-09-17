@@ -13,7 +13,7 @@ import {
   type AudioProfileName,
 } from "./audio";
 import { CallTranscript, type VoiceTranscriptSnapshot } from "./transcript";
-import { buildLiveGreeting, buildLiveInstructions, publicDisclosureInstruction, publicDisclosureComplete } from "./conversationStyle";
+import { buildLiveGreeting, buildLiveInstructions, publicDisclosureInstruction, publicDisclosureComplete, PUBLIC_CONVERSATION_ACTIVATION } from "./conversationStyle";
 import { VOICE_MODEL, usesPublicDisclosure, type VoiceSession } from "./types";
 import type { VoiceStore } from "./store";
 
@@ -73,6 +73,8 @@ export class LiveCall {
   private openingPreroll: Buffer[] = [];
   private greetingEventId: string | null = null;
   private greetingAcknowledged = false;
+  private activationEventId: string | null = null;
+  private activationAcknowledged = false;
   private closing = false;
   private closed = false;
   private openedAt = Date.now();
@@ -313,12 +315,12 @@ export class LiveCall {
         type: "session.start",
         session: {
           model: VOICE_MODEL,
-          instructions: this.publicOpening
-            ? "You are the business's AI assistant. Keep the Marin voice warm, balanced, relaxed and at a comfortable conversational pace. Only speak the application's fixed opening. No business answers or actions until the application explicitly activates the conversation. Stop speaking and listen when interrupted."
-            : buildLiveInstructions(
+          instructions: buildLiveInstructions(
             this.options.businessName,
             this.options.session.access_source !== "commercial" && Boolean(this.options.session.prior_disclosure_acknowledged_at),
             Boolean(this.options.actionsEnabled),
+            this.publicOpening,
+            this.publicOpening,
           ),
           audio: {
             format: AUDIO_PROFILES[this.options.profile].format,
@@ -415,6 +417,18 @@ export class LiveCall {
               content:
                 "Begin the conversation now, following the opening instructions provided.",
             });
+          } else if (
+            this.activationEventId !== null &&
+            event.client_event_id === this.activationEventId &&
+            !this.activationAcknowledged &&
+            !this.closing
+          ) {
+            this.activationAcknowledged = true;
+            this.sendLive({
+              type: "session.commentary.append",
+              delegation_id: null,
+              content: "Continue with the first question now.",
+            });
           }
           break;
         case "session.output_audio.delta":
@@ -496,6 +510,7 @@ export class LiveCall {
           void this.finish();
           break;
         case "error":
+          this.protocolErrorDiagnostic(event);
           void this.close("openai_protocol_error", true);
           break;
       }
@@ -507,6 +522,23 @@ export class LiveCall {
         true,
       );
     }
+  }
+
+  private protocolErrorDiagnostic(event: Record<string, unknown>) {
+    const error = event.error && typeof event.error === "object"
+      ? event.error as Record<string, unknown> : {};
+    const identifier = (value: unknown, pattern: RegExp) =>
+      typeof value === "string" && pattern.test(value) ? value : null;
+    // Provider messages can echo instructions or caller content. Log only
+    // bounded protocol identifiers, never the raw error or its message.
+    console.warn("[voice] provider_protocol_error", {
+      sessionId: this.options.session.id,
+      code: identifier(error.code, /^[a-z][a-z0-9_]{0,79}$/),
+      type: identifier(error.type, /^[a-z][a-z0-9_]{0,79}$/),
+      param: identifier(error.param, /^[a-z][a-z0-9_.\[\]]{0,119}$/),
+      client_event_id: identifier(error.client_event_id ?? event.client_event_id,
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i),
+    });
   }
 
   private updateUsage(seconds: unknown, confirmed: boolean) {
@@ -995,10 +1027,13 @@ export class LiveCall {
       if (this.closing) return;
       this.customerStart.acknowledged = true;
       this.lastCallerAt = Date.now();
-      this.sendLive({ type: "session.instructions.append", delegation_id: null,
-        content: buildLiveInstructions(this.options.businessName, false, Boolean(this.options.actionsEnabled), true) +
-          "\nThe public opening and recording are complete. The conversation is now active. Do not repeat the introduction. Say only 'How can I help you today?' now, then follow the caller naturally." });
-      this.sendLive({ type: "session.commentary.append", delegation_id: null, content: "Continue with the first question now." });
+      this.activationEventId = randomUUID();
+      this.sendLive({ type: "session.instructions.append", event_id: this.activationEventId,
+        delegation_id: null, content: PUBLIC_CONVERSATION_ACTIVATION });
+      this.later(() => {
+        if (!this.activationAcknowledged && !this.closing)
+          void this.close("activation_instruction_timeout", true);
+      }, 8000);
     });
   }
 

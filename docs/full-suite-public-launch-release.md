@@ -4,7 +4,7 @@ Approved scope: [implementation plan](full-suite-public-launch-plan.md). Baselin
 
 ## Current status
 
-Migrations 084–086 and the closed app/worker deployments are applied and independently verified. The first live public-opening rehearsal exposed a protocol error at the handoff into conversation; the worker correction is now deployed and independently verified, awaiting repeat phone acceptance. Full Suite sales and public voice admission remain closed. No subscription change or launch email has been performed. The prepared sales-opening change must not be deployed until the public opening and recording acceptance below passes.
+Full Suite is publicly available at $65/month with 2,500 SMS parts and 100 voice minutes per subscription month. Migrations 084–086, the corrected worker, the final app deployment and public voice eligibility at capacity four are independently verified. The first public-opening rehearsal exposed a handoff protocol error; its correction passed automated verification and the repeat real call, including Bryan's greeting/recording acceptance. No subscription change, purchase or launch email was performed during deployment. Bryan's account remains on its existing $45 subscription until he upgrades through Billing.
 
 ## Phase 1 — package and capability catalog
 
@@ -13,11 +13,11 @@ Migrations 084–086 and the closed app/worker deployments are applied and indep
 - Homepage pricing FAQ responds to the existing sales gate; changing that gate later will not leave a stale “cannot be purchased” claim.
 - Relevant catalog, entitlement, onboarding, homepage and mocked-email checks: **10 files / 209 tests passed**. This is not a production or browser verification.
 
-## Pending release evidence
+## Remaining live follow-up
 
-Public greeting and protected playback acceptance; final sales activation and independent readback. The earlier implementation, automated, browser, sensitive-change and closed-deployment checks below have passed.
+The approved launch gates are complete. Bryan's ordinary paid upgrade and his friend's normal onboarding/booking account are the next customer flows to observe. The friend’s actual booking and calendar invitation remain the agreed post-launch live verification.
 
-Do not mark the release complete until the required evidence is recorded. Friend's first actual booking/invitation is the agreed post-launch live verification.
+Additional Stripe test-mode transactions were explicitly waived; mocked/local payment checks and read-only live configuration checks passed. This release does not claim a newly exercised provider proration/rejoin/payment-failure transaction.
 
 ## Final local verification
 
@@ -57,7 +57,17 @@ Code inspection found the handoff appended the entire voice guide (1,030 words /
 - **404 files / 6,893 tests passed** after the correction, including both codecs, acknowledgment ordering/timeouts, privacy diagnostics, and the real local four-socket harness. Application/worker types, focused lint and production build passed. No database change was needed.
 - Corrected private archive SHA-256: `7ad0ef4e567bba0fd1a4e3243c4a9e8736022a72f9ee8e215ab950a817b4ca02`. Worker deployment `d8ba4898-c6d0-4038-8a6f-962286b3f00e` is SUCCESS and independently verified as the sole active worker, healthy and ready on protocol 2 with zero calls at verification. App remains on closed source `fcea00e`/deployment `2651c426-dbb9-4226-95d9-b759507b321e`; scanner unchanged.
 - Final opening must use the corrected app archive `/private/tmp/simplassist-full-suite-handoff-920aaf3-app` after live acceptance, not the superseded `34fcea1` archive. The unexecuted activation SQL now excludes failed/fallback rehearsals and requires the signup/Lead evidence, in addition to human greeting and protected-playback acceptance.
-- The same approved caller's single-use public rehearsal was rearmed after verification; it expires **September 17 at 14:54:31 UTC / 10:54:31 AM Eastern**. Bryan was asked to repeat the full signup and protected playback check. No acceptance has been reported for the corrected deployment yet. Public purchases/admissions remain closed, and Bryan's subscription has not changed.
+- The same approved caller's single-use public rehearsal was rearmed after verification with expiry **September 17 at 14:54:31 UTC / 10:54:31 AM Eastern**. Bryan was asked to repeat the full signup and protected playback check. Purchases/admissions remained closed at that checkpoint, pending the successful acceptance below.
+
+### Successful repeat acceptance and launch
+
+- The second rehearsal, call `d8bc4419-37e5-49ef-8920-f39edc21b06d`, completed normally on September 17. Notice playback completed at 14:25:25.934 UTC, recording began at 14:25:26.870, and the conversation handoff began at 14:25:26.999. The call ended at 14:27:53.354 after verified caller hangup, with no error or fallback. All 249 persisted transcript fragments followed the conversation input boundary.
+- Contact saving succeeded. The confirmed signup action produced exactly one delivered SMS, one SMS usage event and one Lead, linked to the correct call, confirmation and provider identity. Recording retention ends October 17; OpenAI/pilot usage finalized at 153 seconds with no outstanding reservation. Telnyx cost remains an unconfirmed estimate. Independent verification confirmed unchanged subscription and pilot settings, with no commercial usage or grant created by the rehearsal.
+- Bryan explicitly accepted the complete experience: “Yes—everything worked, including the recording.” This satisfies the human public-greeting and protected-playback launch gate.
+- The guarded activation transaction then enabled commercial eligibility, retained emergency stop off, and raised shared capacity from two to four (revision 2). No business subscription was purchased or upgraded.
+- Corrected source `920aaf3` was uploaded privately for final app deployment `0b38b69b-904b-4a76-ac0c-ea6b9586af1a`. Independent readback at 14:38:52 UTC confirmed SUCCESS and the sole active app deployment. Worker `d8ba4898-c6d0-4038-8a6f-962286b3f00e` and scanner `12c2582a-2263-4055-92a8-1f4eaf27c642` remain unchanged and SUCCESS.
+- Independent live-homepage readback at 14:39:05 UTC confirmed the $65/month Full Suite card, 2,500 SMS parts, 100 voice minutes and English AI voice with an available Get Started link and no Coming Soon/waitlist control. A separate live browser walkthrough confirmed the card and opened `/signup` through its real link; the registration form loaded, and no information was submitted.
+- App/worker health and authenticated readiness returned 200, with commercial protocol 2, action protocol 1 and zero active calls. Unauthenticated worker readiness remains 404; protected owner endpoints remain 401. A separate database readback confirmed enabled=true, emergency_stop=false, capacity=4, revision=2, unchanged subscriptions/pilot settings/tester permissions/prior history, and no automatic purchases, grants, customer usage, retirements or business overrides.
 
 ## Verification in progress — September 17
 

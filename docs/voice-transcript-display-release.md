@@ -24,6 +24,10 @@ Bryan approved fixing word-by-word voice transcript bubbles and the inflated Mes
 
 ## Deployment
 
-Private committed-source application upload is pending. The voice and scan workers must remain on their existing deployments. After upload, verify application health, unauthenticated transcript denial, and an independent service-state check. Existing call transcripts gain the display fix without a backfill or another phone call.
+- Private source commit: `e45f08b3d973883d0bffcfe45245e72cbb723632`; canonical tar SHA-256 `f0e476633e46b461a81918fe0ac3e3d756978748a2d8e5ed7c771dde08dbeca6`. Independent review verified all 1,200 uploaded files match the commit, without missing or extra files. No public Git push.
+- Application deployment: `591fc262-ab34-4cd4-a001-dd8ce6ba1cfb`, **SUCCESS**. Independent verification at 16:35:36 UTC on September 17 confirmed application and worker health HTTP 200 and unauthorized access to the new transcript endpoint HTTP 401, without redirects.
+- Voice deployment `99a21106-e7ef-433e-ac27-5f63fd9a082b` and scanner `12c2582a-2263-4055-92a8-1f4eaf27c642` remain unchanged. No production database records, call settings or billing settings were mutated by this release.
+
+Existing call transcripts gain the display fix without a backfill or another phone call.
 
 Rollback is to restore the previous application deployment. No data restoration, message replay, billing adjustment or transcript rewrite is required.

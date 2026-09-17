@@ -19,8 +19,9 @@ import {
 } from "@/lib/billing/entitlements";
 import { resolveBusinessOperationalControls } from "@/lib/account/operationalControls.server";
 import type { Language } from "@/types/database";
-import { admitPilot, handlePilotEvent } from "@/lib/voice/routing";
+import { admitPilot, admitCommercialVoice, handlePilotEvent, startCommercialVoice } from "@/lib/voice/routing";
 import { pilotRoutingDependencies } from "@/lib/voice/routing.server";
+import { hasCustomerVoiceRoutingConfiguration, isCustomerVoiceRolloutEnabledForBusiness } from "@/lib/voice/access.server";
 
 // Telnyx Voice API delivers all call lifecycle events to the same URL.
 // We act on a small subset to drive forwarding and the missed-call voicemail flow:
@@ -68,6 +69,7 @@ type OperationalForwardingStopReason =
 
 interface VoiceState {
   callControlId: string;
+  callSessionId?: string;
   businessId: string;
   from: string;
   businessName: string;
@@ -83,6 +85,7 @@ interface VoiceState {
   outboundCallControlId?: string | null;
   voicePhase?: VoicePhase;
   voicePilotSessionId?: string;
+  voiceTextFallbackEnabled?: boolean;
 }
 
 interface ForwardingAttempt {
@@ -131,7 +134,7 @@ export async function POST(request: NextRequest) {
     return new NextResponse("Forbidden", { status: 403 });
   }
 
-  const eventData = (event as { data?: { id?: string; event_type?: string; payload?: unknown } }).data;
+  const eventData = (event as { data?: { id?: string; event_type?: string; occurred_at?: string; payload?: unknown } }).data;
   const eventType = eventData?.event_type;
   const eventId = eventData?.id;
   console.log(`[messaging:voice] event_type=${eventType} event_id=${eventId}`);
@@ -153,7 +156,10 @@ export async function POST(request: NextRequest) {
 
   try {
     try {
-      if (await handlePilotEvent(pilotRoutingDependencies(), eventType ?? "", payload, process.env.VOICE_PILOT_ROLLOUT === "true")) {
+      // Stored callback ownership survives admission switches being disabled.
+      if (await handlePilotEvent(pilotRoutingDependencies(), eventType ?? "", payload, true, {
+        eventId, occurredAt: eventData?.occurred_at,
+      })) {
         return new NextResponse("OK", { status: 200 });
       }
     } catch (error) {
@@ -307,6 +313,7 @@ async function handleCallInitiated(payload: Record<string, unknown>) {
 
   const state = encodeState({
     callControlId,
+    callSessionId: typeof payload.call_session_id === "string" ? payload.call_session_id : callControlId,
     businessId,
     from,
     businessName,
@@ -511,8 +518,13 @@ async function handlePlaybackEnded(payload: Record<string, unknown>) {
 }
 
 async function speakVoicemailGreeting(state: VoiceState) {
+  if (await selectCommercialUnansweredRoute(state)) return;
   const locale = resolveComplianceCopyLocale(state.language);
-  const greeting = buildSmsComplianceCopy({
+  const greeting = state.voicePilotSessionId && state.voiceTextFallbackEnabled === false
+    ? locale === "es"
+      ? `Has llamado a ${state.businessName}. No podemos atender tu llamada en este momento. Deja un mensaje después del tono.`
+      : `You've reached ${state.businessName}. We can't answer your call right now. Please leave a message after the tone.`
+    : buildSmsComplianceCopy({
     business: {
       name: state.businessName,
       email: state.businessEmail ?? null,
@@ -556,6 +568,34 @@ async function speakVoicemailGreeting(state: VoiceState) {
       `[messaging:voice] Failed to start voicemail greeting for callControlId=${state.callControlId}`,
       { cause: error }
     );
+  }
+}
+
+/** A server-frozen voice decision is made only once the owner's call is missed. */
+async function selectCommercialUnansweredRoute(state: VoiceState): Promise<boolean> {
+  if (state.voicePilotSessionId || !state.callSessionId || !state.smsPhoneNumber)
+    return false;
+  try {
+    if (!(await hasCustomerVoiceRoutingConfiguration(state.businessId))) return false;
+    const rolloutOpen = await isCustomerVoiceRolloutEnabledForBusiness(state.businessId);
+    const deps = pilotRoutingDependencies();
+    const session = await admitCommercialVoice(deps, {
+      businessId: state.businessId,
+      caller: state.from,
+      called: state.smsPhoneNumber,
+      callControlId: state.callControlId,
+      callSessionId: state.callSessionId,
+    }, rolloutOpen);
+    if (!session) return false;
+    // Carry denied-voice decisions too: voicemail callbacks must honor the
+    // frozen text fallback choice rather than sending a competing generic SMS.
+    state.voicePilotSessionId = session.id;
+    state.voiceTextFallbackEnabled = session.text_fallback_enabled === true;
+    if (session.response_mode !== "voice") return false;
+    await startCommercialVoice(deps, session);
+    return true;
+  } catch (error) {
+    throw new RetryableWebhookError("Commercial voice routing needs retry", { cause: error });
   }
 }
 
@@ -692,6 +732,7 @@ async function startCallForwarding(
       err
     );
     await triggerForwardingFallback({
+      voiceState: state,
       attemptId: attempt.id,
       status: "error",
       reason: err instanceof Error ? err.message : "forwarding dial error",
@@ -811,6 +852,7 @@ async function startCallForwarding(
       err
     );
     await triggerForwardingFallback({
+      voiceState: state,
       attemptId: attempt.id,
       status: "error",
       reason: err instanceof Error ? err.message : "forwarding bridge error",
@@ -942,6 +984,7 @@ async function handleCallHangup(payload: Record<string, unknown>) {
       `[messaging:voice] owner leg ended before bridge attempt=${attempt.id} cause=${cause}; triggering missed-call fallback`
     );
     await triggerForwardingFallback({
+      voiceState: voiceStateForForwardingVoicemail(state, attempt),
       attemptId: attempt.id,
       status: "fallback_triggered",
       reason: `owner_hangup_before_bridge:${cause}`,
@@ -969,6 +1012,7 @@ function voiceStateForForwardingVoicemail(
   return {
     ...(matchingState ?? {}),
     callControlId: attempt.inbound_call_control_id,
+    callSessionId: attempt.call_session_id,
     businessId: attempt.business_id,
     from: attempt.caller_phone,
     businessName: matchingState?.businessName ?? "us",
@@ -1407,6 +1451,7 @@ async function getForwardingAttemptByIdStrict(
 }
 
 async function triggerForwardingFallback(args: {
+  voiceState?: VoiceState;
   attemptId: string;
   status: ForwardingTerminalStatus;
   reason: string;
@@ -1456,6 +1501,21 @@ async function triggerForwardingFallback(args: {
 
   if (args.hangupOutbound && outboundCallControlId) {
     await bestEffortHangup(outboundCallControlId, "forward target cleanup");
+  }
+  if (args.status !== "abandoned" && args.voiceState) {
+    try {
+      const routeState = voiceStateForForwardingVoicemail(args.voiceState, attempt);
+      if (await selectCommercialUnansweredRoute(routeState)) return;
+      if (routeState.voicePilotSessionId) {
+        // Voice was selected but unavailable. Its frozen fallback decision is
+        // honored by the voicemail completion callback, without ending caller.
+        await speakVoicemailGreeting(routeState);
+        return;
+      }
+    } catch (error) {
+      await reopenForwardingFallbackAfterSmsFailure(attempt.id, error);
+      throw new RetryableWebhookError("Forwarded voice routing needs retry", { cause: error });
+    }
   }
   if (args.hangupInbound) {
     await bestEffortHangup(

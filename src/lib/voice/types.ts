@@ -7,6 +7,12 @@ export const RECORDING_NOTICE =
 
 export interface VoiceSession {
   id: string;
+  /** Missing on legacy fixtures; persisted legacy calls default to pilot. */
+  access_source?: "pilot" | "commercial";
+  allowance_period_id?: string | null;
+  commercial_deadline_at?: string | null;
+  text_fallback_enabled?: boolean;
+  admission_reason?: string | null;
   business_id: string;
   action_business_id?: string | null;
   action_conversation_id?: string | null;

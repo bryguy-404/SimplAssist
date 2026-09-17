@@ -54,6 +54,7 @@ function harness(rows: unknown[][], cleanup: unknown[] = []) {
     };
   });
   const hangup = vi.fn().mockResolvedValue({});
+  const retrieveStatus = vi.fn().mockResolvedValue({ data: null });
   const list = vi.fn().mockResolvedValue({ data: [] });
   const remove = vi.fn().mockResolvedValue({});
   const fallback = vi.fn().mockResolvedValue(undefined);
@@ -61,6 +62,7 @@ function harness(rows: unknown[][], cleanup: unknown[] = []) {
     writes,
     rpc,
     hangup,
+    retrieveStatus,
     list,
     remove,
     fallback,
@@ -68,7 +70,7 @@ function harness(rows: unknown[][], cleanup: unknown[] = []) {
       maintainVoicePilot(
         { from, rpc } as unknown as SupabaseClient,
         {
-          calls: { actions: { hangup } },
+          calls: { actions: { hangup }, retrieveStatus },
           recordings: { list, delete: remove },
         } as unknown as Telnyx,
         fallback,
@@ -77,6 +79,29 @@ function harness(rows: unknown[][], cleanup: unknown[] = []) {
 }
 
 describe("durable voice maintenance", () => {
+  it("does not release a commercial hold merely because hangup was accepted", async () => {
+    const h = harness([[], [{ id: "customer", access_source: "commercial", call_control_id: "control", call_session_id: "session" }], [], []]);
+    h.retrieveStatus.mockResolvedValue({ data: { call_control_id: "control", call_session_id: "session", is_alive: true } });
+    await h.run();
+    expect(h.hangup).toHaveBeenCalledOnce();
+    expect(h.rpc.mock.calls.some(([name]) => name.startsWith("record_voice_customer_"))).toBe(false);
+    expect(h.writes).toEqual([]);
+  });
+  it("recovers customer end evidence only from the exact terminated provider call", async () => {
+    const h = harness([[], [{ id: "customer", access_source: "commercial", call_control_id: "control", call_session_id: "session" }], [], []]);
+    h.retrieveStatus.mockResolvedValue({ data: { call_control_id: "control", call_session_id: "session", is_alive: false, end_time: "2026-09-17T12:01:00Z" } });
+    await h.run();
+    expect(h.rpc).toHaveBeenCalledWith("record_voice_customer_end", {
+      p_session_id: "customer", p_event_id: "provider-status:customer:2026-09-17T12:01:00Z", p_ended_at: "2026-09-17T12:01:00Z",
+    });
+    expect(h.rpc).toHaveBeenCalledWith("reconcile_voice_customer_usage", { p_limit: 20 });
+  });
+  it("leaves unrelated provider identities held for review instead of settling their time", async () => {
+    const h = harness([[], [{ id: "customer", access_source: "commercial", call_control_id: "control", call_session_id: "session" }], [], []]);
+    h.retrieveStatus.mockResolvedValue({ data: { call_control_id: "control", call_session_id: "different", is_alive: false, end_time: "2026-09-17T12:01:00Z" } });
+    await h.run();
+    expect(h.rpc.mock.calls.some(([name]) => name.startsWith("record_voice_customer_"))).toBe(false);
+  });
   it("does not finalize or request fallback when a stale worker recovers before its claim", async () => {
     const h = harness([
       [{ id: "recovered", response_mode: "voice" }],

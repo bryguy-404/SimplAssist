@@ -18,6 +18,7 @@ export interface PilotRoutingDependencies {
     claim: () => Promise<boolean>,
   ) => Promise<void>;
   workerReady: () => Promise<boolean>;
+  commercialWorkerReady?: () => Promise<boolean>;
   prepareWorker?: (sessionId: string) => Promise<void>;
   appUrl: string;
   workerUrl: string;
@@ -28,6 +29,7 @@ export interface PilotRoutingDependencies {
 export async function checkVoiceWorkerReady(
   workerUrl: string,
   token: string,
+  commercial = false,
 ): Promise<boolean> {
   if (!workerUrl || token.length < 32) return false;
   try {
@@ -42,6 +44,7 @@ export async function checkVoiceWorkerReady(
     const body = await response.json();
     return (
       body.ready === true &&
+      (!commercial || (body.commercialProtocol === 1 && body.actionProtocol === 1)) &&
       (process.env.VOICE_ACTIONS_ROLLOUT !== "true" ||
         body.actionProtocol === 1) &&
       body.model === "gpt-live-1" &&
@@ -50,6 +53,39 @@ export async function checkVoiceWorkerReady(
   } catch {
     return false;
   }
+}
+
+export async function admitCommercialVoice(
+  deps: PilotRoutingDependencies,
+  args: { businessId: string; called: string; caller: string; callControlId: string; callSessionId: string },
+  allowWorkerProbe = true,
+): Promise<VoiceSession | null> {
+  const { data, error } = await deps.db.rpc("admit_voice_commercial", {
+    p_business_id: args.businessId,
+    p_call_control_id: args.callControlId,
+    p_call_session_id: args.callSessionId,
+    p_caller: args.caller,
+    p_called: args.called,
+    p_worker_ready: allowWorkerProbe && Boolean(await deps.commercialWorkerReady?.()),
+  });
+  if (error) throw new Error("voice_commercial_admission_failed");
+  if (data?.id && (data.access_source !== "commercial" || data.business_id !== args.businessId ||
+    data.call_control_id !== args.callControlId || data.call_session_id !== args.callSessionId ||
+    data.called_phone !== args.called || data.caller_phone !== args.caller))
+    throw new Error("voice_commercial_identity_invalid");
+  return data?.id ? data as VoiceSession : null;
+}
+
+/** The owner already rang (or legacy ringback completed). Do not ring twice. */
+export async function startCommercialVoice(deps: PilotRoutingDependencies, session: VoiceSession) {
+  if (session.access_source !== "commercial" || session.response_mode !== "voice")
+    throw new Error("voice_commercial_identity_invalid");
+  await handlePilotEvent(deps, "call.playback.ended", {
+    call_control_id: session.call_control_id,
+    call_session_id: session.call_session_id,
+    client_state: pilotClientState(session, "ringing"),
+    status: "completed",
+  }, true);
 }
 
 export async function admitPilot(
@@ -126,6 +162,7 @@ export async function handlePilotEvent(
   eventType: string,
   payload: Record<string, unknown>,
   allowLookup: boolean,
+  evidence?: { eventId?: string; occurredAt?: string },
 ): Promise<boolean> {
   if (eventType === "call.initiated") return false;
   const state = stateFrom(payload);
@@ -156,6 +193,13 @@ export async function handlePilotEvent(
   )
     throw new Error("voice_callback_identity_mismatch");
   if (session.response_mode !== "voice") {
+    if (session.access_source === "commercial" &&
+      ["call.hangup", "call.recording.saved", "call.recording.error"].includes(eventType)) {
+      await finalize(deps, session, "text_flow", Boolean(session.text_fallback_enabled), true);
+      await hangup(deps, session);
+      await drainFallback(deps, session.id);
+      return true;
+    }
     if (eventType === "call.hangup")
       await finalize(deps, session, "text_flow", false, true);
     return false;
@@ -184,6 +228,22 @@ export async function handlePilotEvent(
     return true;
   }
   if (eventType === "call.hangup") {
+    if (session.access_source === "commercial") {
+      const originalEnd = typeof payload.end_time === "string"
+        ? payload.end_time : evidence?.occurredAt;
+      const verifiedEnd = originalEnd && Number.isFinite(Date.parse(originalEnd));
+      const { error } = await deps.db.rpc(
+        verifiedEnd && evidence?.eventId ? "record_voice_customer_end" : "record_voice_customer_termination",
+        {
+          p_session_id: session.id,
+          p_event_id: evidence?.eventId ?? `hangup:${session.id}`,
+          ...(verifiedEnd && evidence?.eventId
+            ? { p_ended_at: originalEnd }
+            : { p_terminated_at: new Date().toISOString() }),
+        },
+      );
+      if (error) throw new Error("voice_customer_hangup_save_failed");
+    } else {
     const endedAt =
       typeof payload.end_time === "string" &&
       Number.isFinite(Date.parse(payload.end_time))
@@ -197,6 +257,7 @@ export async function handlePilotEvent(
       })
       .eq("id", session.id);
     if (endedError) throw new Error("voice_hangup_save_failed");
+    }
     if (session.status !== "closed") {
       const preStream = ["ringing", "notice"].includes(session.status);
       // Hanging up during the initial ring preserves the existing abandoned
@@ -253,7 +314,7 @@ export async function handlePilotEvent(
       );
       // Request preparation after ringing is queued. The worker independently
       // checks the default-off switch and prior tester disclosure.
-      if (deps.prepareWorker)
+      if (session.access_source !== "commercial" && deps.prepareWorker)
         await deps.prepareWorker(session.id).catch(() => {});
     } else if (
       eventType === "call.playback.ended" &&
@@ -270,10 +331,10 @@ export async function handlePilotEvent(
         return true;
       if (payload.status !== "completed")
         throw new Error("voice_ringback_failed");
-      if (
+      if (session.access_source !== "commercial" && (
         session.status === "ringing" ||
         session.prior_disclosure_acknowledged_at
-      ) {
+      )) {
         if (!(await deps.workerReady()))
           throw new Error("voice_worker_unavailable");
         const { data: prepared, error: preparationError } = await deps.db.rpc(
@@ -324,7 +385,7 @@ export async function handlePilotEvent(
     ) {
       if (payload.status !== "completed")
         throw new Error("voice_notice_incomplete");
-      if (!(await deps.workerReady()))
+      if (!(await (session.access_source === "commercial" ? deps.commercialWorkerReady?.() : deps.workerReady())))
         throw new Error("voice_worker_unavailable");
       await transition(deps, session, ["notice", "starting"], {
         status: "starting",
@@ -376,7 +437,7 @@ async function startMedia(
   if (url.protocol !== "https:") throw new Error("voice_worker_url_invalid");
   url.protocol = "wss:";
   url.searchParams.set("token", token);
-  if (session.prior_disclosure_acknowledged_at)
+  if (session.access_source !== "commercial" && session.prior_disclosure_acknowledged_at)
     url.searchParams.set("opening_ringback", "v1");
   // Recording starts after the notice or verified prior tester acknowledgment.
   // Store only the provider recording ID when its callback arrives.
@@ -436,7 +497,7 @@ async function finalize(
     p_session_id: session.id,
     p_outcome: outcome,
     p_error: error,
-    p_fallback: fallback,
+    p_fallback: fallback && (session.access_source !== "commercial" || session.text_fallback_enabled === true),
     p_no_provider_started: noProvider,
   });
   if (failure) throw new Error("voice_finalization_failed");
@@ -465,6 +526,7 @@ export async function drainFallback(
     .single();
   if (error) throw new Error("voice_fallback_lookup_failed");
   if (
+    (data.access_source === "commercial" && !data.text_fallback_enabled) ||
     !data.fallback_pending ||
     data.fallback_completed_at ||
     data.fallback_claimed_at

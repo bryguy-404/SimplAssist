@@ -1,6 +1,7 @@
 import type { PreparedLiveConnection } from "./preparation";
 import type { VoiceAnswer } from "./actions";
 import { randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import WebSocket from "ws";
 import {
   AUDIO_PROFILES,
@@ -42,6 +43,7 @@ export interface LiveSessionOptions {
   onStartupTiming?: (phase: string, elapsedMs: number) => void;
   // Injected sockets/timing make the actual bridge testable without paid calls.
   connectOpenAI?: () => WebSocket;
+  monotonicNow?: () => number;
 }
 
 /** Continuous audio bridge. There is no synthetic text-turn/commit loop. */
@@ -68,6 +70,8 @@ export class LiveCall {
   private latestUsage = 0;
   private finalUsage = false;
   private audioSent = false;
+  private customerStart: { eventId: string; monotonicMs: number; acknowledged: boolean } | null = null;
+  private phoneHangupRequested = false;
   private outputFrames = 0;
   private playbackGeneration = 0;
   private pendingMarks = new Set<string>();
@@ -192,6 +196,17 @@ export class LiveCall {
         );
       } else if (event.event === "mark") {
         const name = event.mark?.name;
+        const customerStart = this.customerStart;
+        if (this.options.session.access_source === "commercial" &&
+          customerStart && customerStart.eventId === name && !this.closing &&
+          event.stream_id === this.streamId && !customerStart.acknowledged) {
+          customerStart.acknowledged = true;
+          this.persist(async () => {
+            if (!this.options.store.customerPlaybackAcknowledged)
+              throw new Error("customer_meter_unavailable");
+            await this.options.store.customerPlaybackAcknowledged(name);
+          });
+        }
         const actionMark = this.actionMarks.get(name);
         if (actionMark) {
           this.actionMarks.delete(name);
@@ -233,6 +248,12 @@ export class LiveCall {
           this.persist(() => this.options.store.playbackAcknowledged());
         }
       } else if (event.event === "stop") {
+        if (this.options.session.access_source === "commercial") {
+          if (!this.streamId || event.stream_id !== this.streamId)
+            throw new Error("stream_identity_mismatch");
+          // Stream shutdown alone does not prove the phone ended. Request
+          // hangup below; its signed callback/status owns termination evidence.
+        }
         void this.close("caller_hangup", !this.ready);
       }
     } catch (error) {
@@ -273,7 +294,7 @@ export class LiveCall {
           model: VOICE_MODEL,
           instructions: buildLiveInstructions(
             this.options.businessName,
-            Boolean(this.options.session.prior_disclosure_acknowledged_at),
+            this.options.session.access_source !== "commercial" && Boolean(this.options.session.prior_disclosure_acknowledged_at),
             Boolean(this.options.actionsEnabled),
           ),
           audio: {
@@ -338,6 +359,11 @@ export class LiveCall {
               if (!this.openingReleased && !this.closing)
                 void this.close("greeting_audio_timeout", true);
             }, 12000);
+            if (this.options.session.access_source === "commercial")
+              this.later(() => {
+                if (!this.customerStart && !this.closing)
+                  void this.close("customer_audio_start_timeout", true);
+              }, 12000);
           });
           break;
         }
@@ -725,6 +751,26 @@ export class LiveCall {
           });
           if (this.pendingAction && hasAudibleAudio(frame, this.options.profile))
             this.pendingAction.audibleFrameSent = true;
+          if (this.options.session.access_source === "commercial" &&
+            !this.customerStart && hasAudibleAudio(frame, this.options.profile)) {
+            const eventId = `customer-start-${randomUUID()}`;
+            const startedAt = new Date().toISOString();
+            this.customerStart = {
+              eventId, monotonicMs: this.monotonicNow(), acknowledged: false,
+            };
+            this.persist(async () => {
+              if (!this.options.store.customerAudioStarted)
+                throw new Error("customer_meter_unavailable");
+              await this.options.store.customerAudioStarted(eventId, startedAt);
+            });
+            // Queue directly behind the first audible frame. No greeting wait
+            // or ordinary 500-ms playback-mark interval enters the meter.
+            this.sendPhone({ event: "mark", mark: { name: eventId } });
+            this.later(() => {
+              if (!this.customerStart?.acknowledged && !this.closing)
+                void this.close("customer_playback_unconfirmed", true);
+            }, 10000);
+          }
           if (!this.audioSent) {
             this.audioSent = true;
             this.startupTiming("first_audio_sent");
@@ -770,26 +816,33 @@ export class LiveCall {
             throw new Error("action_playback_stalled");
           this.sendPhone({ event: "mark", mark: { name } });
         }
-        const elapsed = (Date.now() - this.openedAt) / 1000;
+        const commercial = this.options.session.access_source === "commercial";
+        const elapsed = commercial
+          ? this.customerStart ? (this.monotonicNow() - this.customerStart.monotonicMs) / 1000 : 0
+          : (Date.now() - this.openedAt) / 1000;
         const limit = this.options.session.reserved_seconds;
-        if (!this.warningSent && elapsed >= limit - 60) {
+        if (!this.warningSent && elapsed >= limit - (commercial ? 30 : 60)) {
           this.warningSent = true;
           this.sendLive({
             type: "session.instructions.append",
             delegation_id: null,
             content:
-              "Tell the caller this test call has less than one minute remaining, then continue briefly.",
+              commercial
+                ? "Tell the caller this call has about thirty seconds remaining, then finish briefly."
+                : "Tell the caller this test call has less than one minute remaining, then continue briefly.",
           });
         }
         // Reserve 15 seconds for the provider's final-usage close handshake.
-        if (elapsed >= limit - 15) void this.close("time_limit", false);
+        if (elapsed >= limit - (commercial ? 0 : 15)) void this.close("time_limit", false);
         if (!this.idleWarningSent && Date.now() - this.lastCallerAt > 45000) {
           this.idleWarningSent = true;
           this.sendLive({
             type: "session.instructions.append",
             delegation_id: null,
             content:
-              "Ask the caller if they are still there. Explain that the test call will end soon if they have no more questions.",
+              commercial
+                ? "Ask the caller if they are still there. Explain that the call will end soon if they have no more questions."
+                : "Ask the caller if they are still there. Explain that the test call will end soon if they have no more questions.",
           });
         }
         if (Date.now() - this.lastCallerAt > 65000)
@@ -850,6 +903,20 @@ export class LiveCall {
     this.later(() => this.heartbeat(), 3000);
   }
 
+  private monotonicNow() {
+    return this.options.monotonicNow?.() ?? performance.now();
+  }
+
+  private async requestPhoneHangup() {
+    if (this.phoneHangupRequested) return;
+    this.phoneHangupRequested = true;
+    try { await this.options.hangup(); }
+    catch {
+      this.phoneHangupRequested = false;
+      // Durable provider cleanup retries; a failed request is not end evidence.
+    }
+  }
+
   async close(reason: string, fallback: boolean): Promise<void> {
     if (this.closing || this.closed) return this.done;
     this.closing = true;
@@ -862,6 +929,10 @@ export class LiveCall {
     this.input.clear();
     this.playbackGeneration++;
     this.pendingMarks.clear();
+    // Customer time stops at the phone. Never spend another fifteen customer
+    // seconds waiting for the provider's independent final usage response.
+    if (this.options.session.access_source === "commercial")
+      void this.requestPhoneHangup();
     try {
       this.sendPhone({ event: "clear" });
     } catch {
@@ -906,11 +977,7 @@ export class LiveCall {
         sessionId: this.options.session.id,
       });
     }
-    try {
-      await this.options.hangup();
-    } catch {
-      /* Webhook/maintenance retries close failed provider calls. */
-    }
+    await this.requestPhoneHangup();
     this.options.onClosed();
     this.resolveClosed();
   }

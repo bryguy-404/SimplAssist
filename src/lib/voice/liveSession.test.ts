@@ -59,6 +59,9 @@ function harness(
     heartbeat: vi.fn().mockResolvedValue(true),
     audioSent: vi.fn().mockResolvedValue(undefined),
     playbackAcknowledged: vi.fn().mockResolvedValue(undefined),
+    customerAudioStarted: vi.fn().mockResolvedValue(undefined),
+    customerPlaybackAcknowledged: vi.fn().mockResolvedValue(undefined),
+    customerTermination: vi.fn().mockResolvedValue(undefined),
     finish: vi.fn().mockResolvedValue(undefined),
   } satisfies VoiceStore;
   const answer = vi
@@ -82,6 +85,7 @@ function harness(
       : undefined,
     onStartupTiming,
     connectOpenAI: () => live.asWebSocket(),
+    monotonicNow: () => Date.now(),
     ...overrides,
   });
   async function start(delayAudio = false, acknowledgeGreeting = true) {
@@ -159,6 +163,78 @@ describe("continuous phone bridge", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+  it.each(["pcm16", "pcmu8"] as const)(
+    "meters commercial %s from the first audible frame and its own acknowledged mark",
+    async (profile) => {
+      const h = harness(profile, false, { session: { ...session, access_source: "commercial" } });
+      await h.start(true);
+      h.live.event({ type: "session.usage.updated", usage: { seconds: 20 } });
+      const frameBytes = new AudioQueue(profile).frameBytes;
+      h.live.event({ type: "session.output_audio.delta", delta: Buffer.alloc(frameBytes * 5, AUDIO_PROFILES[profile].silence).toString("base64") });
+      await vi.advanceTimersByTimeAsync(120);
+      expect(h.store.customerAudioStarted).not.toHaveBeenCalled();
+      h.live.event({ type: "session.output_audio.delta", delta: Buffer.alloc(frameBytes, 23).toString("base64") });
+      await vi.advanceTimersByTimeAsync(20);
+      const mark = h.phone.sent.find((event) => event.event === "mark" && String((event.mark as { name: string }).name).startsWith("customer-start-"));
+      const name = (mark?.mark as { name: string }).name;
+      expect(name).toMatch(/^customer-start-/);
+      expect(h.store.customerAudioStarted).toHaveBeenCalledWith(name, expect.any(String));
+      expect(h.store.customerPlaybackAcknowledged).not.toHaveBeenCalled();
+      h.phone.event({ event: "mark", stream_id: "wrong", mark: { name } });
+      h.phone.event({ event: "mark", stream_id: "stream", mark: { name: "unrelated" } });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(h.store.customerPlaybackAcknowledged).not.toHaveBeenCalled();
+      h.phone.event({ event: "mark", stream_id: "stream", mark: { name } });
+      h.phone.event({ event: "mark", stream_id: "stream", mark: { name } });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(h.store.customerPlaybackAcknowledged).toHaveBeenCalledExactlyOnceWith(name);
+      expect(h.store.customerAudioStarted.mock.invocationCallOrder[0]).toBeLessThan(h.store.customerPlaybackAcknowledged.mock.invocationCallOrder[0]);
+      await h.finish();
+    },
+  );
+  it("uses the commercial monotonic deadline and hangs up before provider close completes", async () => {
+    let monotonic = 1000;
+    const h = harness("pcm16", false, {
+      session: { ...session, access_source: "commercial", reserved_seconds: 60 },
+      monotonicNow: () => monotonic,
+    });
+    await h.start();
+    h.live.event({ type: "session.output_audio.delta", delta: Buffer.alloc(new AudioQueue("pcm16").frameBytes, 23).toString("base64") });
+    await vi.advanceTimersByTimeAsync(20);
+    const name = (h.phone.sent.find((event) => event.event === "mark")?.mark as { name: string }).name;
+    h.phone.event({ event: "mark", stream_id: "stream", mark: { name } });
+    await vi.advanceTimersByTimeAsync(1);
+    // Large provider elapsed usage and a wall-clock jump cannot consume the
+    // separately reserved conversation time or trigger the old pilot cutoff.
+    h.live.event({ type: "session.usage.updated", usage: { seconds: 500 } });
+    vi.setSystemTime(Date.now() - 600000);
+    monotonic += 30000;
+    await vi.advanceTimersByTimeAsync(20);
+    expect(h.live.sent.filter((e) => String(e.content).includes("thirty seconds"))).toHaveLength(1);
+    expect(h.hangup).not.toHaveBeenCalled();
+    monotonic += 30000;
+    await vi.advanceTimersByTimeAsync(20);
+    expect(h.hangup).toHaveBeenCalledOnce();
+    expect(h.store.finish).not.toHaveBeenCalled();
+    h.live.event({ type: "session.closed", usage: { seconds: 501 } });
+    await h.call.done;
+    expect(h.store.finish).toHaveBeenCalledWith("time_limit", null, false);
+    expect(h.hangup).toHaveBeenCalledOnce();
+  });
+  it("keeps missing start acknowledgment unbillable and does not mistake stream stop for phone termination", async () => {
+    const h = harness("pcm16", false, { session: { ...session, access_source: "commercial" } });
+    await h.start();
+    h.live.event({ type: "session.output_audio.delta", delta: Buffer.alloc(new AudioQueue("pcm16").frameBytes, 23).toString("base64") });
+    await vi.advanceTimersByTimeAsync(10040);
+    expect(h.store.customerAudioStarted).toHaveBeenCalledOnce();
+    expect(h.store.customerPlaybackAcknowledged).not.toHaveBeenCalled();
+    expect(h.hangup).toHaveBeenCalledOnce();
+    h.phone.event({ event: "stop", stream_id: "stream" });
+    h.live.event({ type: "session.closed", usage: { seconds: 13 } });
+    await h.call.done;
+    expect(h.store.customerTermination).not.toHaveBeenCalled();
+    expect(h.store.finish).toHaveBeenCalledWith("customer_playback_unconfirmed", "customer_playback_unconfirmed", true);
   });
   it("adopts a prepared provider without starting another session", async () => {
     const preparedSocket = new Socket();

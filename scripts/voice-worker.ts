@@ -184,6 +184,7 @@ const server = createServer((req, res) => {
       model: VOICE_MODEL,
       activeCalls: calls.size,
       actionProtocol: actionClient ? 1 : 0,
+      commercialProtocol: 1,
     }),
   );
 });

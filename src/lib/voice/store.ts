@@ -37,6 +37,9 @@ export async function consumeStreamToken(
     p_token_hash: hashStreamToken(token),
   });
   if (error) throw new Error("voice_stream_authorization_failed");
+  if (data?.access_source === "commercial" &&
+    (data.demo_mode || (data.action_business_id && data.action_business_id !== data.business_id)))
+    throw new Error("voice_stream_identity_invalid");
   return data?.id ? (data as VoiceSession) : null;
 }
 
@@ -47,6 +50,9 @@ export interface VoiceStore {
   heartbeat(): Promise<boolean>;
   audioSent(): Promise<void>;
   playbackAcknowledged(): Promise<void>;
+  customerAudioStarted?(eventId: string, startedAt: string): Promise<void>;
+  customerPlaybackAcknowledged?(eventId: string): Promise<void>;
+  customerTermination?(eventId: string, terminatedAt: string): Promise<void>;
   finish(
     outcome: string,
     error: string | null,
@@ -95,6 +101,19 @@ export function createVoiceStore(
       });
     },
     async heartbeat() {
+      if (session.access_source === "commercial") {
+        // The admission grant survives ordinary preference/billing changes.
+        // The database rechecks emergency controls, identity and its deadline.
+        const allowed = await rpc("voice_session_continuation_allowed", {});
+        if (!allowed) return false;
+        const { data, error } = await db.from("voice_sessions")
+          .update({ heartbeat_at: new Date().toISOString() })
+          .eq("id", session.id)
+          .in("status", ["starting", "active"])
+          .select("id");
+        if (error) throw new Error("voice_heartbeat_failed");
+        return Boolean(data?.length);
+      }
       const results = await Promise.all([
         db
           .from("voice_pilot_settings")
@@ -137,11 +156,27 @@ export function createVoiceStore(
     playbackAcknowledged() {
       return timestamp("playback_acknowledged_at");
     },
+    async customerAudioStarted(eventId, startedAt) {
+      if (session.access_source !== "commercial") return;
+      await rpc("record_voice_customer_start", {
+        p_event_id: eventId, p_started_at: startedAt,
+      });
+    },
+    async customerPlaybackAcknowledged(eventId) {
+      if (session.access_source !== "commercial") return;
+      await rpc("acknowledge_voice_customer_start", { p_event_id: eventId });
+    },
+    async customerTermination(eventId, terminatedAt) {
+      if (session.access_source !== "commercial") return;
+      await rpc("record_voice_customer_termination", {
+        p_event_id: eventId, p_terminated_at: terminatedAt,
+      });
+    },
     async finish(outcome, error, fallback) {
       await rpc("finalize_voice_session", {
         p_outcome: outcome,
         p_error: error,
-        p_fallback: fallback,
+        p_fallback: fallback && (session.access_source !== "commercial" || session.text_fallback_enabled === true),
         p_no_provider_started: false,
       });
     },

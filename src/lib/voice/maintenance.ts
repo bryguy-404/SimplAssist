@@ -24,7 +24,7 @@ export async function maintainVoicePilot(
   const { data: stale, error: staleError } = await db
     .from("voice_sessions")
     .select("*")
-    .eq("business_id", PILOT_BUSINESS_ID)
+    .or(`access_source.eq.commercial,and(access_source.eq.pilot,business_id.eq.${PILOT_BUSINESS_ID})`)
     .eq("response_mode", "voice")
     .neq("status", "closed")
     .lt("heartbeat_at", new Date(now - 45000).toISOString())
@@ -46,7 +46,8 @@ export async function maintainVoicePilot(
       p_session_id: session.id,
       p_outcome: "worker_lost",
       p_error: "voice_heartbeat_expired",
-      p_fallback: session.response_mode === "voice",
+      p_fallback: session.response_mode === "voice" &&
+        (session.access_source !== "commercial" || session.text_fallback_enabled === true),
       p_no_provider_started: false,
     });
     if (finalized) throw new Error("voice_recovery_finalize_failed");
@@ -55,7 +56,7 @@ export async function maintainVoicePilot(
   const { data: ended, error: endedError } = await db
     .from("voice_sessions")
     .select("*")
-    .eq("business_id", PILOT_BUSINESS_ID)
+    .or(`access_source.eq.commercial,and(access_source.eq.pilot,business_id.eq.${PILOT_BUSINESS_ID})`)
     .eq("response_mode", "voice")
     .eq("status", "closed")
     .is("provider_hangup_confirmed_at", null)
@@ -74,6 +75,28 @@ export async function maintainVoicePilot(
       const code = (error as { status?: number }).status;
       if (code !== 404 && code !== 422) return;
     }
+    if (session.access_source === "commercial") {
+      // A successful command is only an accepted hangup request. Confirm the
+      // exact call is no longer alive before releasing its customer hold.
+      try {
+        const result = await telnyx.calls.retrieveStatus(session.call_control_id, VOICE_PROVIDER_OPTIONS);
+        const ended = result.data;
+        if (!ended || ended.is_alive !== false ||
+          ended.call_control_id !== session.call_control_id ||
+          ended.call_session_id !== session.call_session_id) return;
+        const hasEnd = typeof ended.end_time === "string" && Number.isFinite(Date.parse(ended.end_time));
+        const { error } = await db.rpc(hasEnd ? "record_voice_customer_end" : "record_voice_customer_termination", {
+          p_session_id: session.id,
+          p_event_id: `provider-status:${session.id}:${ended.end_time ?? "ended"}`,
+          ...(hasEnd ? { p_ended_at: ended.end_time } : { p_terminated_at: new Date().toISOString() }),
+        });
+        if (error) throw new Error("voice_customer_termination_save_failed");
+      } catch {
+        // Leave this row eligible for a later provider-status lookup.
+        return;
+      }
+      return;
+    }
     const { error } = await db
       .from("voice_sessions")
       .update({ provider_hangup_confirmed_at: new Date().toISOString() })
@@ -86,7 +109,7 @@ export async function maintainVoicePilot(
   const { data: unchecked, error: uncheckedError } = await db
     .from("voice_sessions")
     .select("*")
-    .eq("business_id", PILOT_BUSINESS_ID)
+    .or(`access_source.eq.commercial,and(access_source.eq.pilot,business_id.eq.${PILOT_BUSINESS_ID})`)
     .eq("response_mode", "voice")
     .eq("status", "closed")
     .or(
@@ -167,6 +190,8 @@ export async function maintainVoicePilot(
   );
   if (reconcileError)
     throw new Error("voice_unused_reservation_reconciliation_failed");
+  const { error: customerReconcileError } = await db.rpc("reconcile_voice_customer_usage", { p_limit: 20 });
+  if (customerReconcileError) throw new Error("voice_customer_usage_reconciliation_failed");
   const { error: estimateError } = await db.rpc("estimate_voice_telnyx_usage", {
     p_notice_characters: RECORDING_NOTICE.length,
   });
@@ -174,7 +199,7 @@ export async function maintainVoicePilot(
   const { data: pending, error: pendingError } = await db
     .from("voice_sessions")
     .select("id")
-    .eq("business_id", PILOT_BUSINESS_ID)
+    .or(`access_source.eq.commercial,and(access_source.eq.pilot,business_id.eq.${PILOT_BUSINESS_ID})`)
     .eq("fallback_pending", true)
     .is("fallback_claimed_at", null)
     .limit(4);

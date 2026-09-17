@@ -18,6 +18,7 @@ export function pilotRoutingDependencies(): PilotRoutingDependencies {
     streamSecret: process.env.VOICE_STREAM_SECRET || "",
     profile: process.env.VOICE_AUDIO_PROFILE === "pcmu8" ? "pcmu8" : "pcm16",
     workerReady: () => checkVoiceWorkerReady(workerUrl, token),
+    commercialWorkerReady: () => checkVoiceWorkerReady(workerUrl, token, true),
     prepareWorker:
       process.env.VOICE_ACTIONS_ROLLOUT === "true"
         ? async (sessionId) => {

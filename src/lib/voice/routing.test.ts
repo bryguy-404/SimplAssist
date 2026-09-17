@@ -5,6 +5,8 @@ import {
   drainFallback,
   handlePilotEvent,
   pilotClientState,
+  admitCommercialVoice,
+  startCommercialVoice,
   type PilotRoutingDependencies,
 } from "./routing";
 import { PILOT_BUSINESS_ID, PILOT_PHONE, type VoiceSession } from "./types";
@@ -75,6 +77,7 @@ function fixture(status: VoiceSession["status"] = "ringing") {
   const rpc = vi.fn(async (_name: string, args: Record<string, unknown>) => {
     if (_name === "prepare_preinformed_voice_session")
       return { data: null, error: null };
+    if (_name.startsWith("record_voice_customer_")) return { data: null, error: null };
     if (session.status !== "closed") {
       session.status = "closed";
       session.outcome = args.p_outcome as string;
@@ -94,6 +97,7 @@ function fixture(status: VoiceSession["status"] = "ringing") {
     db: { from, rpc } as unknown as SupabaseClient,
     telnyx: { calls: { actions } } as unknown as Telnyx,
     workerReady: vi.fn().mockResolvedValue(true),
+    commercialWorkerReady: vi.fn().mockResolvedValue(true),
     sendFallback: vi.fn(async (_session, claim) => {
       await claim();
     }),
@@ -112,6 +116,70 @@ function fixture(status: VoiceSession["status"] = "ringing") {
 }
 
 describe("existing-number voice routing", () => {
+  it("requires a matching commercial admission identity and the upgraded worker", async () => {
+    const f = fixture();
+    f.session.access_source = "commercial";
+    f.rpc.mockResolvedValue({ data: f.session, error: null } as never);
+    const args = { businessId: f.session.business_id, caller: f.session.caller_phone, called: f.session.called_phone, callControlId: f.session.call_control_id, callSessionId: f.session.call_session_id };
+    expect(await admitCommercialVoice(f.deps, args)).toMatchObject({ access_source: "commercial" });
+    expect(f.rpc).toHaveBeenCalledWith("admit_voice_commercial", expect.objectContaining({ p_worker_ready: true }));
+    f.rpc.mockResolvedValue({ data: { ...f.session, business_id: "other" }, error: null } as never);
+    await expect(admitCommercialVoice(f.deps, args)).rejects.toThrow("voice_commercial_identity_invalid");
+  });
+  it("freezes a closed-rollout text denial without probing the worker", async () => {
+    const f = fixture();
+    Object.assign(f.session, { access_source: "commercial", response_mode: "text", text_fallback_enabled: false });
+    f.rpc.mockResolvedValue({ data: f.session, error: null } as never);
+    const result = await admitCommercialVoice(f.deps, { businessId: f.session.business_id,
+      caller: f.session.caller_phone, called: f.session.called_phone, callControlId: f.session.call_control_id,
+      callSessionId: f.session.call_session_id }, false);
+    expect(result).toMatchObject({ response_mode: "text", text_fallback_enabled: false });
+    expect(f.deps.commercialWorkerReady).not.toHaveBeenCalled();
+    expect(f.rpc).toHaveBeenCalledWith("admit_voice_commercial", expect.objectContaining({ p_worker_ready: false }));
+  });
+  it("starts commercial voice after ringing without preparation or a prior-disclosure bypass", async () => {
+    const f = fixture();
+    f.session.access_source = "commercial";
+    f.session.prior_disclosure_acknowledged_at = "2026-09-13T00:00:00Z";
+    await startCommercialVoice(f.deps, f.session);
+    expect(f.actions.startPlayback).not.toHaveBeenCalled();
+    expect(f.rpc).not.toHaveBeenCalledWith("prepare_preinformed_voice_session", expect.anything());
+    expect(f.actions.speak).toHaveBeenCalledOnce();
+    expect(f.actions.startRecording).not.toHaveBeenCalled();
+    await handlePilotEvent(f.deps, "call.speak.ended", f.payload("notice", { status: "completed" }), true);
+    expect(f.deps.commercialWorkerReady).toHaveBeenCalledOnce();
+    expect(new URL(f.actions.startStreaming.mock.calls[0][1].stream_url).searchParams.has("opening_ringback")).toBe(false);
+  });
+  it("preserves original signed commercial end evidence across retries without arrival-time writes", async () => {
+    const f = fixture("active");
+    f.session.access_source = "commercial";
+    const payload = f.payload("conversation", { end_time: "2026-09-14T12:01:30Z" });
+    const evidence = { eventId: "telnyx-end-1", occurredAt: "2026-09-14T12:01:31Z" };
+    await handlePilotEvent(f.deps, "call.hangup", payload, true, evidence);
+    await handlePilotEvent(f.deps, "call.hangup", payload, true, evidence);
+    expect(f.rpc).toHaveBeenCalledWith("record_voice_customer_end", {
+      p_session_id: f.session.id, p_event_id: "telnyx-end-1", p_ended_at: "2026-09-14T12:01:30Z",
+    });
+    expect(f.session).not.toHaveProperty("phone_ended_at");
+    expect(f.deps.sendFallback).not.toHaveBeenCalled();
+  });
+  it("does not invent a customer end timestamp when a hangup lacks original evidence", async () => {
+    const f = fixture("active");
+    f.session.access_source = "commercial";
+    await handlePilotEvent(f.deps, "call.hangup", f.payload("conversation"), true, { eventId: "end-no-time" });
+    expect(f.rpc).toHaveBeenCalledWith("record_voice_customer_termination", expect.objectContaining({ p_event_id: "end-no-time" }));
+    expect(f.rpc).not.toHaveBeenCalledWith("record_voice_customer_end", expect.anything());
+  });
+  it.each([false, true])("honors the frozen denied-voice text fallback=%s after hangup and duplicate recording callbacks", async (enabled) => {
+    const f = fixture();
+    f.session.access_source = "commercial";
+    f.session.response_mode = "text";
+    f.session.text_fallback_enabled = enabled;
+    await handlePilotEvent(f.deps, "call.hangup", f.payload("voicemail"), true);
+    await handlePilotEvent(f.deps, "call.recording.saved", f.payload("voicemail", { recording_id: "voicemail" }), true);
+    expect(f.deps.sendFallback).toHaveBeenCalledTimes(enabled ? 1 : 0);
+    expect(f.recordings).toEqual([]);
+  });
   it("starts the live voice directly for a previously informed tester without inventing a spoken notice", async () => {
     const f = fixture();
     const prepared = {

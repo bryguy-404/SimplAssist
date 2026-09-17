@@ -14,7 +14,10 @@ const mocks = vi.hoisted(() => ({
   getDashboardBusinessContext: vi.fn(),
   from: vi.fn(),
   consoleError: vi.fn(),
+  loadVoiceLeadReviews: vi.fn(),
 }));
+
+vi.mock("@/lib/voice/leadReview.server", () => ({ loadVoiceLeadReviews: mocks.loadVoiceLeadReviews }));
 
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("next/link", () => ({
@@ -99,6 +102,10 @@ function event({
     occurred_at: occurredAt,
     event_type: "link_sent",
     conversation_id: conversationId,
+    contact_id: null as string | null,
+    origin_kind: "conversation" as string,
+    voice_action_id: null as string | null,
+    source_conversation_id: null as string | null,
     contact,
   };
 }
@@ -132,6 +139,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-08-10T12:00:00.000Z"));
   mocks.requireWorkspacePageAccess.mockResolvedValue(undefined);
+  mocks.loadVoiceLeadReviews.mockResolvedValue(new Map());
   mocks.redirect.mockImplementation((path: string) => {
     throw new Error(`redirect:${path}`);
   });
@@ -200,7 +208,7 @@ describe("LeadsPage", () => {
     expect(
       String(list.select.mock.calls[0]?.[0]).replace(/\s+/g, " ").trim()
     ).toBe(
-      "id, occurred_at, event_type, conversation_id, contact:contacts!goal_events_contact_id_fkey ( name, phone_number, email )"
+      "id, occurred_at, event_type, conversation_id, contact_id, origin_kind, voice_action_id, source_conversation_id, contact:contacts!goal_events_contact_id_fkey ( name, phone_number, email )"
     );
     expect(list.eq.mock.calls).toEqual([
       ["business_id", BUSINESS.id],
@@ -233,6 +241,34 @@ describe("LeadsPage", () => {
     );
     expect(monthlyCount.order).not.toHaveBeenCalled();
     expect(monthlyCount.limit).not.toHaveBeenCalled();
+  });
+
+  it("distinguishes voice-origin delivery and confirmed call identity while linking the call, SMS and stored contact", async () => {
+    const row = { ...event({ id: "voice-lead", conversationId: "text-conversation" }), origin_kind: "voice_action", voice_action_id: "signup-action", source_conversation_id: "voice-conversation", contact_id: "contact-id", contact: { name: "Stored identity", email: "stored@example.test", phone_number: "+15555550101" } };
+    configureQueries({ events: [row as ReturnType<typeof event>], count: 1 });
+    mocks.loadVoiceLeadReviews.mockResolvedValue(new Map([[row.id, {
+      confirmedContact: { name: "Confirmed identity", email: "confirmed@example.test", phone: "+15555550101", conflicts: ["name", "email"] },
+      sourceConversationId: "voice-conversation",
+      status: { label: "Signup text delivered", detail: "This does not confirm a completed signup.", tone: "success" },
+    }]]));
+    const html = renderToStaticMarkup(await LeadsPage());
+    expect(html).toContain("Voice call → SMS");
+    expect(html).toContain("Confirmed identity"); expect(html).toContain("Stored identity");
+    expect(html).toContain("Signup text delivered"); expect(html).toContain("does not confirm a completed signup");
+    expect(html).toContain('href="/conversations?conversation=voice-conversation"');
+    expect(html).toContain('href="/conversations?conversation=text-conversation"');
+    expect(html).toContain('href="/contacts?contact=contact-id"');
+    expect(html).toContain('id="lead-voice-lead"');
+  });
+
+  it("keeps historical leads visible when call metadata is unavailable without claiming delivery", async () => {
+    const row = { ...event({ id: "voice-lead" }), origin_kind: "voice_action", voice_action_id: "signup-action", source_conversation_id: "voice-conversation" };
+    configureQueries({ events: [row as ReturnType<typeof event>], count: 1 });
+    mocks.loadVoiceLeadReviews.mockRejectedValue(new Error("lookup unavailable"));
+    const html = renderToStaticMarkup(await LeadsPage());
+    expect(html).toContain("Call details temporarily unavailable");
+    expect(html).toContain("Signup link sent");
+    expect(html).not.toContain("Signup text delivered");
   });
 
   it("renders the contact fallbacks, local date/time, event copy, and conversation linkage", async () => {

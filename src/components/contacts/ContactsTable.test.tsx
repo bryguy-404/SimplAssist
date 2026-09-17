@@ -112,6 +112,13 @@ beforeEach(() => {
 });
 
 describe("ContactsTable canonical lead statuses", () => {
+  it("opens only an existing contact when reached from a call or lead", () => {
+    const selected = contact("Selected");
+    const tree = ContactsTable({ contacts: [selected], conversations: [], initialSelectedId: selected.id });
+    expect(renderToStaticMarkup(tree)).toContain("Contact detail");
+    harness.state = []; harness.stateCursor = 0;
+    expect(renderToStaticMarkup(ContactsTable({ contacts: [selected], conversations: [], initialSelectedId: "foreign-contact" }))).not.toContain("Contact detail");
+  });
   it("filters hot leads by lead_status even when historical scores disagree", () => {
     const rows = [
       contact("Numeric Threshold Only", {

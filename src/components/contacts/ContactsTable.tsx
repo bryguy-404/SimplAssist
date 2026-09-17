@@ -43,6 +43,7 @@ interface ContactWithCount extends Contact {
 interface ContactsTableProps {
   contacts: ContactWithCount[];
   conversations: Conversation[];
+  initialSelectedId?: string;
 }
 
 function relativeTime(date: string): string {
@@ -80,17 +81,24 @@ function LeadBadge({ status }: { status: LeadStatus }) {
 export default function ContactsTable({
   contacts: initialContacts,
   conversations: allConversations,
+  initialSelectedId,
 }: ContactsTableProps) {
   const [contacts, setContacts] = useState(initialContacts);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [sort, setSort] = useState<Sort>("recent");
-  const [selectedContact, setSelectedContact] = useState<ContactWithCount | null>(null);
+  const [selectedContact, setSelectedContact] = useState<ContactWithCount | null>(
+    initialContacts.find((contact) => contact.id === initialSelectedId) || null,
+  );
 
   // Keep contacts in sync when props change
   useEffect(() => {
     setContacts(initialContacts);
   }, [initialContacts]);
+
+  useEffect(() => {
+    if (initialSelectedId) setSelectedContact(initialContacts.find((contact) => contact.id === initialSelectedId) || null);
+  }, [initialSelectedId, initialContacts]);
 
   const filtered = useMemo(() => {
     let result = contacts;

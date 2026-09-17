@@ -30,7 +30,7 @@ import ContactsPage from "./page";
 const BUSINESS_ID = "business-1";
 
 interface QueryResult {
-  data: unknown[];
+  data: unknown;
   error: unknown;
 }
 
@@ -38,6 +38,7 @@ interface QueryRecorder {
   select: ReturnType<typeof vi.fn>;
   eq: ReturnType<typeof vi.fn>;
   order: ReturnType<typeof vi.fn>;
+  maybeSingle: ReturnType<typeof vi.fn>;
   then: Promise<QueryResult>["then"];
   catch: Promise<QueryResult>["catch"];
 }
@@ -47,6 +48,7 @@ function query(result: QueryResult): QueryRecorder {
   recorder.select = vi.fn(() => recorder);
   recorder.eq = vi.fn(() => recorder);
   recorder.order = vi.fn(() => recorder);
+  recorder.maybeSingle = vi.fn().mockResolvedValue(result);
   const promise = Promise.resolve(result);
   recorder.then = promise.then.bind(promise);
   recorder.catch = promise.catch.bind(promise);
@@ -86,6 +88,33 @@ beforeEach(() => {
 });
 
 describe("ContactsPage", () => {
+  it("resolves an omitted deep-linked contact with one bounded owner-scoped lookup", async () => {
+    const selected = query({ data: CONTACT, error: null });
+    mocks.from.mockReturnValueOnce(query({ data: [], error: null }))
+      .mockReturnValueOnce(query({ data: [], error: null })).mockReturnValueOnce(selected);
+    mocks.getDashboardBusinessContext.mockResolvedValue({ status: "resolved", supabase: { from: mocks.from }, user: { id: "user-1" }, business: { id: BUSINESS_ID } });
+    renderToStaticMarkup(await ContactsPage({ searchParams: { contact: CONTACT.id } }));
+    expect(selected.eq.mock.calls).toEqual([["business_id", BUSINESS_ID], ["id", CONTACT.id]]);
+    expect(selected.maybeSingle).toHaveBeenCalledOnce();
+    expect(mocks.contactsTable).toHaveBeenCalledWith(expect.objectContaining({ contacts: [{ ...CONTACT, conversation_count: 0 }], initialSelectedId: CONTACT.id }), expect.anything());
+  });
+
+  it.each([{ data: null, error: null }, { data: null, error: { message: "lookup failed" } }])("does not display a foreign, deleted or unreadable deep-linked contact", async (result) => {
+    const selected = query(result);
+    mocks.from.mockReturnValueOnce(query({ data: [], error: null }))
+      .mockReturnValueOnce(query({ data: [], error: null })).mockReturnValueOnce(selected);
+    mocks.getDashboardBusinessContext.mockResolvedValue({ status: "resolved", supabase: { from: mocks.from }, user: { id: "user-1" }, business: { id: BUSINESS_ID } });
+    renderToStaticMarkup(await ContactsPage({ searchParams: { contact: "foreign-contact" } }));
+    expect(selected.eq).toHaveBeenCalledWith("business_id", BUSINESS_ID);
+    expect(mocks.contactsTable).toHaveBeenCalledWith(expect.objectContaining({ contacts: [] }), expect.anything());
+  });
+
+  it("does not repeat a contact lookup when the selected contact is already in the list", async () => {
+    mocks.from.mockReturnValueOnce(query({ data: [CONTACT], error: null })).mockReturnValueOnce(query({ data: [], error: null }));
+    mocks.getDashboardBusinessContext.mockResolvedValue({ status: "resolved", supabase: { from: mocks.from }, user: { id: "user-1" }, business: { id: BUSINESS_ID } });
+    renderToStaticMarkup(await ContactsPage({ searchParams: { contact: CONTACT.id } }));
+    expect(mocks.from).toHaveBeenCalledTimes(2);
+  });
   it("keeps the full-row contact query and supplies authoritative lead columns to both surfaces", async () => {
     const contactsQuery = query({ data: [CONTACT], error: null });
     const conversationsQuery = query({ data: [CONVERSATION], error: null });

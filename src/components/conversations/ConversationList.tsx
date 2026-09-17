@@ -172,7 +172,7 @@ export function ConversationList({
                 {/* Channel icon */}
                 <div className="mt-0.5 flex-shrink-0">
                   {conv.channel === "voice" ? (
-                    <Phone aria-label="Voice call" className="h-4 w-4" />
+                    <Phone aria-label="AI voice call" className="h-4 w-4" />
                   ) : conv.channel === "sms" ? (
                     <Phone className="h-5 w-5 text-stone-400 dark:text-[#bdbdbf]" />
                   ) : (
@@ -206,7 +206,7 @@ export function ConversationList({
                       )}
                     >
                       {conv.channel === "voice" ? (
-                        <><Phone className="h-3 w-3" /> Voice call</>
+                        <><Phone className="h-3 w-3" /> AI voice call</>
                       ) : webChatLocked || smsLocked ? (
                         <>
                           <Lock className="h-3 w-3" /> {smsLocked ? "Paused" : "Locked"}

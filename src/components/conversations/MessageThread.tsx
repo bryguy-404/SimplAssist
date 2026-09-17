@@ -17,6 +17,7 @@ import {
   getConversationAccessState,
   smsPlanLockedMessage,
 } from "./accessState";
+import { VoiceCallReviewPanel } from "./VoiceCallReview";
 
 interface MessageThreadProps {
   conversation: ConversationWithContact;
@@ -72,6 +73,7 @@ export function MessageThread({
   const [toggling, setToggling] = useState(false);
   const [toggleError, setToggleError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messageScrollRef = useRef<HTMLDivElement>(null);
   const supabase = createBrowserClient();
   const smsBlocked = conversation.channel === "sms" && !smsReady;
   const {
@@ -99,6 +101,8 @@ export function MessageThread({
       return;
     }
 
+    let current = true;
+    setMessages([]);
     async function fetchMessages() {
       const { data } = await supabase
         .from("messages")
@@ -106,14 +110,15 @@ export function MessageThread({
         .eq("conversation_id", conversation.id)
         .order("created_at", { ascending: true });
 
-      if (data) setMessages(data as Message[]);
+      if (current && data) setMessages(data as Message[]);
     }
 
     fetchMessages();
     setIsAiHandling(conversation.is_ai_handling);
     setToggleError(null);
     setSendError(null);
-  }, [conversation.id, conversation.is_ai_handling, supabase, demoMessages]);
+    return () => { current = false; };
+  }, [conversation.id, conversation.channel, conversation.is_ai_handling, supabase, demoMessages]);
 
   // Real-time subscription
   useEffect(() => {
@@ -141,12 +146,17 @@ export function MessageThread({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [conversation.id, supabase, demoMessages]);
+  }, [conversation.id, conversation.channel, supabase, demoMessages]);
 
   // Auto-scroll
   useEffect(() => {
+    if (conversation.channel === "voice") return;
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, conversation.channel]);
+
+  useEffect(() => {
+    if (conversation.channel === "voice") messageScrollRef.current?.scrollTo({ top: 0 });
+  }, [conversation.id, conversation.channel]);
 
   async function handleSend() {
     if (
@@ -275,28 +285,28 @@ export function MessageThread({
       : "Unknown");
 
   return (
-    <div className="flex h-full flex-col bg-white dark:bg-transparent">
+    <div className="flex h-full min-w-0 flex-col bg-white dark:bg-transparent">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-[#ece4d8] dark:border-white/[0.10] px-4 py-3">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-stone-100 dark:bg-white/[0.06]">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#ece4d8] dark:border-white/[0.10] px-4 py-3">
+        <div className="flex w-full min-w-0 items-center gap-3 sm:w-auto sm:flex-1">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-stone-100 dark:bg-white/[0.06]">
             {conversation.channel === "sms" || conversation.channel === "voice" ? (
               <Phone className="h-5 w-5 text-stone-500 dark:text-[#bdbdbf]" />
             ) : (
               <MessageCircle className="h-5 w-5 text-stone-500 dark:text-[#bdbdbf]" />
             )}
           </div>
-          <div>
-            <h2 className="text-sm font-semibold text-stone-900 dark:text-[#f5f5f5]">{contactName}</h2>
-            <div className="flex items-center gap-2 text-xs text-stone-500 dark:text-[#bdbdbf]">
+          <div className="min-w-0 flex-1">
+            <h2 className="break-words text-sm font-semibold text-stone-900 dark:text-[#f5f5f5]">{contactName}</h2>
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-stone-500 dark:text-[#bdbdbf]">
               {conversation.contact?.phone_number && (
-                <span>{formatPhoneNumber(conversation.contact.phone_number)}</span>
+                <span className="whitespace-nowrap">{formatPhoneNumber(conversation.contact.phone_number)}</span>
               )}
               {conversation.contact?.email && (
-                <span>· {conversation.contact.email}</span>
+                <span className="min-w-0 break-all">· {conversation.contact.email}</span>
               )}
-              <span>
-                · {conversation.channel === "voice" ? "Voice" : conversation.channel === "sms" ? "SMS" : "Web Chat"}
+              <span className="whitespace-nowrap">
+                · {conversation.channel === "voice" ? "AI voice call" : conversation.channel === "sms" ? "SMS" : "Web Chat"}
               </span>
               <span
                 className={cn(
@@ -370,7 +380,13 @@ export function MessageThread({
       )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div ref={messageScrollRef} className="min-w-0 flex-1 overflow-y-auto px-4 py-4">
+        {conversation.channel === "voice" && !demoMessages ? (
+          <div className="mb-6"><VoiceCallReviewPanel key={conversation.id} conversationId={conversation.id} />
+            <h3 className="mb-2 mt-6 text-sm font-semibold">Call transcript</h3>
+            <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">Transcripts may contain errors. Assistant text does not prove every word was heard; use the recording to review interruptions and playback.</p>
+          </div>
+        ) : null}
         {messages.length === 0 ? (
           <div className="flex h-full items-center justify-center text-sm text-stone-400 dark:text-[#bdbdbf]">
             No messages in this conversation yet.

@@ -4,7 +4,7 @@ import ContactsTable from "@/components/contacts/ContactsTable";
 import { getDashboardBusinessContext } from "@/lib/dashboard/context";
 import { requireWorkspacePageAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
-export default async function ContactsPage() {
+export default async function ContactsPage({ searchParams }: { searchParams?: { contact?: string | string[] } } = {}) {
   await requireWorkspacePageAccess();
   const context = await getDashboardBusinessContext();
   if (context.status === "unauthenticated") redirect("/login");
@@ -27,6 +27,14 @@ export default async function ContactsPage() {
 
   const contacts = contactsResult.data ?? [];
   const conversations = conversationsResult.data ?? [];
+  const selectedContactId = typeof searchParams?.contact === "string" ? searchParams.contact : undefined;
+  // The bulk list can be capped by the provider. Resolve a deep link separately
+  // without widening its ownership scope or loading the entire contact history.
+  if (selectedContactId && !contacts.some((contact) => contact.id === selectedContactId)) {
+    const selected = await supabase.from("contacts").select("*")
+      .eq("business_id", business.id).eq("id", selectedContactId).maybeSingle();
+    if (!selected.error && selected.data) contacts.unshift(selected.data);
+  }
 
   // Compute conversation count per contact
   const countMap: Record<string, number> = {};
@@ -52,6 +60,7 @@ export default async function ContactsPage() {
       <ContactsTable
         contacts={contactsWithCount}
         conversations={conversations}
+        initialSelectedId={selectedContactId}
       />
     </div>
   );

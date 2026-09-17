@@ -71,12 +71,12 @@ export function InboxLayout({
       {/* Message thread - right panel */}
       <div
         className={cn(
-          "h-full flex-1 md:block",
+          "h-full min-w-0 flex-1 md:block",
           selected ? "block" : "hidden"
         )}
       >
         {selected ? (
-          <div className="flex h-full flex-col">
+          <div className="flex h-full min-w-0 flex-col">
             {/* Mobile back button */}
             <div className="flex items-center border-b border-[#ece4d8] dark:border-white/[0.10] px-3 py-2 md:hidden">
               <button
@@ -87,7 +87,7 @@ export function InboxLayout({
                 Back
               </button>
             </div>
-            <div className="flex-1 overflow-hidden">
+            <div className="min-w-0 flex-1 overflow-hidden">
               <MessageThread
                 conversation={selected}
                 businessId={businessId}

@@ -86,6 +86,8 @@ export default function ContactDetail({
   const [notes, setNotes] = useState(contact.notes ?? "");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const hasVoiceHistory = conversations.some((conversation) => conversation.channel === "voice");
 
   async function saveName() {
     setEditingName(false);
@@ -147,10 +149,21 @@ export default function ContactDetail({
   }
 
   async function deleteContact() {
+    if (hasVoiceHistory || saving) return;
     setSaving(true);
-    await supabase.from("contacts").delete().eq("id", contact.id);
-    setSaving(false);
-    onDeleted(contact.id);
+    setDeleteError(null);
+    try {
+      const { data, error } = await supabase.from("contacts").delete().eq("id", contact.id).select("id");
+      if (error || !data?.some((row: { id: string }) => row.id === contact.id)) {
+        setDeleteError("The contact could not be deleted. Please refresh and try again.");
+        return;
+      }
+      onDeleted(contact.id);
+    } catch {
+      setDeleteError("The contact could not be deleted. Please refresh and try again.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -258,13 +271,13 @@ export default function ContactDetail({
               </label>
               <p className={`mt-1 flex items-center gap-1.5 text-sm ${ink}`}>
                 {contact.source_channel === "voice" ? (
-                  <Phone aria-label="Voice call" className="h-4 w-4" />
+                  <Phone aria-label="AI voice call" className="h-4 w-4" />
                 ) : contact.source_channel === "sms" ? (
                   <Phone className="h-4 w-4 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
                 ) : (
                   <MessageCircle className="h-4 w-4 text-stone-500 dark:text-[#bdbdbf]" />
                 )}
-                {contact.source_channel === "voice" ? "Voice" : contact.source_channel === "sms" ? "SMS" : "Web Chat"}
+                {contact.source_channel === "voice" ? "AI voice call" : contact.source_channel === "sms" ? "SMS" : "Web Chat"}
               </p>
             </div>
             <div>
@@ -337,7 +350,7 @@ export default function ContactDetail({
                       )}
                       <div>
                         <p className={`text-sm font-medium ${ink}`}>
-                          {conv.channel === "voice" ? "Voice" : conv.channel === "sms" ? "SMS" : "Web Chat"}
+                          {conv.channel === "voice" ? "AI voice call" : conv.channel === "sms" ? "SMS" : "Web Chat"}
                         </p>
                         <p className={`text-xs ${body}`}>
                           {relativeTime(conv.last_message_at)}
@@ -366,7 +379,9 @@ export default function ContactDetail({
 
           {/* Delete */}
           <div className="border-t border-[#ece4d8] dark:border-white/[0.10] pt-4">
-            {confirmDelete ? (
+            {hasVoiceHistory ? (
+              <p className={`text-sm ${body}`}>Contacts with voice call history cannot be deleted here.</p>
+            ) : confirmDelete ? (
               <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                 <p className="text-sm text-red-600 dark:text-red-400">
                   Delete this contact and all their data?
@@ -394,6 +409,7 @@ export default function ContactDetail({
                 Delete Contact
               </button>
             )}
+            {deleteError ? <p role="alert" className="mt-3 text-sm text-red-600 dark:text-red-400">{deleteError}</p> : null}
           </div>
 
           {saving && (

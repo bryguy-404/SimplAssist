@@ -4,6 +4,7 @@ import {
   PILOT_BUSINESS_ID,
   PILOT_PHONE,
   RECORDING_NOTICE,
+  usesPublicDisclosure,
   type VoiceSession,
 } from "./types";
 import { issueStreamToken } from "./store";
@@ -44,7 +45,7 @@ export async function checkVoiceWorkerReady(
     const body = await response.json();
     return (
       body.ready === true &&
-      (!commercial || (body.commercialProtocol === 1 && body.actionProtocol === 1)) &&
+      (!commercial || (body.commercialProtocol === 2 && body.actionProtocol === 1)) &&
       (process.env.VOICE_ACTIONS_ROLLOUT !== "true" ||
         body.actionProtocol === 1) &&
       body.model === "gpt-live-1" &&
@@ -80,6 +81,21 @@ export async function admitCommercialVoice(
 export async function startCommercialVoice(deps: PilotRoutingDependencies, session: VoiceSession) {
   if (session.access_source !== "commercial" || session.response_mode !== "voice")
     throw new Error("voice_commercial_identity_invalid");
+  if (session.disclosure_version === 1) {
+    if (!(await deps.commercialWorkerReady?.())) throw new Error("voice_worker_unavailable");
+    await transition(deps, session, ["ringing", "notice"], {
+      status: "notice", media_start_requested_at: session.media_start_requested_at ?? new Date().toISOString(),
+    });
+    // Keep useful connecting audio while the one Marin session starts. The
+    // worker stops it only after real opening audio is buffered.
+    await deps.telnyx.calls.actions.startPlayback(session.call_control_id, {
+      audio_url: new URL("/audio/voicemail-ringback-11s-v1.wav", deps.appUrl).toString(),
+      loop: 5, command_id: `voice-public-connect-${session.id}`,
+      client_state: pilotClientState(session, "public_disclosure"),
+    }, VOICE_PROVIDER_OPTIONS);
+    await startMedia(deps, session);
+    return;
+  }
   await handlePilotEvent(deps, "call.playback.ended", {
     call_control_id: session.call_control_id,
     call_session_id: session.call_session_id,
@@ -106,19 +122,22 @@ export async function admitPilot(
   ] = await Promise.all([
     deps.db
       .from("voice_pilot_settings")
-      .select("enabled")
+      .select("enabled,retired_at")
       .eq("business_id", args.businessId)
       .maybeSingle(),
     deps.db
       .from("voice_pilot_testers")
-      .select("phone_number")
+      .select("phone_number,public_notice_rehearsal_until")
       .eq("business_id", args.businessId)
       .eq("phone_number", args.caller)
       .maybeSingle(),
   ]);
   if (settingsError || testerError)
     throw new Error("voice_admission_lookup_failed");
-  const ready = settings?.enabled && tester ? await deps.workerReady() : false;
+  const rehearsing = tester?.public_notice_rehearsal_until && Date.parse(tester.public_notice_rehearsal_until) > Date.now();
+  const ready = settings?.enabled && !settings.retired_at && tester
+    ? rehearsing ? await deps.commercialWorkerReady?.() : await deps.workerReady()
+    : false;
   const { data, error } = await deps.db.rpc("admit_voice_pilot", {
     p_business_id: args.businessId,
     p_call_control_id: args.callControlId,
@@ -314,7 +333,7 @@ export async function handlePilotEvent(
       );
       // Request preparation after ringing is queued. The worker independently
       // checks the default-off switch and prior tester disclosure.
-      if (session.access_source !== "commercial" && deps.prepareWorker)
+      if (session.access_source !== "commercial" && !usesPublicDisclosure(session) && deps.prepareWorker)
         await deps.prepareWorker(session.id).catch(() => {});
     } else if (
       eventType === "call.playback.ended" &&
@@ -331,6 +350,13 @@ export async function handlePilotEvent(
         return true;
       if (payload.status !== "completed")
         throw new Error("voice_ringback_failed");
+      if (session.public_notice_rehearsal && usesPublicDisclosure(session)) {
+        if (!(await deps.commercialWorkerReady?.())) throw new Error("voice_worker_unavailable");
+        await transition(deps, session, ["ringing", "notice"], { status: "notice",
+          media_start_requested_at: session.media_start_requested_at ?? new Date().toISOString() });
+        await startMedia(deps, session);
+        return true;
+      }
       if (session.access_source !== "commercial" && (
         session.status === "ringing" ||
         session.prior_disclosure_acknowledged_at
@@ -380,6 +406,7 @@ export async function handlePilotEvent(
       );
     } else if (
       eventType === "call.speak.ended" &&
+      !usesPublicDisclosure(session) &&
       state.voicePilotPhase === "notice" &&
       ["notice", "starting"].includes(session.status)
     ) {
@@ -437,11 +464,11 @@ async function startMedia(
   if (url.protocol !== "https:") throw new Error("voice_worker_url_invalid");
   url.protocol = "wss:";
   url.searchParams.set("token", token);
-  if (session.access_source !== "commercial" && session.prior_disclosure_acknowledged_at)
+  if ((session.access_source !== "commercial" && session.prior_disclosure_acknowledged_at) || usesPublicDisclosure(session))
     url.searchParams.set("opening_ringback", "v1");
   // Recording starts after the notice or verified prior tester acknowledgment.
   // Store only the provider recording ID when its callback arrives.
-  await deps.telnyx.calls.actions.startRecording(
+  if (!usesPublicDisclosure(session)) await deps.telnyx.calls.actions.startRecording(
     session.call_control_id,
     {
       channels: "dual",

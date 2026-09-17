@@ -1,3 +1,4 @@
+import { createDisclosureReplyClassifier } from "../src/lib/voice/disclosure";
 import { VoicePreparations } from "../src/lib/voice/preparation";
 import { createVoiceActionClient } from "../src/lib/voice/actionClient";
 import { createServer } from "node:http";
@@ -8,7 +9,7 @@ import { WebSocketServer } from "ws";
 import { consumeStreamToken, createVoiceStore } from "../src/lib/voice/store";
 import { createVoiceAnswerer } from "../src/lib/voice/answer";
 import { LiveCall } from "../src/lib/voice/liveSession";
-import { VOICE_MODEL } from "../src/lib/voice/types";
+import { VOICE_MODEL, usesPublicDisclosure } from "../src/lib/voice/types";
 import type { AudioProfileName } from "../src/lib/voice/audio";
 
 function required(name: string) {
@@ -52,6 +53,7 @@ const answer = createVoiceAnswerer(
   required("ANTHROPIC_API_KEY"),
   actionClient,
 );
+const classifyDisclosureReply = createDisclosureReplyClassifier(db, required("ANTHROPIC_API_KEY"));
 const calls = new Set<LiveCall>();
 const preparations = new VoicePreparations(
   db,
@@ -152,7 +154,7 @@ const server = createServer((req, res) => {
           throw new Error("invalid_id");
         if (
           !preparations.has(input.sessionId) &&
-          calls.size + preparations.size + pendingUpgrades >= 2
+          calls.size + preparations.size + pendingUpgrades >= 4
         ) {
           res.writeHead(503).end();
           return;
@@ -184,7 +186,7 @@ const server = createServer((req, res) => {
       model: VOICE_MODEL,
       activeCalls: calls.size,
       actionProtocol: actionClient ? 1 : 0,
-      commercialProtocol: 1,
+      commercialProtocol: 2,
     }),
   );
 });
@@ -199,7 +201,7 @@ server.on("upgrade", (req, socket, head) => {
     draining ||
     Date.now() - readyAt > 45000 ||
     Date.now() - maintenanceHealthyAt > 90000 ||
-    calls.size + pendingUpgrades >= 2
+    calls.size + pendingUpgrades >= 4
   ) {
     socket.end("HTTP/1.1 503 Service Unavailable\r\n\r\n");
     return;
@@ -261,7 +263,7 @@ server.on("upgrade", (req, socket, head) => {
                   .then(() => undefined)
             : undefined,
           stopConnectingRingback:
-            openingRingback && session.prior_disclosure_acknowledged_at
+            openingRingback && (session.prior_disclosure_acknowledged_at || usesPublicDisclosure(session))
               ? async () => {
                   await telnyx.calls.actions.stopPlayback(
                     session.call_control_id,
@@ -279,6 +281,18 @@ server.on("upgrade", (req, socket, head) => {
               phase,
               elapsedMs,
             }),
+          classifyDisclosureReply: (requestId, reply, signal) => classifyDisclosureReply(session, requestId, reply, signal),
+          startRecording: async () => {
+            await telnyx.calls.actions.startRecording(session.call_control_id, {
+              channels: "dual", format: "mp3", recording_track: "both", max_length: session.reserved_seconds + 30,
+              play_beep: false, command_id: `voice-record-${session.id}`,
+            }, { timeout: 5000, maxRetries: 0 });
+          },
+          stopRecording: async () => {
+            await telnyx.calls.actions.stopRecording(session.call_control_id, {
+              command_id: `voice-record-stop-${session.id}`,
+            }, { timeout: 5000, maxRetries: 0 });
+          },
           hangup: async () => {
             await telnyx.calls.actions.hangup(session.call_control_id, {
               command_id: `voice-end-${session.id}`,

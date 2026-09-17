@@ -13,8 +13,8 @@ import {
   type AudioProfileName,
 } from "./audio";
 import { CallTranscript, type VoiceTranscriptSnapshot } from "./transcript";
-import { buildLiveGreeting, buildLiveInstructions } from "./conversationStyle";
-import { VOICE_MODEL, type VoiceSession } from "./types";
+import { buildLiveGreeting, buildLiveInstructions, publicDisclosureInstruction, publicDisclosureComplete } from "./conversationStyle";
+import { VOICE_MODEL, usesPublicDisclosure, type VoiceSession } from "./types";
 import type { VoiceStore } from "./store";
 
 export interface LiveSessionOptions {
@@ -37,6 +37,9 @@ export interface LiveSessionOptions {
     eventId: string,
     callerEndMs: number,
   ) => Promise<void>;
+  startRecording?: () => Promise<void>;
+  stopRecording?: () => Promise<void>;
+  classifyDisclosureReply?: (requestId: string, reply: string, signal: AbortSignal) => Promise<"refuse" | "repeat">;
   hangup: () => Promise<void>;
   onClosed: () => void;
   stopConnectingRingback?: () => Promise<void>;
@@ -48,7 +51,16 @@ export interface LiveSessionOptions {
 
 /** Continuous audio bridge. There is no synthetic text-turn/commit loop. */
 export class LiveCall {
-  private readonly transcript = new CallTranscript();
+  private transcript = new CallTranscript();
+  private readonly publicOpening: boolean;
+  private disclosure: {
+    phase: "speaking" | "interrupted" | "recording" | "handoff" | "active";
+    attempt: number; spoken: string; reply: string; mark: string | null;
+    audibleSent: boolean; inputGeneration: number; inputQuietAt: number;
+    classifierBusy: boolean; instructionAccepted: boolean; pendingReply: boolean; handoffAck: string | null; activationPending: boolean; handoffCommitted: boolean;
+  } | null = null;
+  private inputAudioMs = 0;
+  private transcriptCutoffMs = 0;
   private readonly input: AudioQueue;
   private readonly output: AudioQueue;
   private readonly reorder = new InboundReorderBuffer();
@@ -109,6 +121,9 @@ export class LiveCall {
   constructor(private readonly options: LiveSessionOptions) {
     // Retain early caller speech during the bounded startup handshake.
     // Flush it in order once the provider accepts audio; normal input is paced.
+    this.publicOpening = usesPublicDisclosure(options.session);
+    if (this.publicOpening) this.disclosure = { phase: "speaking", attempt: 1, spoken: "", reply: "", mark: null,
+      audibleSent: false, inputGeneration: 0, inputQuietAt: 0, classifierBusy: false, instructionAccepted: false, pendingReply: false, handoffAck: null, activationPending: false, handoffCommitted: false };
     this.input = new AudioQueue(options.profile, 12000);
     this.openingReleased = !options.stopConnectingRingback;
     // At most two seconds of speech can wait for the bounded ring-stop command.
@@ -189,16 +204,22 @@ export class LiveCall {
         if (!this.streamId || event.stream_id !== this.streamId)
           throw new Error("stream_identity_mismatch");
         if (event.media?.track !== "inbound") return;
+        const input = decodeAudio(event.media.payload, this.options.profile);
+        // Output-energy thresholds do not identify caller speech. Opening
+        // interruption uses the live provider's actual input transcript below;
+        // steady background noise must not indefinitely pause disclosure.
         this.reorder.add(
           Number(event.media.chunk),
-          decodeAudio(event.media.payload, this.options.profile),
+          input,
           Date.now(),
         );
       } else if (event.event === "mark") {
         const name = event.mark?.name;
+        if (this.disclosure && this.disclosure.phase !== "active" && event.stream_id === this.streamId && !this.closing)
+          this.disclosurePlayback(name);
         const customerStart = this.customerStart;
         if (this.options.session.access_source === "commercial" &&
-          customerStart && customerStart.eventId === name && !this.closing &&
+          !this.publicOpening && customerStart && customerStart.eventId === name && !this.closing &&
           event.stream_id === this.streamId && !customerStart.acknowledged) {
           customerStart.acknowledged = true;
           this.persist(async () => {
@@ -292,7 +313,9 @@ export class LiveCall {
         type: "session.start",
         session: {
           model: VOICE_MODEL,
-          instructions: buildLiveInstructions(
+          instructions: this.publicOpening
+            ? "You are the business's AI assistant. Keep the Marin voice warm, balanced, relaxed and at a comfortable conversational pace. Only speak the application's fixed opening. No business answers or actions until the application explicitly activates the conversation. Stop speaking and listen when interrupted."
+            : buildLiveInstructions(
             this.options.businessName,
             this.options.session.access_source !== "commercial" && Boolean(this.options.session.prior_disclosure_acknowledged_at),
             Boolean(this.options.actionsEnabled),
@@ -334,32 +357,41 @@ export class LiveCall {
           const id = event.session.id as string;
           this.startupTiming("openai_session_started");
           this.persist(async () => {
-            await this.options.store.activate(id);
+            if (this.publicOpening) {
+              if (!this.options.store.beginDisclosure) throw new Error("voice_disclosure_unavailable");
+              await this.options.store.beginDisclosure(id);
+            } else await this.options.store.activate(id);
             if (this.closing) return;
             this.ready = true;
             this.startupTiming("session_activated");
             const earlyAudio = this.input.takeBuffered();
-            if (earlyAudio.length)
+            if (earlyAudio.length) {
+              const profile = AUDIO_PROFILES[this.options.profile];
+              this.inputAudioMs += earlyAudio.length / (profile.rate * profile.bytesPerSample) * 1000;
               this.sendLive({
                 type: "session.input_audio.append",
                 audio: earlyAudio.toString("base64"),
               });
+            }
             this.greetingEventId = randomUUID();
             this.sendLive({
               type: "session.instructions.append",
               event_id: this.greetingEventId,
               delegation_id: null,
-              content: buildLiveGreeting(this.options.businessName),
+              content: this.publicOpening ? publicDisclosureInstruction(this.options.businessName) : buildLiveGreeting(this.options.businessName),
             });
             this.later(() => {
               if (!this.greetingAcknowledged && !this.closing)
                 void this.close("greeting_instruction_timeout", true);
             }, 8000);
             this.later(() => {
-              if (!this.openingReleased && !this.closing)
+              if ((!this.openingReleased || (this.publicOpening && !this.audioSent)) && !this.closing)
                 void this.close("greeting_audio_timeout", true);
             }, 12000);
-            if (this.options.session.access_source === "commercial")
+            if (this.publicOpening) this.later(() => {
+              if (this.disclosure?.phase !== "active" && !this.closing) void this.close("disclosure_timeout", true);
+            }, 25000);
+            if (this.options.session.access_source === "commercial" && !this.publicOpening)
               this.later(() => {
                 if (!this.customerStart && !this.closing)
                   void this.close("customer_audio_start_timeout", true);
@@ -374,6 +406,7 @@ export class LiveCall {
             !this.closing
           ) {
             this.greetingAcknowledged = true;
+            if (this.disclosure?.phase === "speaking") this.disclosure.instructionAccepted = true;
             // Explicitly prompt the already configured greeting to begin; an
             // instruction acknowledgment alone is not evidence of speech.
             this.sendLive({
@@ -385,9 +418,11 @@ export class LiveCall {
           }
           break;
         case "session.output_audio.delta":
-          if (!this.closing) {
+          if (!this.closing && (!this.disclosure || this.disclosure.phase === "active" ||
+            (this.disclosure.phase === "speaking" && this.disclosure.instructionAccepted))) {
             const bytes = decodeAudio(event.delta, this.options.profile);
             if (hasAudibleAudio(bytes, this.options.profile)) {
+              if (this.disclosure?.phase === "speaking") this.disclosure.mark = null;
               this.lastAudibleOutputAt = Date.now();
               this.audibleOutputGeneration++;
             }
@@ -406,6 +441,20 @@ export class LiveCall {
             startMs: event.start_ms,
             endMs: event.end_ms,
           };
+          if (this.disclosure && this.disclosure.phase !== "active") {
+            if (typeof fragment.text !== "string" || fragment.text.length > 4000) throw new Error("invalid_disclosure_fragment");
+            if (fragment.role === "customer") {
+              this.interruptDisclosure();
+              this.disclosure.reply += fragment.text;
+              if (this.disclosure.reply.length > 4000) throw new Error("disclosure_reply_limit");
+            } else if (this.disclosure.phase === "speaking" && this.disclosure.instructionAccepted) {
+              this.disclosure.spoken += fragment.text;
+              if (this.disclosure.spoken.length > 4000) throw new Error("disclosure_output_limit");
+            }
+            break;
+          }
+          // Delayed fragments from the unrecorded opening must never enter history.
+          if (this.publicOpening && fragment.startMs < this.transcriptCutoffMs) break;
           if (this.transcript.add(fragment)) {
             if (fragment.role === "customer") {
               this.callerFragmentGeneration++;
@@ -582,6 +631,11 @@ export class LiveCall {
   }
 
   private delegate(id: string, offsetMs: number) {
+    if (this.disclosure && !this.disclosure.handoffCommitted) {
+      this.sendLive({ type: "session.commentary.append", delegation_id: id,
+        content: "No business answer or action is authorized. Remain silent; the application is completing the opening." });
+      return;
+    }
     if (this.seenDelegations.has(id)) return;
     this.seenDelegations.add(id);
     if (this.backendFailures >= 3) {
@@ -738,11 +792,13 @@ export class LiveCall {
           this.input.append(bytes);
       }
       if (this.ready && !this.closing) {
+        this.inputAudioMs += 20;
         this.sendLive({
           type: "session.input_audio.append",
           audio: this.input.take(true)!.toString("base64"),
         });
         if (!this.openingReleased) this.prepareOpeningPlayback();
+        this.tickDisclosure();
         const frame = this.openingReleased ? this.output.take() : null;
         if (frame) {
           this.sendPhone({
@@ -751,7 +807,8 @@ export class LiveCall {
           });
           if (this.pendingAction && hasAudibleAudio(frame, this.options.profile))
             this.pendingAction.audibleFrameSent = true;
-          if (this.options.session.access_source === "commercial" &&
+          if (this.disclosure?.phase === "speaking" && hasAudibleAudio(frame, this.options.profile)) this.disclosure.audibleSent = true;
+          if (this.options.session.access_source === "commercial" && !this.publicOpening &&
             !this.customerStart && hasAudibleAudio(frame, this.options.profile)) {
             const eventId = `customer-start-${randomUUID()}`;
             const startedAt = new Date().toISOString();
@@ -834,7 +891,7 @@ export class LiveCall {
         }
         // Reserve 15 seconds for the provider's final-usage close handshake.
         if (elapsed >= limit - (commercial ? 0 : 15)) void this.close("time_limit", false);
-        if (!this.idleWarningSent && Date.now() - this.lastCallerAt > 45000) {
+        if ((!this.disclosure || this.disclosure.phase === "active") && !this.idleWarningSent && Date.now() - this.lastCallerAt > 45000) {
           this.idleWarningSent = true;
           this.sendLive({
             type: "session.instructions.append",
@@ -852,6 +909,125 @@ export class LiveCall {
       void this.close("audio_transport_failed", true);
     }
     this.later(() => this.tick(), 20);
+  }
+
+  private noticeOutputComplete() {
+    const d = this.disclosure;
+    return Boolean(d?.audibleSent && publicDisclosureComplete(d.spoken, this.options.businessName) && !this.output.hasPendingAudibleAudio);
+  }
+
+  private interruptDisclosure() {
+    const d = this.disclosure;
+    if (!d || d.phase === "active" || this.closing) return;
+    d.inputQuietAt = Date.now(); d.inputGeneration++; d.pendingReply = true;
+    // Speech after the complete opening is a reply, not an interrupted notice.
+    // Keep its mark: no clear was sent, so the ACK still proves actual playback.
+    if (d.phase === "recording" || d.phase === "handoff" || this.noticeOutputComplete()) return;
+    d.mark = null;
+    if (d.phase !== "interrupted") {
+      d.phase = "interrupted"; d.spoken = "";
+      this.output.clear(); this.sendPhone({ event: "clear" });
+      this.sendLive({ type: "session.instructions.append", delegation_id: null,
+        content: "The opening was interrupted. Stop speaking and listen silently; the application owns the next step. Do not answer questions or use actions." });
+    }
+  }
+
+  private resumeDisclosure() {
+    const d = this.disclosure!;
+    d.reply = ""; d.pendingReply = false; d.classifierBusy = false;
+    if (d.phase !== "interrupted") return;
+    if (d.attempt >= 2) { void this.close("disclosure_interrupted", true); return; }
+    d.attempt++; d.phase = "speaking"; d.spoken = "";
+    d.audibleSent = false; d.instructionAccepted = false;
+    this.output.clear(); this.greetingAcknowledged = false; this.greetingEventId = randomUUID();
+    this.sendLive({ type: "session.instructions.append", event_id: this.greetingEventId, delegation_id: null,
+      content: publicDisclosureInstruction(this.options.businessName) });
+  }
+
+  private tickDisclosure() {
+    const d = this.disclosure;
+    if (!d || this.closing || d.phase === "active") return;
+    if (d.phase === "speaking" && d.instructionAccepted && !d.mark && this.noticeOutputComplete() &&
+      Date.now() - this.lastAudibleOutputAt > 300) {
+      d.mark = `notice-${d.attempt}-${randomUUID()}`;
+      this.sendPhone({ event: "mark", mark: { name: d.mark } });
+    }
+    if (d.pendingReply && !d.classifierBusy && Date.now() - d.inputQuietAt > 800) {
+      // Noise without transcript may interrupt at most one notice; it never
+      // authorizes actions or invents a refusal. A real reply is classified whole.
+      if (!d.reply.trim()) { this.resumeDisclosure(); return; }
+      d.classifierBusy = true;
+      const generation = d.inputGeneration;
+      const abort = new AbortController();
+      this.later(() => abort.abort(), 3500);
+      void this.options.classifyDisclosureReply?.(`disclosure-${randomUUID()}`, d.reply, abort.signal).then((decision) => {
+        if (this.closing) return;
+        if (generation !== d.inputGeneration) { d.classifierBusy = false; return; }
+        if (decision !== "repeat") {
+          void this.options.stopRecording?.().catch(() => {});
+          void this.close("recording_declined", true); return;
+        }
+        this.resumeDisclosure();
+      }).catch(() => { void this.close("disclosure_reply_unavailable", true); });
+      if (!this.options.classifyDisclosureReply) void this.close("disclosure_reply_unavailable", true);
+    }
+    if (d.phase === "handoff" && d.handoffAck && !d.pendingReply && !d.activationPending && Date.now() - d.inputQuietAt > 200) {
+      d.activationPending = true;
+      this.activateDisclosedConversation(d.handoffAck);
+    }
+  }
+
+  private activateDisclosedConversation(eventId: string) {
+    const d = this.disclosure!;
+    this.persist(async () => {
+      if (this.closing || !this.options.store.handoffAcknowledged || d.pendingReply) { d.activationPending = false; return; }
+      if (!this.options.store.handoffStarted) throw new Error("voice_disclosure_unavailable");
+      // All opening clarification is complete and the phone has acknowledged
+      // readiness. This is the listening boundary, not the earlier notice or
+      // handoff send. New input belongs to the recorded conversation now.
+      d.phase = "active"; d.spoken = ""; d.reply = "";
+      this.transcriptCutoffMs = this.inputAudioMs;
+      this.transcript = new CallTranscript();
+      this.customerStart = { eventId, monotonicMs: this.monotonicNow(), acknowledged: false };
+      await this.options.store.handoffStarted(eventId, new Date().toISOString());
+      await this.options.store.handoffAcknowledged(eventId, this.transcriptCutoffMs);
+      d.handoffCommitted = true;
+      if (this.closing) return;
+      this.customerStart.acknowledged = true;
+      this.lastCallerAt = Date.now();
+      this.sendLive({ type: "session.instructions.append", delegation_id: null,
+        content: buildLiveInstructions(this.options.businessName, false, Boolean(this.options.actionsEnabled), true) +
+          "\nThe public opening and recording are complete. The conversation is now active. Do not repeat the introduction. Say only 'How can I help you today?' now, then follow the caller naturally." });
+      this.sendLive({ type: "session.commentary.append", delegation_id: null, content: "Continue with the first question now." });
+    });
+  }
+
+  private disclosurePlayback(name: unknown) {
+    const d = this.disclosure;
+    if (!d?.mark || name !== d.mark || this.closing) return;
+    const eventId = d.mark;
+    d.mark = null;
+    if (d.phase === "speaking") {
+      d.phase = "recording";
+      this.output.clear();
+      this.persist(async () => {
+        if (this.closing || d.phase !== "recording") return;
+        if (!this.options.store.completeDisclosure || !this.options.startRecording || !this.options.store.recordingStarted || !this.options.store.handoffStarted)
+          throw new Error("voice_disclosure_unavailable");
+        await this.options.store.completeDisclosure(eventId);
+        if (this.closing || d.phase !== "recording") return;
+        await this.options.startRecording();
+        if (this.closing || d.phase !== "recording") { await this.options.stopRecording?.(); return; }
+        await this.options.store.recordingStarted();
+        if (this.closing) return;
+        const handoffId = `handoff-${randomUUID()}`;
+        d.phase = "handoff"; d.mark = handoffId;
+        this.sendPhone({ event: "mark", mark: { name: handoffId } });
+        this.later(() => { if (!d.handoffAck && !this.closing) void this.close("conversation_handoff_timeout", true); }, 3000);
+      });
+    } else if (d.phase === "handoff") {
+      d.handoffAck = eventId;
+    }
   }
 
   private prepareOpeningPlayback() {

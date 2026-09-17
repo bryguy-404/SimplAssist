@@ -45,6 +45,11 @@ export async function consumeStreamToken(
 
 export interface VoiceStore {
   activate(openaiId: string): Promise<void>;
+  beginDisclosure?(openaiId: string): Promise<void>;
+  completeDisclosure?(eventId: string): Promise<void>;
+  recordingStarted?(): Promise<void>;
+  handoffStarted?(eventId: string, startedAt: string): Promise<void>;
+  handoffAcknowledged?(eventId: string, inputStartMs: number): Promise<void>;
   fragment(fragment: TranscriptFragment): Promise<void>;
   usage(seconds: number, confirmed: boolean): Promise<void>;
   heartbeat(): Promise<boolean>;
@@ -81,6 +86,21 @@ export function createVoiceStore(
     if (error) throw new Error("voice_playback_tracking_failed");
   }
   return {
+    async beginDisclosure(openaiId) {
+      if (!(await rpc("begin_voice_disclosure", { p_openai_id: openaiId }))) throw new Error("voice_disclosure_blocked");
+    },
+    async completeDisclosure(eventId) {
+      if (!(await rpc("complete_voice_disclosure", { p_event_id: eventId }))) throw new Error("voice_disclosure_blocked");
+    },
+    async recordingStarted() {
+      if (!(await rpc("mark_voice_recording_started", {}))) throw new Error("voice_recording_start_blocked");
+    },
+    async handoffStarted(eventId, startedAt) {
+      if (!(await rpc("begin_voice_conversation_handoff", { p_event_id: eventId, p_started_at: startedAt }))) throw new Error("voice_handoff_blocked");
+    },
+    async handoffAcknowledged(eventId, inputStartMs) {
+      if (!(await rpc("acknowledge_voice_conversation_handoff", { p_event_id: eventId, p_input_start_ms: inputStartMs }))) throw new Error("voice_handoff_blocked");
+    },
     async activate(openaiId) {
       if (!(await rpc("activate_voice_session", { p_openai_id: openaiId })))
         throw new Error("voice_activation_blocked");
@@ -109,7 +129,7 @@ export function createVoiceStore(
         const { data, error } = await db.from("voice_sessions")
           .update({ heartbeat_at: new Date().toISOString() })
           .eq("id", session.id)
-          .in("status", ["starting", "active"])
+          .in("status", ["notice", "starting", "active"])
           .select("id");
         if (error) throw new Error("voice_heartbeat_failed");
         return Boolean(data?.length);
@@ -134,7 +154,7 @@ export function createVoiceStore(
           .from("voice_sessions")
           .update({ heartbeat_at: new Date().toISOString() })
           .eq("id", session.id)
-          .in("status", ["starting", "active", "closing"])
+          .in("status", ["notice", "starting", "active", "closing"])
           .select("id"),
       ]);
       if (results.some((r) => r.error))

@@ -54,6 +54,11 @@ function harness(
   const live = new Socket();
   const store = {
     activate: vi.fn().mockResolvedValue(undefined),
+    beginDisclosure: vi.fn().mockResolvedValue(undefined),
+    completeDisclosure: vi.fn().mockResolvedValue(undefined),
+    recordingStarted: vi.fn().mockResolvedValue(undefined),
+    handoffStarted: vi.fn().mockResolvedValue(undefined),
+    handoffAcknowledged: vi.fn().mockResolvedValue(undefined),
     fragment: vi.fn().mockResolvedValue(undefined),
     usage: vi.fn().mockResolvedValue(undefined),
     heartbeat: vi.fn().mockResolvedValue(true),
@@ -1445,5 +1450,178 @@ describe("audio and transcript ordering", () => {
       t.snapshot().indexOf("correction"),
     );
     expect(t.latestCallerEndMs).toBe(1000);
+  });
+});
+
+
+describe("public same-Marin disclosure", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+  const publicSession = { ...session, access_source: "commercial", disclosure_version: 1 } as VoiceSession;
+  const notice = "Hi, thanks for calling Lakeview Plumbing. I’m the AI assistant, and this call will be recorded.";
+  function setup(profile: "pcm16" | "pcmu8" = "pcm16", extra: Partial<LiveSessionOptions> = {}) {
+    const startRecording = vi.fn().mockResolvedValue(undefined);
+    const stopRecording = vi.fn().mockResolvedValue(undefined);
+    const classifyDisclosureReply = vi.fn().mockResolvedValue("repeat");
+    return { ...harness(profile, true, { session: publicSession, startRecording, stopRecording, classifyDisclosureReply, ...extra }),
+      startRecording, stopRecording, classifyDisclosureReply };
+  }
+  async function sayNotice(f: ReturnType<typeof setup>, profile: "pcm16" | "pcmu8" = "pcm16", text = notice) {
+    f.live.event({ type: "session.output_transcript.delta", event_id: `notice-${Math.random()}`, delta: text, start_ms: 0, end_ms: 200 });
+    f.live.event({ type: "session.output_audio.delta", delta: Buffer.alloc(new AudioQueue(profile).frameBytes * 5, 23).toString("base64") });
+    await vi.advanceTimersByTimeAsync(500);
+    return (f.phone.sent.filter((e) => e.event === "mark" && String((e.mark as { name?: string } | undefined)?.name).startsWith("notice-")).at(-1)?.mark as { name: string } | undefined)?.name;
+  }
+  for (const profile of ["pcm16", "pcmu8"] as const) it(`records only after complete audible notice and starts minutes at acknowledged handoff (${profile})`, async () => {
+    const f = setup(profile);
+    await f.start();
+    expect(f.store.beginDisclosure).toHaveBeenCalledWith("openai-session");
+    expect(f.store.activate).not.toHaveBeenCalled();
+    f.live.event({ type: "session.delegation.created", delegation: { id: "premature", target: "client" }, offset_ms: 0 });
+    const mark = await sayNotice(f, profile);
+    expect(mark).toBeTruthy();
+    expect(f.answer).not.toHaveBeenCalled();
+    expect(f.store.fragment).not.toHaveBeenCalled();
+    expect(f.startRecording).not.toHaveBeenCalled();
+    expect(f.store.customerAudioStarted).not.toHaveBeenCalled();
+    f.phone.event({ event: "mark", stream_id: "other", mark: { name: mark } });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.startRecording).not.toHaveBeenCalled();
+    f.phone.event({ event: "mark", stream_id: "stream", mark: { name: mark } });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.store.completeDisclosure).toHaveBeenCalledWith(mark);
+    expect(f.startRecording).toHaveBeenCalledOnce();
+    expect(f.store.recordingStarted).toHaveBeenCalledOnce();
+    const handoff = (f.phone.sent.find((e) => e.event === "mark" && String((e.mark as { name?: string } | undefined)?.name).startsWith("handoff-"))?.mark as { name: string }).name;
+    expect(f.store.handoffStarted).not.toHaveBeenCalled();
+    expect(f.store.handoffAcknowledged).not.toHaveBeenCalled();
+    f.phone.event({ event: "mark", stream_id: "stream", mark: { name: handoff } });
+    await vi.advanceTimersByTimeAsync(30);
+    expect(f.store.handoffStarted).toHaveBeenCalledWith(handoff, expect.any(String));
+    expect(f.store.handoffAcknowledged).toHaveBeenCalledWith(handoff, expect.any(Number));
+    f.phone.event({ event: "mark", stream_id: "stream", mark: { name: mark } });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.startRecording).toHaveBeenCalledOnce();
+    f.live.event({ type: "session.input_transcript.delta", event_id: "late-private", delta: "early private words", start_ms: 0, end_ms: 20 });
+    f.live.event({ type: "session.input_transcript.delta", event_id: "after-handoff", delta: "What are your hours?", start_ms: 3000, end_ms: 3500 });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.store.fragment).toHaveBeenCalledTimes(1);
+    expect(f.store.fragment).toHaveBeenCalledWith(expect.objectContaining({ eventId: "after-handoff" }));
+    expect(f.live.sent.some((e) => String(e.content).includes("How can I help you today?"))).toBe(true);
+    await f.finish();
+  });
+  it("cannot start recording from transcript-only, silence, truncated text or wrong mark", async () => {
+    const f = setup(); await f.start();
+    f.live.event({ type: "session.output_transcript.delta", event_id: "text-only", delta: notice, start_ms: 0, end_ms: 100 });
+    f.live.event({ type: "session.output_audio.delta", delta: Buffer.alloc(new AudioQueue("pcm16").frameBytes * 10).toString("base64") });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(f.phone.sent.filter((e) => e.event === "mark" && String((e.mark as { name?: string } | undefined)?.name).startsWith("notice-"))).toHaveLength(0);
+    f.phone.event({ event: "mark", stream_id: "stream", mark: { name: "notice-1-invented" } });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.startRecording).not.toHaveBeenCalled();
+    await f.finish();
+    const g = setup(); await g.start(); await sayNotice(g, "pcm16", "Hi, thanks for calling Lakeview Plumbing.");
+    expect(g.phone.sent.filter((e) => e.event === "mark" && String((e.mark as { name?: string } | undefined)?.name).startsWith("notice-"))).toHaveLength(0);
+    await g.finish();
+  });
+  it("invalidates a cleared notice mark on interruption and permits only one complete replay", async () => {
+    const f = setup(); await f.start(); const stale = await sayNotice(f);
+    // A newly arrived audible tail invalidates the earlier drained-output mark.
+    f.live.event({ type: "session.output_audio.delta", delta: Buffer.alloc(new AudioQueue("pcm16").frameBytes * 15, 23).toString("base64") });
+    f.live.event({ type: "session.input_transcript.delta", event_id: "interrupt-tail", delta: "Hello?", start_ms: 400, end_ms: 600 });
+    f.phone.event({ event: "media", stream_id: "stream", media: { track: "inbound", chunk: "1", payload: Buffer.alloc(new AudioQueue("pcm16").frameBytes, 23).toString("base64") } });
+    f.phone.event({ event: "mark", stream_id: "stream", mark: { name: stale } });
+    f.live.event({ type: "session.input_transcript.delta", event_id: "hello", delta: "Hello?", start_ms: 400, end_ms: 600 });
+    await vi.advanceTimersByTimeAsync(850);
+    expect(f.startRecording).not.toHaveBeenCalled();
+    expect(f.classifyDisclosureReply).toHaveBeenCalledOnce();
+    const retry = f.live.sent.filter((e) => e.type === "session.instructions.append").at(-1);
+    f.live.event({ type: "session.instructions.appended", client_event_id: retry?.event_id });
+    f.live.event({ type: "session.output_transcript.delta", event_id: "retry-start", delta: "Hi, thanks for calling", start_ms: 1000, end_ms: 1200 });
+    f.live.event({ type: "session.output_audio.delta", delta: Buffer.alloc(new AudioQueue("pcm16").frameBytes * 15, 23).toString("base64") });
+    f.live.event({ type: "session.input_transcript.delta", event_id: "interrupt-again", delta: "Hello again", start_ms: 1500, end_ms: 1600 });
+    await vi.advanceTimersByTimeAsync(850);
+    expect(f.hangup).toHaveBeenCalledOnce();
+    expect(f.startRecording).not.toHaveBeenCalled();
+    expect(f.store.fragment).not.toHaveBeenCalled();
+    await f.finish();
+  });
+  it("closes on a recording refusal without saving the reply or calling business tools", async () => {
+    const f = setup(); f.classifyDisclosureReply.mockResolvedValue("refuse"); await f.start();
+    f.live.event({ type: "session.input_transcript.delta", event_id: "refusal", delta: "Please don't record me.", start_ms: 0, end_ms: 50 });
+    await vi.advanceTimersByTimeAsync(850);
+    expect(f.hangup).toHaveBeenCalledOnce(); expect(f.startRecording).not.toHaveBeenCalled();
+    expect(f.store.fragment).not.toHaveBeenCalled(); expect(f.answer).not.toHaveBeenCalled();
+    await f.finish();
+    expect(f.store.finish).toHaveBeenCalledWith("recording_declined", "recording_declined", true);
+  });
+  it("tolerates an incidental audio click and an okay immediately after the completed notice", async () => {
+    const f = setup(); await f.start();
+    f.phone.event({ event: "media", stream_id: "stream", media: { track: "inbound", chunk: "1", payload: Buffer.alloc(new AudioQueue("pcm16").frameBytes, 23).toString("base64") } });
+    const mark = await sayNotice(f, "pcm16", notice.replace("I’m", "I am").replace("AI", "A.I."));
+    expect(mark).toBeTruthy(); expect(f.classifyDisclosureReply).not.toHaveBeenCalled();
+    f.phone.event({ event: "mark", stream_id: "stream", mark: { name: mark } });
+    await vi.advanceTimersByTimeAsync(1);
+    f.live.event({ type: "session.input_transcript.delta", event_id: "okay", delta: "Okay.", start_ms: 500, end_ms: 600 });
+    const handoff = (f.phone.sent.find((e) => e.event === "mark" && String((e.mark as { name?: string } | undefined)?.name).startsWith("handoff-"))?.mark as { name: string }).name;
+    f.phone.event({ event: "mark", stream_id: "stream", mark: { name: handoff } });
+    await vi.advanceTimersByTimeAsync(850);
+    expect(f.classifyDisclosureReply).toHaveBeenCalledOnce();
+    expect(f.store.handoffAcknowledged).toHaveBeenCalledOnce();
+    expect(f.hangup).not.toHaveBeenCalled(); expect(f.store.fragment).not.toHaveBeenCalled();
+    expect(f.live.sent.filter((e) => String(e.content).includes("Speak only this exact opening"))).toHaveLength(1);
+    await f.finish();
+  });
+  it.each(["pcm16", "pcmu8"] as const)("ignores persistent low-level background noise during opening (%s)", async (profile) => {
+    const f = setup(profile); await f.start();
+    const quiet = Buffer.alloc(new AudioQueue(profile).frameBytes, profile === "pcm16" ? 0 : 240);
+    if (profile === "pcm16") for (let i = 0; i < quiet.length; i += 2) quiet.writeInt16LE(120, i);
+    // This is audible to the output-preservation helper, but it is not speech.
+    expect(hasAudibleAudio(quiet, profile)).toBe(true);
+    for (let i = 1; i <= 40; i++) {
+      f.phone.event({ event: "media", stream_id: "stream", media: { track: "inbound", chunk: String(i), payload: quiet.toString("base64") } });
+      await vi.advanceTimersByTimeAsync(20);
+    }
+    const mark = await sayNotice(f, profile); expect(mark).toBeTruthy();
+    f.phone.event({ event: "mark", stream_id: "stream", mark: { name: mark } }); await vi.advanceTimersByTimeAsync(1);
+    const handoff = (f.phone.sent.find((e) => e.event === "mark" && String((e.mark as { name?: string } | undefined)?.name).startsWith("handoff-"))?.mark as { name: string }).name;
+    f.phone.event({ event: "mark", stream_id: "stream", mark: { name: handoff } }); await vi.advanceTimersByTimeAsync(30);
+    expect(f.classifyDisclosureReply).not.toHaveBeenCalled(); expect(f.hangup).not.toHaveBeenCalled();
+    expect(f.store.handoffAcknowledged).toHaveBeenCalledOnce(); await f.finish();
+  });
+  it("keeps a delayed healthy okay classification free and separate from the phone handoff timeout", async () => {
+    const f = setup(); await f.start(); const mark = await sayNotice(f);
+    f.classifyDisclosureReply.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve("repeat"), 2500)));
+    f.phone.event({ event: "mark", stream_id: "stream", mark: { name: mark } }); await vi.advanceTimersByTimeAsync(1);
+    f.live.event({ type: "session.input_transcript.delta", event_id: "slow-okay", delta: "Okay.", start_ms: 500, end_ms: 600 });
+    const handoff = (f.phone.sent.find((e) => e.event === "mark" && String((e.mark as { name?: string } | undefined)?.name).startsWith("handoff-"))?.mark as { name: string }).name;
+    f.phone.event({ event: "mark", stream_id: "stream", mark: { name: handoff } });
+    const beforeReply = Date.now();
+    await vi.advanceTimersByTimeAsync(3100);
+    expect(f.hangup).not.toHaveBeenCalled(); expect(f.store.handoffStarted).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(f.store.handoffStarted).toHaveBeenCalledOnce(); expect(f.store.handoffAcknowledged).toHaveBeenCalledOnce();
+    expect(Date.parse(f.store.handoffStarted.mock.calls[0][1])).toBeGreaterThanOrEqual(beforeReply + 3300);
+    expect(f.hangup).not.toHaveBeenCalled(); await f.finish();
+  });
+  it("rehearses the same opening on the approved pilot without the customer minute meter", async () => {
+    const f = setup("pcm16", { session: { ...session, access_source: "pilot", disclosure_version: 1, public_notice_rehearsal: true } as VoiceSession });
+    await f.start(); const mark = await sayNotice(f);
+    f.phone.event({ event: "mark", stream_id: "stream", mark: { name: mark } }); await vi.advanceTimersByTimeAsync(1);
+    const handoff = (f.phone.sent.find((e) => e.event === "mark" && String((e.mark as { name?: string } | undefined)?.name).startsWith("handoff-"))?.mark as { name: string }).name;
+    f.phone.event({ event: "mark", stream_id: "stream", mark: { name: handoff } }); await vi.advanceTimersByTimeAsync(30);
+    expect(f.store.beginDisclosure).toHaveBeenCalledOnce(); expect(f.store.handoffAcknowledged).toHaveBeenCalledOnce();
+    expect(f.store.customerAudioStarted).not.toHaveBeenCalled(); expect(f.store.customerPlaybackAcknowledged).not.toHaveBeenCalled();
+    await f.finish();
+  });
+  it("never activates on recording failure or missing handoff acknowledgment", async () => {
+    const f = setup(); f.startRecording.mockRejectedValue(new Error("unavailable")); await f.start();
+    const mark = await sayNotice(f); f.phone.event({ event: "mark", stream_id: "stream", mark: { name: mark } });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.store.handoffStarted).not.toHaveBeenCalled(); expect(f.hangup).toHaveBeenCalledOnce(); await f.finish();
+    const g = setup(); await g.start(); const ready = await sayNotice(g);
+    g.phone.event({ event: "mark", stream_id: "stream", mark: { name: ready } });
+    await vi.advanceTimersByTimeAsync(3100);
+    expect(g.store.handoffAcknowledged).not.toHaveBeenCalled(); expect(g.hangup).toHaveBeenCalledOnce(); await g.finish();
   });
 });

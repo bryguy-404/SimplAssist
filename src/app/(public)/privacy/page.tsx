@@ -13,7 +13,7 @@ export default function PrivacyPage() {
       siblingHref="/terms"
       siblingLabel="Terms of Service"
     >
-      <p className={`-mt-8 text-sm ${body}`}>Effective date: August 7, 2026</p>
+      <p className={`-mt-8 text-sm ${body}`}>Effective date: September 17, 2026</p>
 
       <LegalSection title="1. Introduction">
         <p>
@@ -28,16 +28,19 @@ export default function PrivacyPage() {
         <p>
           We collect business information provided during registration (business name, website,
           address, phone number, hours, services). We collect customer contact information when
-          customers text or chat with the AI (phone numbers, conversation content). We collect usage
-          data to improve our service.
+          customers call, text, or chat with the AI (names, email addresses, phone numbers,
+          conversation content, and confirmed appointment details). Voice audio is processed to
+          conduct the conversation. We also store call transcripts, disclosed call recordings,
+          action results, and usage data to operate and improve the service.
         </p>
       </LegalSection>
 
       <LegalSection title="3. How We Use Your Information">
         <p>
           To power the AI assistant responses. To maintain conversation history in your CRM. To send
-          SMS messages on behalf of your business via Telnyx. To provide analytics and reporting in
-          your dashboard. We do not sell your data to third parties.
+          SMS messages and handle calls on behalf of your business via Telnyx. To capture details
+          and carry out caller-confirmed signup-text and appointment requests. To show conversation
+          results and usage in your dashboard. We do not sell your data to third parties.
         </p>
       </LegalSection>
 
@@ -129,10 +132,22 @@ export default function PrivacyPage() {
       </LegalSection>
 
       <LegalSection title="6. Data Storage and Security">
-        <p>
+        <p className="mb-4">
           All data is stored securely using Supabase (PostgreSQL). Conversations are encrypted in
           transit. We retain conversation data for as long as your account is active. You can
           request data deletion by contacting support.
+        </p>
+        <p className="mb-4">
+          Public voice callers hear an AI and recording notice before we begin saving call audio
+          or transcripts. If a caller interrupts that notice, the system may briefly process their
+          reply to handle an objection or repeat the notice. That opening input is not saved in
+          the call transcript. An approved private tester may have acknowledged recording in advance.
+        </p>
+        <p>
+          Call audio recordings are retained for 30 days and then deleted through our automated
+          cleanup process. Call transcripts and confirmed contact or appointment records follow
+          the normal conversation and account retention rules. Recordings are accessible through
+          authenticated account controls; provider recording links are not made public.
         </p>
       </LegalSection>
 
@@ -157,9 +172,11 @@ export default function PrivacyPage() {
 
       <LegalSection title="8. Third-Party Services">
         <p>
-          SimplAssist integrates with Telnyx (messaging), Anthropic (AI conversation processing),
-          Stripe (payments), Supabase (database), and Resend (transactional email delivery). Each
-          service has its own privacy policy.
+          SimplAssist integrates with Telnyx (phone calls, messaging, and recording storage),
+          OpenAI (live AI voice processing), Anthropic (business answers and action interpretation),
+          Google Calendar (availability, appointments, and invitations), Stripe (payments),
+          Supabase (database), and Resend (transactional email delivery). Each service has its
+          own privacy policy.
         </p>
       </LegalSection>
 

@@ -87,6 +87,14 @@ describe("durable voice maintenance", () => {
     expect(h.rpc.mock.calls.some(([name]) => name.startsWith("record_voice_customer_"))).toBe(false);
     expect(h.writes).toEqual([]);
   });
+  it.each([true, false])("releases a legacy pilot slot only after exact provider termination, alive=%s", async (alive) => {
+    const h = harness([[], [{ id: "pilot", access_source: "pilot", call_control_id: "control", call_session_id: "session" }], [], []]);
+    h.retrieveStatus.mockResolvedValue({ data: { call_control_id: "control", call_session_id: "session", is_alive: alive } });
+    await h.run();
+    expect(h.hangup).toHaveBeenCalledOnce();
+    expect(h.writes).toEqual(alive ? [] : [{ table: "voice_sessions", value: { provider_hangup_confirmed_at: expect.any(String) } }]);
+    expect(h.rpc.mock.calls.some(([name]) => name.startsWith("record_voice_customer_"))).toBe(false);
+  });
   it("recovers customer end evidence only from the exact terminated provider call", async () => {
     const h = harness([[], [{ id: "customer", access_source: "commercial", call_control_id: "control", call_session_id: "session" }], [], []]);
     h.retrieveStatus.mockResolvedValue({ data: { call_control_id: "control", call_session_id: "session", is_alive: false, end_time: "2026-09-17T12:01:00Z" } });

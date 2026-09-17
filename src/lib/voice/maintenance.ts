@@ -75,26 +75,21 @@ export async function maintainVoicePilot(
       const code = (error as { status?: number }).status;
       if (code !== 404 && code !== 422) return;
     }
+    // Accepted hangup commands cannot release capacity for either source.
+    let verifiedEnd: { end_time?: string };
+    try {
+      const result = await telnyx.calls.retrieveStatus(session.call_control_id, VOICE_PROVIDER_OPTIONS);
+      const ended = result.data;
+      if (!ended || ended.is_alive !== false || ended.call_control_id !== session.call_control_id || ended.call_session_id !== session.call_session_id) return;
+      verifiedEnd = ended;
+    } catch { return; }
     if (session.access_source === "commercial") {
-      // A successful command is only an accepted hangup request. Confirm the
-      // exact call is no longer alive before releasing its customer hold.
-      try {
-        const result = await telnyx.calls.retrieveStatus(session.call_control_id, VOICE_PROVIDER_OPTIONS);
-        const ended = result.data;
-        if (!ended || ended.is_alive !== false ||
-          ended.call_control_id !== session.call_control_id ||
-          ended.call_session_id !== session.call_session_id) return;
-        const hasEnd = typeof ended.end_time === "string" && Number.isFinite(Date.parse(ended.end_time));
-        const { error } = await db.rpc(hasEnd ? "record_voice_customer_end" : "record_voice_customer_termination", {
-          p_session_id: session.id,
-          p_event_id: `provider-status:${session.id}:${ended.end_time ?? "ended"}`,
-          ...(hasEnd ? { p_ended_at: ended.end_time } : { p_terminated_at: new Date().toISOString() }),
-        });
-        if (error) throw new Error("voice_customer_termination_save_failed");
-      } catch {
-        // Leave this row eligible for a later provider-status lookup.
-        return;
-      }
+      const hasEnd = typeof verifiedEnd.end_time === "string" && Number.isFinite(Date.parse(verifiedEnd.end_time));
+      const { error } = await db.rpc(hasEnd ? "record_voice_customer_end" : "record_voice_customer_termination", {
+        p_session_id: session.id, p_event_id: `provider-status:${session.id}:${verifiedEnd.end_time ?? "ended"}`,
+        ...(hasEnd ? { p_ended_at: verifiedEnd.end_time } : { p_terminated_at: new Date().toISOString() }),
+      });
+      if (error) throw new Error("voice_customer_termination_save_failed");
       return;
     }
     const { error } = await db

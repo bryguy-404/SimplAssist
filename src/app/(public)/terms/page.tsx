@@ -24,7 +24,8 @@ export default function TermsPage() {
       <LegalSection title="2. Description of Service">
         <p>
           SimplAssist provides AI-powered customer communication tools for small businesses, including
-          SMS auto-response, web chat widget, contact management, and related features.
+          SMS auto-response, web chat, AI voice answering, contact management, and appointment
+          scheduling. Available features depend on the selected plan and completed account setup.
         </p>
       </LegalSection>
 
@@ -94,10 +95,23 @@ export default function TermsPage() {
           Services are billed monthly. You may cancel at any time. Refunds are not provided for
           partial months. SimplAssist reserves the right to change pricing with 30 days notice.
         </p>
-        <p>
+        <p className="mb-4">
           Subscription and setup fees may include carrier registration costs required for SMS
           compliance. Those fees are passed through from carriers and TCR (The Campaign Registry)
           and are non-refundable once registration has been submitted on your behalf.
+        </p>
+        <p className="mb-4">
+          The $25 setup fee is charged once per business. Upgrades show the amount due before
+          confirmation and take effect after payment succeeds. Scheduled downgrades take effect
+          at renewal. Previously used messages and voice minutes are not reset by a plan change.
+        </p>
+        <p>
+          Full Suite includes 2,500 SMS parts and 100 voice minutes per billing month. Long texts
+          can use multiple parts. A mid-period upgrade receives a proportional voice allowance
+          until renewal. Voice minutes do not roll over, and there are no automatic paid voice
+          overages. Ringing, preparation, and the recording notice do not count toward the voice
+          allowance; conversation time includes listening, pauses, and response waits. When voice
+          is unavailable or the allowance is exhausted, your selected eligible fallback applies.
         </p>
       </LegalSection>
 

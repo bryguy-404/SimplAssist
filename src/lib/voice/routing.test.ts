@@ -150,6 +150,34 @@ describe("existing-number voice routing", () => {
     expect(f.deps.commercialWorkerReady).toHaveBeenCalledOnce();
     expect(new URL(f.actions.startStreaming.mock.calls[0][1].stream_url).searchParams.has("opening_ringback")).toBe(false);
   });
+  it("streams the public same-Marin notice while ringback continues without starting recording or Polly", async () => {
+    const f = fixture();
+    Object.assign(f.session, { access_source: "commercial", disclosure_version: 1, prior_disclosure_acknowledged_at: "2026-09-13T00:00:00Z" });
+    await startCommercialVoice(f.deps, f.session);
+    expect(f.session.status).toBe("notice");
+    expect(f.actions.startPlayback).toHaveBeenCalledOnce();
+    expect(f.actions.startStreaming).toHaveBeenCalledOnce();
+    expect(new URL(f.actions.startStreaming.mock.calls[0][1].stream_url).searchParams.get("opening_ringback")).toBe("v1");
+    expect(f.actions.startRecording).not.toHaveBeenCalled(); expect(f.actions.speak).not.toHaveBeenCalled();
+    await handlePilotEvent(f.deps, "call.speak.ended", f.payload("notice", { status: "completed" }), true);
+    expect(f.session.status).toBe("notice"); expect(f.session.notice_completed_at).toBeUndefined();
+    expect(f.actions.startRecording).not.toHaveBeenCalled(); expect(f.actions.startStreaming).toHaveBeenCalledOnce();
+  });
+  it("takes the protected pilot rehearsal through the public opening without its prior acknowledgment or preparation", async () => {
+    const f = fixture();
+    Object.assign(f.session, { access_source: "pilot", disclosure_version: 1, public_notice_rehearsal: true, prior_disclosure_acknowledged_at: "2026-09-13T00:00:00Z" });
+    await handlePilotEvent(f.deps, "call.playback.ended", f.payload("ringing", { status: "completed" }), true);
+    expect(f.deps.commercialWorkerReady).toHaveBeenCalledOnce();
+    expect(f.rpc).not.toHaveBeenCalledWith("prepare_preinformed_voice_session", expect.anything());
+    expect(f.actions.speak).not.toHaveBeenCalled(); expect(f.actions.startRecording).not.toHaveBeenCalled();
+    expect(f.actions.startStreaming).toHaveBeenCalledOnce(); expect(f.session.status).toBe("notice");
+  });
+  it("fails a new public opening closed when its upgraded worker is unavailable", async () => {
+    const f = fixture(); Object.assign(f.session, { access_source: "commercial", disclosure_version: 1 });
+    vi.mocked(f.deps.commercialWorkerReady!).mockResolvedValue(false);
+    await expect(startCommercialVoice(f.deps, f.session)).rejects.toThrow("voice_worker_unavailable");
+    expect(f.actions.startStreaming).not.toHaveBeenCalled(); expect(f.actions.startRecording).not.toHaveBeenCalled();
+  });
   it("preserves original signed commercial end evidence across retries without arrival-time writes", async () => {
     const f = fixture("active");
     f.session.access_source = "commercial";

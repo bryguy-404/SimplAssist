@@ -343,7 +343,7 @@ export function OwnerVoiceSettingsContent({
       <VoiceMinuteUsage settings={settings} />
       <p className={clsx("mt-4 text-sm", bodyFaint)}>
         {pilot ? "Pilot minutes include time the voice session spends listening and waiting."
-          : "Voice minutes count from when your AI begins speaking until the caller hangs up, including listening, pauses, and checking answers. Ringing does not count."}
+          : "Voice minutes count after the opening notice, including conversation, listening, pauses, and checking answers until the caller hangs up. Ringing, connection setup, and the opening notice do not count."}
       </p>
       <p className={clsx("mt-2 text-sm", bodyFaint)}>
         Extra voice minutes are not purchased or charged automatically.

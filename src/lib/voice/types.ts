@@ -9,6 +9,12 @@ export interface VoiceSession {
   id: string;
   /** Missing on legacy fixtures; persisted legacy calls default to pilot. */
   access_source?: "pilot" | "commercial";
+  disclosure_version?: number;
+  public_notice_rehearsal?: boolean;
+  disclosure_started_at?: string | null;
+  disclosure_event_id?: string | null;
+  recording_started_at?: string | null;
+  conversation_handoff_event_id?: string | null;
   allowance_period_id?: string | null;
   commercial_deadline_at?: string | null;
   text_fallback_enabled?: boolean;
@@ -61,3 +67,5 @@ export interface VoicePilotSettings {
   max_call_seconds: number;
   revision: number;
 }
+
+export const usesPublicDisclosure = (session: VoiceSession) => session.disclosure_version === 1 && (session.access_source === "commercial" || session.public_notice_rehearsal === true);

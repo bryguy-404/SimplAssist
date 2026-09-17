@@ -52,6 +52,22 @@ describe("commercial voice persistence", () => {
     await f.store.finish("technical_failure", "audio_failed", true);
     expect(f.rpc).toHaveBeenLastCalledWith("finalize_voice_session", expect.objectContaining({ p_fallback: false }));
   });
+  it("persists disclosure, recording and acknowledged handoff as separate guarded steps", async () => {
+    const f = fixture();
+    await f.store.beginDisclosure!("provider"); await f.store.completeDisclosure!("notice-1-id");
+    await f.store.recordingStarted!(); await f.store.handoffStarted!("handoff-id", "2026-09-17T12:00:00Z");
+    await f.store.handoffAcknowledged!("handoff-id", 2400);
+    expect(f.rpc.mock.calls).toEqual([
+      ["begin_voice_disclosure", { p_session_id: "call", p_openai_id: "provider" }],
+      ["complete_voice_disclosure", { p_session_id: "call", p_event_id: "notice-1-id" }],
+      ["mark_voice_recording_started", { p_session_id: "call" }],
+      ["begin_voice_conversation_handoff", { p_session_id: "call", p_event_id: "handoff-id", p_started_at: "2026-09-17T12:00:00Z" }],
+      ["acknowledge_voice_conversation_handoff", { p_session_id: "call", p_event_id: "handoff-id", p_input_start_ms: 2400 }],
+    ]);
+    f.rpc.mockResolvedValue({ data: false, error: null });
+    await expect(f.store.completeDisclosure!("notice-1-denied")).rejects.toThrow();
+    await expect(f.store.handoffAcknowledged!("handoff-denied", 2400)).rejects.toThrow();
+  });
   it("rejects a commercial stream routed to a different action business", async () => {
     const f = fixture();
     f.rpc.mockResolvedValue({ data: { ...session, action_business_id: "other" }, error: null });

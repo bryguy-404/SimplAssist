@@ -53,7 +53,20 @@ The private source archive is revision `14d96aa`, SHA-256 `dad2cdfdcd2f04426732f
 - Application deployment `34e7aae2-84e4-4ffb-931f-45d6c83e922c` succeeded from the same private source archive. Application/worker health and authenticated readiness return 200; unauthorized owner review and the new settings endpoint return 401, and unauthorized worker readiness returns 404. The worker reports zero active calls, GPT-Live-1/pcm16 and both protocol versions 1.
 - Independent post-deployment verification at 06:44 UTC confirmed both new deployment IDs are successful, the scan worker is unchanged, apex/www and worker health return 200, and the protected settings endpoint returns 401 without authentication. Commercial rollout remains off with an empty allowlist/accounting state; all baseline pilot, subscription, usage and Leads fingerprints remain unchanged.
 - The final production build after the browser save correction passed.
-- A new caller-driven acceptance test was requested after deployment. Bryan chose to test later. Its spoken experience, one-text/one-Lead outcome and recording playback remain pending; the approved previous calls are not treated as proof of this release.
+- Bryan completed the new caller-driven test and reported that the phone call went very well and everything went through correctly. The phone/signup regression check passed; independent evidence is recorded below. Protected recording playback was not explicitly confirmed.
+
+### Caller acceptance — September 17, 2026
+
+Bryan accepted the latest phone experience and deferred further response-timing, pause and conversation refinements. A separate read-only metadata check at **12:36:53 UTC** verified the only post-deployment call, `482dc460-aa91-4db6-96e5-018aca3bd126`, created at 12:29:05 UTC and ended by the caller at 12:33:17 UTC:
+
+- Normal closed call, with no call/action error and no pending or completed fallback text.
+- Contact action succeeded with matching contact and confirmation links. One existing-contact detail conflict was preserved for dashboard review; it was not a save failure or an overwrite of protected existing details.
+- Signup action `4dfd352b-395f-4895-93ee-c9c05f54c595` succeeded, with delivery confirmed: exactly one original SMS, one matching SMS usage record, and one Lead for that provider submission.
+- Lead provenance is correct, with its event date equal to the provider-acceptance timestamp, 12:32:09.838 UTC. The business now has five signup-link Leads.
+- One recording is retained through October 17 at 12:29:05 UTC. The verifier inspected metadata only; it did not play audio or read transcripts. Owner playback remains a separate unconfirmed check.
+- OpenAI provider usage is confirmed. Pilot settings remain unchanged, this call used the pilot access source, and no commercial allowance or usage was created. Commercial rollout remains disabled with an empty allowed-business list.
+
+This evidence verifies the existing pilot after the access/minutes deployment. Normal paid Full Suite purchasing, onboarding, commercial activation and actual voice booking remain the next launch work.
 
 ## Rollback
 
@@ -61,6 +74,10 @@ Disable commercial admissions first. Drain any commercial calls using a compatib
 
 ## Remaining launch work
 
-Commercial sales and access remain closed until public greeting/recording behavior, additional businesses, actual bookings/calendar invitations, remaining structured call/failure tests, worker capacity and combined costs are verified. A replacement Stripe subscription for an already projected account currently fails closed; an explicitly authorized subscription-replacement flow must be verified before commercial resubscription opens. Homepage/checkout/onboarding rollout and paid extra usage require their later approved release work.
+Bryan subsequently chose a smaller public Full Suite launch instead of a separate private early-access cohort. After the final pilot call, review the advertised feature list, retain working features, and agree on any useful small additions. The intended starting package remains everything in Growth, 2,500 SMS parts and 100 voice minutes for $65/month. Postponed features must be removed from the included-feature promises or clearly marked as future features.
 
-After closed deployment, Bryan should make one approved private signup call and confirm the accepted speech experience, one signup text, one Lead and protected recording playback. Automated checks cannot establish real phone naturalness.
+Before opening purchases, verify the ordinary purchase, onboarding, plan permissions, voice activation and minute-accounting path, including the booking capabilities selected for launch. Bryan's friend will then subscribe through the ordinary public website, complete account approval and connect a calendar; use that real account to test appointments and invitations and improve the experience. No separate private early-access signup is planned.
+
+Commercial sales and access remain closed during this preparation. Public greeting/recording behavior, business isolation, remaining failure tests, worker capacity and combined costs still need release checks. A replacement Stripe subscription for an already projected account currently fails closed; an explicitly authorized subscription-replacement flow must be verified before commercial resubscription opens. Homepage/checkout/onboarding rollout and paid extra usage require their later approved release work.
+
+Preserve the accepted voice experience as the baseline. Bryan prefers to revisit response timing, pauses and conversation refinements later.

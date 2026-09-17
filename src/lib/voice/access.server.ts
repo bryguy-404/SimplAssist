@@ -39,11 +39,13 @@ export async function hasCustomerVoiceRoutingConfiguration(businessId: string): 
 export async function isCustomerVoiceRolloutEnabledForBusiness(businessId: string): Promise<boolean> {
   const [control, business] = await Promise.all([
     supabaseAdmin.from("voice_rollout_control").select("enabled,emergency_stop").eq("singleton", true).maybeSingle(),
-    supabaseAdmin.from("voice_rollout_businesses").select("enabled,emergency_stop").eq("business_id", businessId).maybeSingle(),
+    supabaseAdmin.from("voice_rollout_businesses").select("emergency_stop").eq("business_id", businessId).maybeSingle(),
   ]);
   if (control.error || business.error) throw new VoiceSettingsError("unavailable");
+  // Public paid accounts do not need a membership row. Per-business rows only
+  // provide an emergency stop; SQL repeats this plus payment/period checks.
   return control.data?.enabled === true && control.data.emergency_stop === false &&
-    business.data?.enabled === true && business.data.emergency_stop === false;
+    (business.data === null || business.data?.emergency_stop === false);
 }
 
 /** Caller resolves current workspace access. No provider identities or raw rows leave this projection. */

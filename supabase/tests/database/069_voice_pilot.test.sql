@@ -23,7 +23,8 @@ SELECT is((SELECT count(DISTINCT conversation_id)::integer FROM public.voice_ses
 SELECT is((public.admit_voice_pilot('ea848911-ef72-44a6-8cf3-c47b3959be26','third','third','+15555550101','+15742638634',true)).outcome,'capacity_unavailable','concurrent capacity enforced');
 SELECT is((SELECT count(*)::integer FROM public.contacts WHERE business_id = 'ea848911-ef72-44a6-8cf3-c47b3959be26'),1,'caller identity reused without customer history lookup');
 SELECT throws_ok($$ SELECT public.admit_voice_pilot('ea848911-ef72-44a6-8cf3-c47b3959be26','first','first','+15555550999','+15742638634',true) $$,'P0001','Call identity mismatch','cannot reuse a call identity for a different caller');
-UPDATE public.voice_sessions SET status='closed' WHERE response_mode='voice';
+-- Phone termination frees capacity; unconfirmed provider usage still holds budget.
+UPDATE public.voice_sessions SET status='closed',phone_ended_at=clock_timestamp() WHERE response_mode='voice';
 UPDATE public.voice_pilot_settings SET budget_seconds=1200;
 SELECT is((public.admit_voice_pilot('ea848911-ef72-44a6-8cf3-c47b3959be26','empty','empty','+15555550101','+15742638634',true)).outcome,'minutes_unavailable','unconfirmed usage retains reservation after loss');
 UPDATE public.voice_pilot_settings SET budget_seconds=12000;

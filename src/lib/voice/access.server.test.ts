@@ -3,7 +3,7 @@ const mocks = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn(), ready: vi.fn() })
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/admin", () => ({ supabaseAdmin: { rpc: mocks.rpc, from: mocks.from } }));
 vi.mock("./routing", () => ({ checkVoiceWorkerReady: mocks.ready }));
-import { getOwnerVoiceSettings, updateOwnerVoiceSettings, hasCustomerVoiceRoutingConfiguration } from "./access.server";
+import { getOwnerVoiceSettings, updateOwnerVoiceSettings, hasCustomerVoiceRoutingConfiguration, isCustomerVoiceRolloutEnabledForBusiness } from "./access.server";
 const summary = {
   visible: true, access_source: "commercial", eligible: true, reason: null, primary_response: "voice", text_fallback_enabled: true,
   revision: 2, period_end: "2026-10-17T00:00:00Z", included_seconds: 6000, used_seconds: 1200, held_seconds: 600,
@@ -17,6 +17,24 @@ beforeEach(() => {
   query.maybeSingle.mockResolvedValue({ data: { timezone: "America/Indiana/Indianapolis" }, error: null }); mocks.from.mockReturnValue(query);
 });
 describe("safe owner voice projection", () => {
+  it.each([null, { emergency_stop: false }, { enabled: false, emergency_stop: false }])("public rollout does not require a business allowlist %#", async (data) => {
+    mocks.from().maybeSingle.mockResolvedValueOnce({ data: { enabled: true, emergency_stop: false }, error: null }).mockResolvedValueOnce({ data, error: null });
+    expect(await isCustomerVoiceRolloutEnabledForBusiness("business")).toBe(true);
+  });
+  it.each([
+    [{ enabled: false, emergency_stop: false }, null],
+    [{ enabled: true, emergency_stop: true }, null],
+    [{ enabled: true, emergency_stop: false }, { emergency_stop: true }],
+    [null, null],
+    [{ enabled: true, emergency_stop: false }, {}],
+  ])("respects global and business emergency controls %#", async (control, business) => {
+    mocks.from().maybeSingle.mockResolvedValueOnce({ data: control, error: null }).mockResolvedValueOnce({ data: business, error: null });
+    expect(await isCustomerVoiceRolloutEnabledForBusiness("business")).toBe(false);
+  });
+  it("fails closed when optional emergency lookup cannot be verified", async () => {
+    mocks.from().maybeSingle.mockResolvedValueOnce({ data: { enabled: true, emergency_stop: false }, error: null }).mockResolvedValueOnce({ data: null, error: { code: "unavailable" } });
+    await expect(isCustomerVoiceRolloutEnabledForBusiness("business")).rejects.toThrow("voice_settings_unavailable");
+  });
   it.each([null, { primary_response: "text" }])("keeps untouched/text-only routing on the existing path %#", async (data) => {
     const query = mocks.from(); query.maybeSingle.mockResolvedValue({ data, error: null });
     mocks.from.mockClear(); expect(await hasCustomerVoiceRoutingConfiguration("business")).toBe(false);

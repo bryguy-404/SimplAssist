@@ -2,9 +2,12 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET LOCAL search_path=public,extensions;
 SELECT no_plan();
+-- This suite exercises retained protocol-0 calls. New disclosure behavior is
+-- covered separately; the default change is transaction-local and rolls back.
+ALTER TABLE public.voice_sessions ALTER COLUMN disclosure_version SET DEFAULT 0;
 CREATE TEMP TABLE fixture(n integer PRIMARY KEY,b uuid,o uuid);
 CREATE FUNCTION pg_temp.customer(n integer,initial_plan text DEFAULT 'full') RETURNS uuid LANGUAGE plpgsql AS $$
-DECLARE b uuid:=gen_random_uuid(); o uuid:=gen_random_uuid(); rev bigint;
+DECLARE b uuid:=gen_random_uuid(); o uuid:=gen_random_uuid(); rev bigint; operation uuid;
 BEGIN
   INSERT INTO auth.users(id,email) VALUES(o,'voice-monthly-'||n||'@example.test');
   INSERT INTO public.businesses(id,owner_id,name,business_type,slug) VALUES(b,o,'Monthly voice','general','voice-monthly-'||n);
@@ -14,6 +17,12 @@ BEGIN
   INSERT INTO public.subscriptions(business_id,stripe_customer_id,stripe_subscription_id,plan,status,current_period_start,current_period_end)
     VALUES(b,'cus_monthly_'||n,'sub_monthly_'||n,initial_plan,'active',now()-interval '10 days',now()+interval '20 days');
   rev:=public.begin_voice_billing_reconciliation(b,'sub_monthly_'||n,'cus_monthly_'||n);
+  INSERT INTO public.sms_billing_operations(business_id,owner_id,kind,state,target_plan,target_price_id,stripe_subscription_id,stripe_customer_id,
+    source_fingerprint,expires_at,confirmed_at,applied_at,invoice_id,payment_effective_at,payment_verified_at)
+    VALUES(b,o,'checkout','applied','full','price_fixture','sub_monthly_'||n,'cus_monthly_'||n,repeat('a',64),now()+interval '1 day',now(),now(),
+      'in_monthly_'||n,now()-interval '10 days',now()) RETURNING id INTO operation;
+  UPDATE public.voice_billing_projection SET entitlement_operation_id=operation WHERE business_id=b;
+  PERFORM public.record_voice_billing_payment(b,rev,'sub_monthly_'||n,'cus_monthly_'||n,'in_monthly_'||n,now()-interval '10 days',now()+interval '20 days',now()-interval '10 days');
   UPDATE public.subscriptions SET plan='full' WHERE business_id=b;
   PERFORM public.apply_voice_billing_projection(b,rev,'sub_monthly_'||n,'full','active',now()-interval '10 days',now()+interval '20 days',false,
     CASE WHEN initial_plan='full' THEN now()-interval '10 days' ELSE now() END);

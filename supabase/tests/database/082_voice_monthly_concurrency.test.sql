@@ -50,8 +50,15 @@ INSERT INTO public.voice_commercial_settings(business_id,primary_response) VALUE
 INSERT INTO public.subscriptions(business_id,stripe_customer_id,stripe_subscription_id,plan,status,current_period_start,current_period_end)
   VALUES('10000000-0000-4000-a082-000000000001','cus_monthly_race','sub_monthly_race','full','active',date_trunc('day',now())-interval '10 days',date_trunc('day',now())+interval '20 days');
 INSERT INTO public.phone_numbers(business_id,phone_number,telnyx_phone_number_id,is_active) VALUES('10000000-0000-4000-a082-000000000001','+15555558888','monthly-race-number',true);
-DO $$ DECLARE rev bigint; p uuid; BEGIN
+DO $$ DECLARE rev bigint; p uuid; operation uuid; BEGIN
   rev:=public.begin_voice_billing_reconciliation('10000000-0000-4000-a082-000000000001','sub_monthly_race','cus_monthly_race');
+  INSERT INTO public.sms_billing_operations(business_id,owner_id,kind,state,target_plan,target_price_id,stripe_subscription_id,stripe_customer_id,
+    source_fingerprint,expires_at,confirmed_at,applied_at,invoice_id,payment_effective_at,payment_verified_at)
+    VALUES('10000000-0000-4000-a082-000000000001','00000000-0000-4000-a082-000000000001','checkout','applied','full','price_fixture',
+      'sub_monthly_race','cus_monthly_race',repeat('a',64),now()+interval '1 day',now(),now(),'in_monthly_race',date_trunc('day',now())-interval '10 days',now()) RETURNING id INTO operation;
+  UPDATE public.voice_billing_projection SET entitlement_operation_id=operation WHERE business_id='10000000-0000-4000-a082-000000000001';
+  PERFORM public.record_voice_billing_payment('10000000-0000-4000-a082-000000000001',rev,'sub_monthly_race','cus_monthly_race','in_monthly_race',
+    date_trunc('day',now())-interval '10 days',date_trunc('day',now())+interval '20 days',date_trunc('day',now())-interval '10 days');
   PERFORM public.apply_voice_billing_projection('10000000-0000-4000-a082-000000000001',rev,'sub_monthly_race','full','active',date_trunc('day',now())-interval '10 days',date_trunc('day',now())+interval '20 days',false,date_trunc('day',now())-interval '10 days');
   SELECT id INTO p FROM public.voice_allowance_periods WHERE business_id='10000000-0000-4000-a082-000000000001';
   INSERT INTO public.voice_customer_usage(call_key,call_identity_hash,business_id,period_id,reserved_seconds,settled_seconds,state,settled_at)
@@ -82,6 +89,7 @@ SELECT extensions.dblink_disconnect('monthly_c');
 SELECT extensions.dblink_exec('monthly_setup',$prepare$
 DO $$ DECLARE s public.voice_customer_usage; BEGIN
   SELECT * INTO s FROM public.voice_customer_usage WHERE business_id='10000000-0000-4000-a082-000000000001' AND settled_at IS NULL;
+  UPDATE public.voice_sessions SET disclosure_version=0 WHERE id=s.call_key;
   PERFORM public.record_voice_customer_start(s.call_key,'race-first-audible',s.created_at);
   PERFORM public.acknowledge_voice_customer_start(s.call_key,'race-first-audible');
   PERFORM public.record_voice_customer_termination(s.call_key,'race-proven-termination',clock_timestamp());
@@ -128,6 +136,11 @@ END $$;
 ALTER TABLE public.business_metric_events DISABLE TRIGGER reject_business_metric_events_mutation;
 DELETE FROM public.business_metric_events WHERE business_id='10000000-0000-4000-a082-000000000001';
 ALTER TABLE public.business_metric_events ENABLE TRIGGER reject_business_metric_events_mutation;
+ALTER TABLE public.voice_billing_payments DISABLE TRIGGER guard_voice_payment_history;
+DELETE FROM public.voice_billing_payments WHERE invoice_id='in_monthly_race';
+ALTER TABLE public.voice_billing_payments ENABLE TRIGGER guard_voice_payment_history;
+DELETE FROM public.sms_billing_operations WHERE business_id='10000000-0000-4000-a082-000000000001';
+DELETE FROM public.sms_billing_accounts WHERE business_id='10000000-0000-4000-a082-000000000001';
 DELETE FROM public.businesses WHERE id='10000000-0000-4000-a082-000000000001';
 DELETE FROM auth.users WHERE id='00000000-0000-4000-a082-000000000001';
 UPDATE public.voice_rollout_control SET enabled=false;

@@ -86,7 +86,7 @@ export async function sendBookingNotification(action: VoiceAction, call: { calle
   }
 }
 export async function reconcileBookingNotifications() {
-  const pending = await db.from('booking_notifications').select('*').or('and(provider_message_id.not.is.null,usage_recorded_at.is.null),status.eq.accepted,status.eq.submitting').order('reconciled_at', { nullsFirst: true }).limit(12);
+  const pending = await db.from('booking_notifications').select('*').or('and(provider_message_id.not.is.null,usage_recorded_at.is.null),and(provider_message_id.not.is.null,action_recorded_at.is.null),status.eq.accepted,status.eq.submitting').order('reconciled_at', { nullsFirst: true }).limit(12);
   if (pending.error) throw new Error('booking_text_recovery_unavailable');
   for (const raw of pending.data ?? []) {
     const n = raw as NotificationRow;
@@ -101,10 +101,10 @@ export async function reconcileBookingNotifications() {
         const recipient = response.data?.to?.[0];
         if (recipient?.phone_number !== n.destination) throw new Error('booking_text_provider_mismatch');
         const status = recipient.status === 'delivered' ? 'delivered' : ['delivery_failed','sending_failed','expired','cancelled'].includes(recipient.status ?? '') ? 'failed' : n.status;
-        const updated = await db.from('booking_notifications').update({ status }).eq('id', n.id).eq('business_id', n.business_id);
-        if (updated.error) throw new Error('booking_text_delivery_save_failed');
         const action = await db.from('voice_actions').update({ status: status === 'failed' ? 'failed' : 'succeeded', recovery_complete: true, result: { summary: notificationSummary({ ...n, status }), notificationId: n.id, deliveryStatus: status }, updated_at: new Date().toISOString() }).eq('id', n.permission_action_id).eq('business_id', n.business_id).in('status',['executing','uncertain','succeeded']);
         if (action.error) throw new Error('booking_text_action_recovery_failed');
+        const updated = await db.from('booking_notifications').update({ status, action_recorded_at: new Date().toISOString() }).eq('id', n.id).eq('business_id', n.business_id);
+        if (updated.error) throw new Error('booking_text_delivery_save_failed');
       } else if (n.status === 'submitting' && Date.parse(raw.updated_at) < Date.now()-60000) {
         await db.from('booking_notifications').update({ status: 'uncertain' }).eq('id', n.id).eq('status', 'submitting');
       }

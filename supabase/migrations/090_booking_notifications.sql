@@ -3,7 +3,9 @@ ALTER TABLE public.voice_actions DROP CONSTRAINT voice_actions_kind_check;
 ALTER TABLE public.voice_actions ADD CONSTRAINT voice_actions_kind_check CHECK(kind IN ('contact','booking','booking_request','signup','booking_review_text','booking_confirmation_text'));
 ALTER TABLE public.voice_actions DROP CONSTRAINT voice_actions_session_id_kind_fingerprint_key;
 CREATE UNIQUE INDEX voice_actions_live_fingerprint ON public.voice_actions(session_id,kind,fingerprint) WHERE status<>'superseded';
-ALTER TABLE public.booking_notifications ADD COLUMN usage_recorded_at timestamptz, ADD COLUMN reconciled_at timestamptz;
+-- Preserve the existing contact/signup identity and continuation behavior.
+CREATE UNIQUE INDEX voice_actions_legacy_fingerprint ON public.voice_actions(session_id,kind,fingerprint) WHERE kind IN ('contact','signup');
+ALTER TABLE public.booking_notifications ADD COLUMN usage_recorded_at timestamptz, ADD COLUMN reconciled_at timestamptz, ADD COLUMN action_recorded_at timestamptz;
 CREATE OR REPLACE FUNCTION public.voice_action_allowed(p_session_id uuid,p_kind text) RETURNS boolean
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path='' AS $$
 BEGIN
@@ -36,7 +38,7 @@ BEGIN
     WHERE NOT EXISTS(SELECT 1 FROM public.voice_transcript_fragments f WHERE f.session_id=s.id AND f.event_id=e AND f.role='customer')) THEN
     RAISE EXCEPTION 'request transcript evidence missing'; END IF;
   SELECT * INTO a FROM public.voice_actions WHERE session_id=s.id AND kind=p_kind AND fingerprint=p_fingerprint ORDER BY revision DESC LIMIT 1;
-  IF a.id IS NOT NULL AND a.status<>'superseded' THEN RETURN a; END IF;
+  IF a.id IS NOT NULL AND (a.status<>'superseded' OR p_kind IN ('contact','signup')) THEN RETURN a; END IF;
   IF EXISTS(SELECT 1 FROM public.voice_actions WHERE session_id=s.id AND status IN ('executing','uncertain')) THEN
     RAISE EXCEPTION 'previous action unresolved'; END IF;
   IF p_kind IN ('booking','booking_request') AND COALESCE((p_payload->>'newAppointment')::boolean,false)=false AND EXISTS(SELECT 1 FROM public.voice_actions WHERE session_id=s.id AND kind IN ('booking','booking_request') AND status='succeeded') THEN

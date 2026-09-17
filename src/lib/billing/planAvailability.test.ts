@@ -16,7 +16,7 @@ describe("plan sales availability", () => {
       chat_only: "hidden",
       sms_only: "available",
       sms_and_chat: "available",
-      full: "coming_soon",
+      full: "available",
     });
     expect(CUSTOMER_VISIBLE_PLAN_ORDER).toEqual([
       "sms_only",
@@ -29,7 +29,7 @@ describe("plan sales availability", () => {
     ["chat_only", false, false],
     ["sms_only", true, true],
     ["sms_and_chat", true, true],
-    ["full", false, true],
+    ["full", true, true],
   ] satisfies [SubscriptionPlan, boolean, boolean][])(
     "reports whether %s can start a new sale",
     (plan, expected, visible) => {
@@ -41,9 +41,9 @@ describe("plan sales availability", () => {
     }
   );
 
-  it("replaces an unavailable saved Full selection with Growth", () => {
+  it("preserves the available Full selection and falls back for hidden plans", () => {
     expect(availablePlanOrFallback("full", "sms_and_chat")).toBe(
-      "sms_and_chat"
+      "full"
     );
     expect(availablePlanOrFallback("sms_only", "sms_and_chat")).toBe(
       "sms_only"
@@ -53,7 +53,7 @@ describe("plan sales availability", () => {
     );
   });
 
-  it("preserves Full only for an already-paid onboarding retry", () => {
+  it("recognizes a paid Full onboarding retry separately from a new purchase", () => {
     expect(paidPlanForOnboardingRetry("full", "active")).toBe("full");
     expect(paidPlanForOnboardingRetry("full", "trialing")).toBe("full");
     expect(paidPlanForOnboardingRetry("full", "past_due")).toBeNull();

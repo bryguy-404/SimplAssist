@@ -338,9 +338,9 @@ describe("canonical homepage static HTML", () => {
     expect(text).toContain("SMS + Web Chat");
     expect(text).toContain("Full Suite");
     expect(text.match(/Most Popular/g)).toHaveLength(1);
-    expect(text.match(/Coming Soon/g)).toHaveLength(2);
-    expect(pricing?.match(/href="\/signup"/g)).toHaveLength(3);
-    expect(text).toContain("Notify Me When It Launches");
+    expect(text).not.toContain("Coming Soon");
+    expect(pricing?.match(/href="\/signup"/g)).toHaveLength(4);
+    expect(text).not.toContain("Notify Me When It Launches");
     expect(pricing).toContain('<table class="w-full min-w-[940px]');
     expect(pricing).toContain('role="region"');
     expect(pricing).toContain('aria-label="Complete plan feature comparison"');

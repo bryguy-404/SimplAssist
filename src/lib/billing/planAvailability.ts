@@ -16,7 +16,7 @@ export const PLAN_SALES_STATUS = {
   chat_only: "hidden",
   sms_only: "available",
   sms_and_chat: "available",
-  full: "coming_soon",
+  full: "available",
 } as const satisfies Record<SubscriptionPlan, PlanSalesStatus>;
 
 /**

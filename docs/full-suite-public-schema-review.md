@@ -46,3 +46,18 @@ A read-only transaction against project `inmgpkurctttsofpywuz` verified:
 - The pilot settings, approved testers, and subscription fingerprints were unchanged. Fourteen calls remained pilot history; no call was active.
 
 The baseline is preserved locally in `/private/tmp/full-suite-independent-baseline-report.json` for comparison after application. Migration 085 permits a configured capacity of four but leaves the stored value at two. Public rollout and commercial sales remain closed until the separate release checks pass.
+
+## Independent production verification after migration
+
+A separate read-only session verified production after the root applied the atomic 084–086 bundle, before application deployment. **All checks passed.**
+
+- Canonical migration-text hashes match for 081–086.
+- The tested local catalog matches production exactly: 81 functions, 13 tables, 180 columns, 82 constraints, 29 indexes, 12 triggers, four policies, function grants/security settings, table permissions, and the pilot totals view.
+- Pilot settings, testers, subscriptions, prior call accounting, provider usage, SMS usage, and Leads fingerprints are unchanged.
+- Rollout remains disabled at capacity two. No commercial grant, usage, setting, operation, payment proof, pilot retirement, or rehearsal arm was created.
+- Migration 084 copied exactly two existing customer/setup-fee identity records. Their business, customer, and setup timestamps exactly match existing subscriptions; this did not create a purchase or voice allowance.
+- All fourteen historical sessions retain protocol zero and pilot accounting. No voice call was active.
+
+Production catalog SHA-256: `3a2cc3c54743eb9503f4f3fcef9d768ffa9244a3c2c68482008b8a260edb167c`.
+
+The complete machine-readable comparison is `/private/tmp/full-suite-independent-after-report.json`; the independently captured production catalog is `/private/tmp/full-suite-independent-production-catalog.json`. Verification used only explicit read-only transactions on project `inmgpkurctttsofpywuz`.

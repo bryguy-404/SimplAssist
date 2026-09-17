@@ -47,7 +47,7 @@ const EXISTING_PLAN_BASELINE = {
     name: "Pro / Full Suite",
     price: 65,
     includedSmsParts: 2500,
-    salesStatus: "coming_soon",
+    salesStatus: "available",
     capabilities: [
       "missed_call_sms",
       "manual_sms",

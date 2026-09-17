@@ -19,7 +19,7 @@ describe("PlanSelectionOption", () => {
     expect(markup).toBe("");
   });
 
-  it("renders Full Suite as a non-selectable waitlist card", () => {
+  it("renders Full Suite as a non-selectable waitlist card when its gate is closed", () => {
     const markup = renderToStaticMarkup(
       <PlanSelectionOption
         inputName="plan"
@@ -28,6 +28,7 @@ describe("PlanSelectionOption", () => {
         selected={false}
         recommended={false}
         onSelect={vi.fn()}
+        availabilityOverride="coming_soon"
       />
     );
 
@@ -35,6 +36,17 @@ describe("PlanSelectionOption", () => {
     expect(markup).toContain("Notify Me When It Launches");
     expect(markup).not.toContain('type="radio"');
     expect(markup.startsWith("<div")).toBe(true);
+  });
+
+  it("makes public Full Suite selectable with its actual activation total", () => {
+    const markup = renderToStaticMarkup(<PlanSelectionOption inputName="plan" planKey="full" plan={SUBSCRIPTION_PLANS.full}
+      selected={false} recommended={false} onSelect={vi.fn()} />);
+    expect(markup).toContain('type="radio"');
+    expect(markup).toContain('value="full"');
+    expect(markup).toContain("$90 today");
+    expect(markup).toContain("$65/month");
+    expect(markup).not.toContain("Coming Soon");
+    expect(markup).not.toContain("Notify Me When It Launches");
   });
 
   it("keeps an available plan selectable", () => {

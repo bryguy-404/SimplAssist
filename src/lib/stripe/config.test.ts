@@ -17,14 +17,14 @@ describe("launch pricing packages", () => {
       Object.fromEntries(
         Object.entries(SUBSCRIPTION_PLANS).map(([key, plan]) => [
           key,
-          { price: plan.price, includedSmsParts: plan.includedSmsParts },
+          { price: plan.price, includedSmsParts: plan.includedSmsParts, includedVoiceMinutes: plan.includedVoiceMinutes },
         ]),
       ),
     ).toEqual({
-      chat_only: { price: 10, includedSmsParts: 0 },
-      sms_only: { price: 25, includedSmsParts: 500 },
-      sms_and_chat: { price: 45, includedSmsParts: 1500 },
-      full: { price: 65, includedSmsParts: 2500 },
+      chat_only: { price: 10, includedSmsParts: 0, includedVoiceMinutes: 0 },
+      sms_only: { price: 25, includedSmsParts: 500, includedVoiceMinutes: 0 },
+      sms_and_chat: { price: 45, includedSmsParts: 1500, includedVoiceMinutes: 0 },
+      full: { price: 65, includedSmsParts: 2500, includedVoiceMinutes: 100 },
     });
   });
 

@@ -42,9 +42,9 @@ type PlanCapabilityVector = Readonly<Record<FeatureKey, boolean>>;
  * requires a deliberate capability decision instead of inheriting access from
  * a numeric rank.
  *
- * Future Full features intentionally live in this matrix before their product
- * implementations exist. That keeps pricing language and later runtime gates
- * anchored to stable identifiers without exposing placeholder functionality.
+ * Reserved future feature identifiers remain stable, but grant no access until
+ * their implementations ship. Purchase eligibility cannot promise a capability
+ * merely because its future plan has already been chosen.
  */
 export const PLAN_CAPABILITY_MATRIX = {
   chat_only: {
@@ -118,13 +118,13 @@ export const PLAN_CAPABILITY_MATRIX = {
     calendar: true,
     direct_booking: true,
     advanced_guardrails: true,
-    advanced_analytics: true,
-    conversion_reporting: true,
-    weekly_summary: true,
-    lead_alerts: true,
-    review_requests: true,
-    follow_up_automation: true,
-    priority_support: true,
+    advanced_analytics: false,
+    conversion_reporting: false,
+    weekly_summary: false,
+    lead_alerts: false,
+    review_requests: false,
+    follow_up_automation: false,
+    priority_support: false,
     ai_voice_answering: true,
   },
 } as const satisfies Readonly<Record<SubscriptionPlan, PlanCapabilityVector>>;

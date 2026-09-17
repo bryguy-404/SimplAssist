@@ -1,4 +1,5 @@
 import "server-only";
+import { FULL_SUITE_PACKAGE_SUMMARY } from "@/lib/billing/fullSuitePresentation";
 
 import { randomUUID } from "node:crypto";
 import { publicAppOrigin } from "@/lib/billing/publicAppOrigin";
@@ -127,7 +128,7 @@ export async function sendFullSuiteLaunchEmail(
       text: [
         "Full Suite is live.",
         "",
-        "Advanced analytics, lead alerts, review requests, and automated follow-ups are now available.",
+        FULL_SUITE_PACKAGE_SUMMARY,
         "",
         `Explore Full Suite: ${pricingUrl}`,
         "",
@@ -135,7 +136,7 @@ export async function sendFullSuiteLaunchEmail(
       ].join("\n"),
       html: [
         "<p><strong>Full Suite is live.</strong></p>",
-        "<p>Advanced analytics, lead alerts, review requests, and automated follow-ups are now available.</p>",
+        `<p>${escapeHtml(FULL_SUITE_PACKAGE_SUMMARY)}</p>`,
         `<p><a href="${escapeHtml(pricingUrl)}">Explore Full Suite</a></p>`,
         `<p><a href="${escapeHtml(
           unsubscribeUrl

@@ -50,7 +50,7 @@ describe("sendFullSuiteWaitlistConfirmation", () => {
       subject: "You’re on the Full Suite waitlist",
     });
     expect(message.text).toContain(
-      "Advanced analytics, lead alerts, review requests, and automated follow-ups"
+      "AI voice answering in English, 100 voice minutes per billing month, 2,500 SMS parts per month"
     );
     expect(message.text).toMatch(
       /https:\/\/simplassist\.com\/waitlist\/unsubscribe\?token=v1\./

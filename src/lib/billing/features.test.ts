@@ -49,13 +49,6 @@ const EXPECTED_FEATURES = {
     "calendar",
     "direct_booking",
     "advanced_guardrails",
-    "advanced_analytics",
-    "conversion_reporting",
-    "weekly_summary",
-    "lead_alerts",
-    "review_requests",
-    "follow_up_automation",
-    "priority_support",
     "ai_voice_answering",
   ],
 } as const satisfies Record<SubscriptionPlan, readonly FeatureKey[]>;
@@ -120,7 +113,7 @@ describe("feature plan matrix", () => {
     expect(canPlanUseFeature("chat_only", "ai_sms_conversations")).toBe(false);
   });
 
-  it("keeps every future product key reserved for Full", () => {
+  it("keeps future keys reserved without granting unavailable features", () => {
     const reserved: FeatureKey[] = [
       "advanced_analytics",
       "conversion_reporting",
@@ -129,13 +122,13 @@ describe("feature plan matrix", () => {
       "review_requests",
       "follow_up_automation",
       "priority_support",
-      "ai_voice_answering",
     ];
 
     for (const feature of reserved) {
       expect(requiredPlanForFeature(feature)).toBe("full");
       expect(canPlanUseFeature("sms_and_chat", feature)).toBe(false);
-      expect(canPlanUseFeature("full", feature)).toBe(true);
+      expect(canPlanUseFeature("full", feature)).toBe(false);
+      expect(eligiblePlansForFeature(feature)).toEqual([]);
     }
   });
 
@@ -217,9 +210,9 @@ describe("feature plan matrix", () => {
     ["sms_only", "ai_sms_conversations", "sms_and_chat"],
     ["chat_only", "manual_sms", "sms_and_chat"],
     ["chat_only", "ai_sms_conversations", "sms_and_chat"],
-    ["chat_only", "advanced_analytics", "full"],
-    ["sms_only", "advanced_analytics", "full"],
-    ["sms_and_chat", "advanced_analytics", "full"],
+    ["chat_only", "advanced_analytics", null],
+    ["sms_only", "advanced_analytics", null],
+    ["sms_and_chat", "advanced_analytics", null],
     ["chat_only", "web_chat", null],
     ["full", "manual_sms", null],
   ] as const)(
@@ -235,6 +228,10 @@ describe("feature plan matrix", () => {
         if (canPlanUseFeature(plan, feature)) continue;
 
         const recommendation = recommendedUpgradePlan(plan, feature);
+        if (eligiblePlansForFeature(feature).length === 0) {
+          expect(recommendation).toBeNull();
+          continue;
+        }
         expect(recommendation).not.toBeNull();
         expect(canPlanUseFeature(recommendation!, feature)).toBe(true);
         expect(planIncludesPlan(recommendation!, plan)).toBe(true);

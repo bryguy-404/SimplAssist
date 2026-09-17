@@ -1,4 +1,5 @@
 "use client";
+import { FULL_SUITE_PACKAGE_SUMMARY } from "@/lib/billing/fullSuitePresentation";
 
 import {
   type FormEvent,
@@ -227,8 +228,7 @@ export function FullSuiteWaitlistButton({
                     id={descriptionId}
                     className="mt-3 text-sm leading-6 text-stone-600 dark:text-[#bdbdbf]"
                   >
-                    Advanced analytics, lead alerts, review requests, and
-                    automated follow-ups are on the way.
+                    {FULL_SUITE_PACKAGE_SUMMARY}
                   </p>
                 </div>
 

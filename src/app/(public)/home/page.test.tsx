@@ -278,14 +278,12 @@ describe("canonical homepage static HTML", () => {
       "AI customization",
       "Google Calendar connection",
       "AI appointment scheduling",
-      "Advanced AI guardrails",
-      "Advanced analytics dashboard",
-      "Lead-to-appointment conversion reporting",
-      "Weekly performance summary",
-      "Real-time new-lead alerts",
-      "Review-request workflow",
-      "Automated follow-up and no-show workflows",
-      "Priority support",
+      "Custom AI rules and guardrails",
+      "AI voice answering in English",
+      "Included voice minutes/billing month",
+      "Voice contact capture and signup texts",
+      "Voice calendar booking",
+      "Voice transcripts and recordings",
     ];
 
     expect(pricing).toBeDefined();
@@ -299,7 +297,10 @@ describe("canonical homepage static HTML", () => {
     expect(text).toContain("AI customization + Google Calendar booking");
     expect(text).toContain("No phone, texting, or setup fee");
     expect(text).toContain("$25 one-time SMS activation fee");
-    expect(text).toContain("2,500 SMS parts/month + priority support");
+    expect(text).toContain("2,500 included SMS parts/month");
+    expect(text).toContain("100 voice minutes/billing month");
+    expect(text).not.toContain("Priority support");
+    expect(text).not.toContain("Advanced analytics dashboard");
     expect(text).toContain("Everything in SMS Only, plus");
     expect(text).toContain("Everything in SMS + Web Chat, plus");
     expect(text).toContain("Full AI SMS conversations + customization");

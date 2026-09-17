@@ -9,6 +9,7 @@ export const SUBSCRIPTION_PLANS: Record<
     name: string;
     price: number;
     includedSmsParts: number;
+    includedVoiceMinutes: number;
     includedAiReplies: number | null;
     features: string[];
   }
@@ -17,6 +18,7 @@ export const SUBSCRIPTION_PLANS: Record<
     name: "Chat Only",
     price: 10,
     includedSmsParts: 0,
+    includedVoiceMinutes: 0,
     includedAiReplies: 200,
     features: [
       "Website chat widget",
@@ -33,6 +35,7 @@ export const SUBSCRIPTION_PLANS: Record<
     name: "Starter / SMS Only",
     price: 25,
     includedSmsParts: 500,
+    includedVoiceMinutes: 0,
     includedAiReplies: null,
     features: [
       "One local SimplAssist number",
@@ -47,6 +50,7 @@ export const SUBSCRIPTION_PLANS: Record<
     name: "Growth / SMS + Web Chat",
     price: 45,
     includedSmsParts: 1500,
+    includedVoiceMinutes: 0,
     includedAiReplies: null,
     features: [
       "Everything in SMS Only",
@@ -64,17 +68,15 @@ export const SUBSCRIPTION_PLANS: Record<
     name: "Pro / Full Suite",
     price: 65,
     includedSmsParts: 2500,
+    includedVoiceMinutes: 100,
     includedAiReplies: null,
     features: [
       "Everything in SMS + Web Chat",
-      "Advanced AI guardrails",
-      "Advanced analytics dashboard",
-      "Lead-to-appointment conversion reporting",
-      "Weekly performance summary",
-      "Real-time new-lead alerts",
-      "Review-request workflow",
-      "Automated follow-up and no-show workflows",
-      "Priority support",
+      "AI voice answering in English",
+      "100 included voice minutes/billing month",
+      "Voice contact capture, signup texts, and calendar booking",
+      "Call transcripts and recordings",
+      "Custom AI rules and guardrails",
       "2,500 included SMS parts/month",
     ],
   },

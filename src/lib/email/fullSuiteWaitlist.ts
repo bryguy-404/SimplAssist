@@ -1,6 +1,7 @@
 import "server-only";
 
 import { publicAppOrigin } from "@/lib/billing/publicAppOrigin";
+import { FULL_SUITE_PACKAGE_SUMMARY } from "@/lib/billing/fullSuitePresentation";
 import { createWaitlistUnsubscribeToken } from "@/lib/waitlist/unsubscribeToken";
 import { resend, RESEND_FROM } from "./client";
 
@@ -46,7 +47,7 @@ export async function sendFullSuiteWaitlistConfirmation(
         text: [
           "You’re on the Full Suite waitlist.",
           "",
-          "Advanced analytics, lead alerts, review requests, and automated follow-ups are on the way.",
+          FULL_SUITE_PACKAGE_SUMMARY,
           "",
           "We’ll email you when Full Suite launches.",
           "",
@@ -54,7 +55,7 @@ export async function sendFullSuiteWaitlistConfirmation(
         ].join("\n"),
         html: [
           "<p>You’re on the Full Suite waitlist.</p>",
-          "<p>Advanced analytics, lead alerts, review requests, and automated follow-ups are on the way.</p>",
+          `<p>${escapeHtml(FULL_SUITE_PACKAGE_SUMMARY)}</p>`,
           "<p>We’ll email you when Full Suite launches.</p>",
           `<p><a href="${safeUnsubscribeUrl}">Unsubscribe from Full Suite updates</a></p>`,
         ].join(""),

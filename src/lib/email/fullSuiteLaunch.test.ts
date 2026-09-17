@@ -68,7 +68,7 @@ describe("sendFullSuiteLaunchEmail", () => {
       subject: "Full Suite is live 🎉",
     });
     expect(message.text).toContain(
-      "Advanced analytics, lead alerts, review requests, and automated follow-ups"
+      "AI voice answering in English, 100 voice minutes per billing month, 2,500 SMS parts per month"
     );
     expect(message.text).toContain("https://simplassist.com/#pricing");
     expect(message.text).toMatch(

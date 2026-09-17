@@ -1,4 +1,10 @@
 import type { Metadata } from "next";
+import { isPlanAvailable } from "@/lib/billing/planAvailability";
+import { FULL_SUITE_PACKAGE_SUMMARY } from "@/lib/billing/fullSuitePresentation";
+
+const fullSuitePricingCopy = `${FULL_SUITE_PACKAGE_SUMMARY} ${isPlanAvailable("full")
+  ? "Choose Full Suite during signup, or upgrade from your billing page."
+  : "Full Suite is coming soon and cannot be purchased yet."}`;
 
 export const SITE_ORIGIN = "https://simplassist.com";
 
@@ -48,7 +54,7 @@ export const HOME_FAQS = [
   {
     question: "How much does SimplAssist cost?",
     answer:
-      "SMS Only is $25/month with 500 included SMS parts, and SMS + Web Chat is $45/month with 1,500 included SMS parts. There's a one-time $25 setup fee when you activate paid SMS, which covers your carrier registration. Full Suite is coming soon and can't be purchased just yet.",
+      `SMS Only is $25/month with 500 included SMS parts, and SMS + Web Chat is $45/month with 1,500 included SMS parts. There's a one-time $25 setup fee per business when you activate paid SMS, which covers your carrier registration. ${fullSuitePricingCopy}`,
   },
   {
     question: "What kinds of businesses is SimplAssist for?",
@@ -92,7 +98,7 @@ export const CHAT_ONLY_HOME_FAQS = [
   {
     question: "How much does SimplAssist cost?",
     answer:
-      "Chat Only is $10/month with 200 completed website-chat AI replies and no setup fee. SMS Only is $25/month with 500 included SMS parts, and SMS + Web Chat is $45/month with 1,500 included SMS parts. Paid SMS activation has a one-time $25 setup fee for carrier registration. Full Suite is coming soon and cannot be purchased yet.",
+      `Chat Only is $10/month with 200 completed website-chat AI replies and no setup fee. SMS Only is $25/month with 500 included SMS parts, and SMS + Web Chat is $45/month with 1,500 included SMS parts. Paid SMS activation has a one-time $25 setup fee per business for carrier registration. ${fullSuitePricingCopy}`,
   },
   HOME_FAQS[4],
   {

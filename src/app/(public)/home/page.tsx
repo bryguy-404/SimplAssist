@@ -18,6 +18,7 @@ import { FullSuiteWaitlistButton } from "@/components/waitlist/FullSuiteWaitlist
 import { isChatOnlyPublicLaunchEnabled } from "@/lib/billing/chatOnlyPublicLaunch.server";
 import { isPlanAvailable } from "@/lib/billing/planAvailability";
 import { SETUP_FEE_CENTS, SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
+import { FULL_SUITE_DESCRIPTION, FULL_SUITE_HIGHLIGHTS, FULL_SUITE_USAGE_NOTE } from "@/lib/billing/fullSuitePresentation";
 import { OpenChatButton } from "./open-chat-button";
 import { HomepageChatWidget } from "./homepage-chat-widget";
 import {
@@ -223,28 +224,11 @@ const existingPlans = [
     planKey: "full" as const,
     name: "Full Suite",
     price: formattedPlanPrice("full"),
-    category: "Complete suite",
-    billingNote: "Planned pricing",
-    description: "Measure performance and automate follow-up as your business grows.",
-    highlights: [
-      "Everything in SMS + Web Chat, plus",
-      "Advanced AI guardrails + analytics",
-      "Conversion reports + weekly summaries",
-      "Lead alerts, reviews + follow-up workflows",
-      `${formattedSmsParts("full")} SMS parts/month + priority support`,
-    ],
-    features: [
-      "Everything in SMS + Web Chat",
-      "Advanced AI guardrails",
-      "Advanced analytics dashboard",
-      "Lead-to-appointment conversion reporting",
-      "Weekly performance summary",
-      "Real-time new-lead alerts",
-      "Review-request workflow",
-      "Automated follow-up and no-show workflows",
-      "Priority support",
-      `${formattedSmsParts("full")} included SMS parts/month`,
-    ],
+    category: "Text, chat + voice",
+    billingNote: smsActivationFeeLabel,
+    description: FULL_SUITE_DESCRIPTION,
+    highlights: FULL_SUITE_HIGHLIGHTS,
+    features: SUBSCRIPTION_PLANS.full.features,
     highlighted: false,
   },
 ];
@@ -443,10 +427,10 @@ const comparisonGroups: ReadonlyArray<{
     ],
   },
   {
-    title: "Full Suite advanced",
+    title: "Full Suite voice & controls",
     rows: [
       {
-        feature: "Advanced AI guardrails",
+        feature: "Custom AI rules and guardrails",
         values: {
           chat_only: false,
           sms_only: false,
@@ -455,7 +439,7 @@ const comparisonGroups: ReadonlyArray<{
         },
       },
       {
-        feature: "Advanced analytics dashboard",
+        feature: "AI voice answering in English",
         values: {
           chat_only: false,
           sms_only: false,
@@ -464,7 +448,16 @@ const comparisonGroups: ReadonlyArray<{
         },
       },
       {
-        feature: "Lead-to-appointment conversion reporting",
+        feature: "Included voice minutes/billing month",
+        values: {
+          chat_only: false,
+          sms_only: false,
+          sms_and_chat: false,
+          full: String(SUBSCRIPTION_PLANS.full.includedVoiceMinutes),
+        },
+      },
+      {
+        feature: "Voice contact capture and signup texts",
         values: {
           chat_only: false,
           sms_only: false,
@@ -473,7 +466,7 @@ const comparisonGroups: ReadonlyArray<{
         },
       },
       {
-        feature: "Weekly performance summary",
+        feature: "Voice calendar booking",
         values: {
           chat_only: false,
           sms_only: false,
@@ -482,34 +475,7 @@ const comparisonGroups: ReadonlyArray<{
         },
       },
       {
-        feature: "Real-time new-lead alerts",
-        values: {
-          chat_only: false,
-          sms_only: false,
-          sms_and_chat: false,
-          full: true,
-        },
-      },
-      {
-        feature: "Review-request workflow",
-        values: {
-          chat_only: false,
-          sms_only: false,
-          sms_and_chat: false,
-          full: true,
-        },
-      },
-      {
-        feature: "Automated follow-up and no-show workflows",
-        values: {
-          chat_only: false,
-          sms_only: false,
-          sms_and_chat: false,
-          full: true,
-        },
-      },
-      {
-        feature: "Priority support",
+        feature: "Voice transcripts and recordings",
         values: {
           chat_only: false,
           sms_only: false,
@@ -1109,6 +1075,10 @@ export default function HomePage() {
               );
             })}
           </div>
+
+          <p className={`mt-5 text-center text-sm leading-6 ${body}`}>
+            {FULL_SUITE_USAGE_NOTE}
+          </p>
 
           {publicChatOnlyAvailable && (
             <p

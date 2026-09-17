@@ -978,7 +978,7 @@ describe("feature decisions", () => {
     ["chat_only", false, true, false],
     ["sms_only", true, false, false],
     ["sms_and_chat", true, true, false],
-    ["full", true, true, true],
+    ["full", true, true, false],
   ] as const)(
     "applies the existing feature walls to partner plan %s",
     async (partnerPlan, manualSms, webChat, advancedAnalytics) => {

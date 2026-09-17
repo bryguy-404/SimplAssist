@@ -28,6 +28,8 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
+import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
+import { FULL_SUITE_DESCRIPTION } from "@/lib/billing/fullSuitePresentation";
 
 /* ── Copied from /home ── */
 
@@ -119,20 +121,9 @@ export const plans = [
   },
   {
     name: "Full Suite",
-    price: "$65",
-    description: "Measure performance and automate follow-up as your business grows.",
-    features: [
-      "Everything in SMS + Web Chat",
-      "Advanced AI guardrails",
-      "Advanced analytics dashboard",
-      "Lead-to-appointment conversion reporting",
-      "Weekly performance summary",
-      "Real-time new-lead alerts",
-      "Review-request workflow",
-      "Automated follow-up and no-show workflows",
-      "Priority support",
-      "2,500 included SMS parts/month",
-    ],
+    price: `$${SUBSCRIPTION_PLANS.full.price}`,
+    description: FULL_SUITE_DESCRIPTION,
+    features: SUBSCRIPTION_PLANS.full.features,
     highlighted: false,
   },
 ];

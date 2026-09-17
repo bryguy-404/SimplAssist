@@ -3,8 +3,8 @@ import "server-only";
 import { createHash, randomUUID } from "node:crypto";
 import type Stripe from "stripe";
 import { stripe } from "./client";
-import { createClient } from "@/lib/supabase/server";
 import { claimCheckoutPlanFamily } from "@/lib/billing/planFamilyLock.server";
+import { createSmsCheckout } from "./smsBilling.server";
 import type { SubscriptionPlan } from "@/types/database";
 import {
   assertApprovedChatOnlyStripePrice,
@@ -101,71 +101,9 @@ export async function createCheckoutSession(
     });
   }
 
-  // Preserve the established SMS family claim and Checkout behavior exactly.
+  // Keep onboarding/family authorization; payable SMS work uses durable identity.
   await claimCheckoutPlanFamily(businessId, plan, requireOnboardingIntent);
-
-  const supabase = await createClient();
-
-  // Check if business already has a Stripe customer
-  const { data: subscription } = await supabase
-    .from("subscriptions")
-    .select("stripe_customer_id")
-    .eq("business_id", businessId)
-    .single();
-
-  let customerId = subscription?.stripe_customer_id;
-
-  if (!customerId) {
-    // Look up business info for the customer record
-    const { data: business } = await supabase
-      .from("businesses")
-      .select("name")
-      .eq("id", businessId)
-      .single();
-
-    const customer = await stripe.customers.create({
-      metadata: { business_id: businessId },
-      name: business?.name ?? undefined,
-    });
-    customerId = customer.id;
-  }
-
-  const sessionMetadata: Record<string, string> = {
-    business_id: businessId,
-    plan,
-    mode,
-  };
-  if (setupFeePriceId) {
-    sessionMetadata.setup_fee_price_id = setupFeePriceId;
-  }
-
-  const session = await stripe.checkout.sessions.create({
-    customer: customerId,
-    mode: "subscription",
-    // Shows the optional "Add promotion code" field at checkout. The codes
-    // themselves (friends/colleagues incentives) are created and managed
-    // entirely in the Stripe dashboard. A 100%-off redemption produces a $0
-    // first invoice with payment_status "no_payment_required" — the setup-fee
-    // stamp in subscriptionSync relies on `session.status === "complete"` for
-    // that case (pinned by a regression test).
-    allow_promotion_codes: true,
-    line_items: [
-      { price: planPriceId, quantity: 1 },
-      ...(setupFeePriceId ? [{ price: setupFeePriceId, quantity: 1 }] : []),
-    ],
-    success_url: successUrl,
-    cancel_url: cancelUrl,
-    subscription_data: {
-      metadata: {
-        business_id: businessId,
-        plan,
-        mode,
-      },
-    },
-    metadata: sessionMetadata,
-  });
-
-  return session.url;
+  return createSmsCheckout({ businessId, plan, priceId: planPriceId, setupFeePriceId, successUrl, cancelUrl, mode });
 }
 
 async function createSingleFlightChatOnlyCheckout(args: {

@@ -46,7 +46,7 @@ const mocks = vi.hoisted(() => ({
   getCurrentAIReplyUsage: vi.fn(),
 }));
 
-vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
+vi.mock("next/navigation", () => ({ redirect: mocks.redirect, useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
   requireWorkspacePageAccess: mocks.requireWorkspacePageAccess,
 }));
@@ -312,11 +312,14 @@ describe("BillingPage", () => {
                 data: {
                   plan: "full",
                   status: "active",
+                  current_period_start: "2026-08-01T12:00:00.000Z",
                   current_period_end: "2026-09-01T12:00:00.000Z",
                 },
               }
             : {
                 data: {
+                  period_start: "2026-08-01T12:00:00.000Z",
+                  period_end: "2026-09-01T12:00:00.000Z",
                   inbound_sms_parts: 20,
                   outbound_sms_parts: 30,
                   included_sms_parts: 2_500,
@@ -344,8 +347,55 @@ describe("BillingPage", () => {
     expect(html).toContain("50 / 2,500 parts");
     expect(html).not.toContain("Stripe billing action: checkout");
     expect(html).not.toContain("Choose a plan to get started");
-    expect(mocks.isPlanAvailable).not.toHaveBeenCalled();
+    expect(mocks.isPlanAvailable).not.toHaveBeenCalledWith("full");
     expect(mocks.getCurrentAIReplyUsage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["sms_only", "500"], ["sms_and_chat", "1,500"], ["full", "2,500"],
+  ])("shows a new paid %s subscription's allowance before its first SMS", async (plan, allowance) => {
+    setDirectActiveChatOnlyBilling();
+    mocks.from.mockImplementation((table: string) => queryThenable(Promise.resolve({ data: table === "subscriptions" ? {
+      plan, status: "active", current_period_start: "2026-09-01T12:00:00Z", current_period_end: "2026-10-01T12:00:00Z",
+    } : null })));
+
+    const html = renderToStaticMarkup(await BillingPage({}));
+
+    expect(html).toContain(`0 / ${allowance} parts`);
+    expect(html).toContain("Your SMS usage is within the included amount.");
+    expect(html).not.toContain("0 / 0 parts");
+    expect(mocks.getCurrentAIReplyUsage).not.toHaveBeenCalled();
+  });
+
+  it("does not present exhausted previous-period usage after renewal and a downgrade", async () => {
+    setDirectActiveChatOnlyBilling();
+    mocks.from.mockImplementation((table: string) => queryThenable(Promise.resolve({ data: table === "subscriptions" ? {
+      plan: "sms_only", status: "active", current_period_start: "2026-09-01T12:00:00Z", current_period_end: "2026-10-01T12:00:00Z",
+    } : {
+      period_start: "2026-08-01T12:00:00Z", period_end: "2026-09-01T12:00:00Z",
+      inbound_sms_parts: 1000, outbound_sms_parts: 1500, included_sms_parts: 2500,
+    } })));
+
+    const html = renderToStaticMarkup(await BillingPage({}));
+
+    expect(html).toContain("0 / 500 parts");
+    expect(html).not.toContain("2,500 / 2,500 parts");
+    expect(html).not.toContain("Outbound SMS is paused");
+  });
+
+  it("preserves recorded current-period use and allowance, matching equivalent timestamp formats", async () => {
+    setDirectActiveChatOnlyBilling();
+    mocks.from.mockImplementation((table: string) => queryThenable(Promise.resolve({ data: table === "subscriptions" ? {
+      plan: "full", status: "active", current_period_start: "2026-09-01T12:00:00Z", current_period_end: "2026-10-01T12:00:00Z",
+    } : {
+      period_start: "2026-09-01T08:00:00-04:00", period_end: "2026-10-01T12:00:00.000Z",
+      inbound_sms_parts: 1000, outbound_sms_parts: 1100, included_sms_parts: 2500,
+    } })));
+
+    const html = renderToStaticMarkup(await BillingPage({}));
+
+    expect(html).toContain("2,100 / 2,500 parts");
+    expect(html).toContain("You are close to your included SMS parts");
   });
 
   it("shows authoritative 0 / 200 Chat Only usage without SMS or acquisition actions", async () => {
@@ -509,11 +559,14 @@ describe("BillingPage", () => {
                 data: {
                   plan: "sms_and_chat",
                   status: "active",
+                  current_period_start: "2026-08-01T12:00:00.000Z",
                   current_period_end: "2026-09-01T12:00:00.000Z",
                 },
               }
             : {
                 data: {
+                  period_start: "2026-08-01T12:00:00.000Z",
+                  period_end: "2026-09-01T12:00:00.000Z",
                   inbound_sms_parts: 12,
                   outbound_sms_parts: 18,
                   included_sms_parts: 1_500,

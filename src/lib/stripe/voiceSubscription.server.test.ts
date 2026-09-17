@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type Stripe from "stripe";
-const mocks = vi.hoisted(() => ({ rpc: vi.fn(), retrieve: vi.fn() }));
+const mocks = vi.hoisted(() => ({ rpc: vi.fn(), retrieve: vi.fn(), paidInvoice: vi.fn() }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/admin", () => ({ supabaseAdmin: { rpc: mocks.rpc } }));
 vi.mock("./client", () => ({ stripe: { subscriptions: { retrieve: mocks.retrieve } } }));
+vi.mock("./smsBilling.server", () => ({ verifiedPaidInvoice: mocks.paidInvoice }));
 import { prepareVoiceSubscription } from "./voiceSubscription.server";
 const subscription = { id: "sub_voice", customer: "cus_voice", metadata: { business_id: "business" }, livemode: false, status: "active" } as unknown as Stripe.Subscription;
-beforeEach(() => { vi.clearAllMocks(); vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_fixture"); mocks.rpc.mockResolvedValue({ data: null, error: null }); });
+beforeEach(() => { vi.clearAllMocks(); vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_fixture"); mocks.rpc.mockResolvedValue({ data: null, error: null }); mocks.paidInvoice.mockResolvedValue(null); });
 afterEach(() => vi.unstubAllEnvs());
 describe("authoritative voice billing snapshots", () => {
   it("leaves unrelated and private-pilot subscriptions on the existing path", async () => {
@@ -49,5 +50,45 @@ describe("authoritative voice billing snapshots", () => {
     mocks.rpc.mockResolvedValue({ data: null, error: { message: "private" } });
     await expect(prepareVoiceSubscription(subscription, "business")).rejects.toThrow("voice_billing_reconciliation_unavailable");
     expect(mocks.retrieve).not.toHaveBeenCalled();
+  });
+  describe("paid renewal evidence", () => {
+    const start = 1_790_208_000;
+    const end = start + 30 * 86_400;
+    const paidAt = start + 12;
+    const line = {
+      period: { start, end },
+      parent: { subscription_item_details: { subscription_item: "si_voice", proration: false } },
+    };
+    beforeEach(() => {
+      mocks.rpc.mockImplementation(async (name: string) => ({ data: name === "begin_voice_billing_reconciliation" ? 8 : true, error: null }));
+      mocks.retrieve.mockResolvedValue({ ...subscription, items: { data: [{ id: "si_voice", current_period_start: start, current_period_end: end }] } });
+      mocks.paidInvoice.mockResolvedValue({ id: "in_renewal", status_transitions: { paid_at: paidAt }, lines: { data: [line] } });
+    });
+    it("records the exact monthly interval and original paid time before canonical sync", async () => {
+      await prepareVoiceSubscription(subscription, "business");
+      expect(mocks.rpc).toHaveBeenNthCalledWith(2, "record_voice_billing_payment", {
+        p_business_id: "business", p_revision: 8, p_subscription_id: "sub_voice", p_customer_id: "cus_voice",
+        p_invoice_id: "in_renewal", p_period_start: new Date(start * 1000).toISOString(),
+        p_period_end: new Date(end * 1000).toISOString(), p_paid_at: new Date(paidAt * 1000).toISOString(),
+      });
+    });
+    it("does not grant a renewal from active status when the invoice is unpaid", async () => {
+      mocks.paidInvoice.mockResolvedValue(null);
+      expect(await prepareVoiceSubscription(subscription, "business")).toMatchObject({ revision: 8 });
+      expect(mocks.rpc).toHaveBeenCalledTimes(1);
+    });
+    it.each([
+      { ...line, period: { start: start + 100, end } },
+      { ...line, parent: { subscription_item_details: { subscription_item: "si_foreign", proration: false } } },
+      { ...line, parent: { subscription_item_details: { subscription_item: "si_voice", proration: true } } },
+    ])("does not turn unrelated or proration invoice lines into monthly proof %#", async (invoiceLine) => {
+      mocks.paidInvoice.mockResolvedValue({ id: "in_renewal", status_transitions: { paid_at: paidAt }, lines: { data: [invoiceLine] } });
+      await prepareVoiceSubscription(subscription, "business");
+      expect(mocks.rpc).toHaveBeenCalledTimes(1);
+    });
+    it("keeps proof storage failures retryable", async () => {
+      mocks.rpc.mockImplementation(async (name: string) => ({ data: name === "begin_voice_billing_reconciliation" ? 8 : false, error: null }));
+      await expect(prepareVoiceSubscription(subscription, "business")).rejects.toThrow("voice_billing_payment_verification_unavailable");
+    });
   });
 });

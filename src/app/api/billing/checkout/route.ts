@@ -32,6 +32,7 @@ import { publicAppOrigin } from "@/lib/billing/publicAppOrigin";
 import { isChatOnlyDirectAcquisitionEnabledForBusiness } from "@/lib/billing/chatOnlyRollout.server";
 import { isPlanAvailable } from "@/lib/billing/planAvailability";
 import { subscriptionPlanSchema } from "@/lib/billing/planSchema";
+import { SmsBillingError } from "@/lib/stripe/smsBilling";
 import {
   DirectCheckoutPlanClaimUnavailableError,
   PlanFamilyTransitionNotSupportedError,
@@ -560,6 +561,7 @@ export async function POST(request: NextRequest) {
         { status: 503 },
       );
     }
+    if (error instanceof SmsBillingError) return NextResponse.json({ error: error.code, code: error.code }, { status: error.httpStatus });
     console.error("Checkout failed", { error: checkoutFailureSummary(error) });
     return NextResponse.json(
       { error: "Failed to create checkout session" },

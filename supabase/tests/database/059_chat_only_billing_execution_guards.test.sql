@@ -225,7 +225,7 @@ SELECT ok(
 
 SELECT ok(
   pg_get_functiondef(
-    'public.sync_stripe_subscription_if_business_active(uuid,text,text,text,text,timestamptz,timestamptz,text,text,text,timestamptz,boolean,timestamptz)'
+    'public.sync_stripe_subscription_before_sms_operations(uuid,text,text,text,text,timestamptz,timestamptz,text,text,text,timestamptz,boolean,timestamptz)'
       ::regprocedure
   ) LIKE ALL (ARRAY[
     '%business.billing_mode = ''stripe''%',

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
+  createSmsCheckout: vi.fn(),
   createCustomer: vi.fn(),
   createCheckoutSession: vi.fn(),
   retrieveCheckoutSession: vi.fn(),
@@ -17,6 +18,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("server-only", () => ({}));
+vi.mock("./smsBilling.server", () => ({ createSmsCheckout: mocks.createSmsCheckout }));
 vi.mock("@/lib/supabase/server", () => ({
   createClient: vi.fn(async () => ({ from: mocks.from })),
 }));
@@ -70,6 +72,7 @@ const SESSION_EXPIRES_AT = "2026-08-19T13:00:00.000Z";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.createSmsCheckout.mockResolvedValue("https://checkout.stripe.test/session");
   mocks.from.mockImplementation((table: string) => {
     const result =
       table === "subscriptions"
@@ -135,7 +138,7 @@ describe("createCheckoutSession existing SMS-plan contract", () => {
     ["sms_and_chat", "price_growth"],
     ["full", "price_full"],
   ] as const)(
-    "keeps the recurring %s Price and one-time setup Price as exact line items",
+    "routes %s through durable acquisition after the existing family guard",
     async (plan, planPriceId) => {
       await expect(
         createCheckoutSession(
@@ -157,31 +160,9 @@ describe("createCheckoutSession existing SMS-plan contract", () => {
         plan,
         true,
       );
-      expect(mocks.createCheckoutSession).toHaveBeenCalledOnce();
-      expect(mocks.createCheckoutSession).toHaveBeenCalledWith({
-        customer: "cus_existing",
-        mode: "subscription",
-        allow_promotion_codes: true,
-        line_items: [
-          { price: planPriceId, quantity: 1 },
-          { price: "price_setup", quantity: 1 },
-        ],
-        success_url: SUCCESS_URL,
-        cancel_url: CANCEL_URL,
-        subscription_data: {
-          metadata: {
-            business_id: BUSINESS_ID,
-            plan,
-            mode: "onboarding",
-          },
-        },
-        metadata: {
-          business_id: BUSINESS_ID,
-          plan,
-          mode: "onboarding",
-          setup_fee_price_id: "price_setup",
-        },
-      });
+      expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
+      expect(mocks.createSmsCheckout).toHaveBeenCalledWith({ businessId: BUSINESS_ID, plan, priceId: planPriceId,
+        setupFeePriceId: "price_setup", successUrl: SUCCESS_URL, cancelUrl: CANCEL_URL, mode: "onboarding" });
     },
   );
 

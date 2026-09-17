@@ -165,7 +165,7 @@ SELECT ok(
     '%FOR SHARE NOWAIT%'
   ])
   AND pg_get_functiondef(
-    'public.sync_stripe_subscription_if_business_active(uuid,text,text,text,text,timestamptz,timestamptz,text,text,text,timestamptz,boolean,timestamptz)'
+    'public.sync_stripe_subscription_before_sms_operations(uuid,text,text,text,text,timestamptz,timestamptz,text,text,text,timestamptz,boolean,timestamptz)'
       ::regprocedure
   ) LIKE ALL (ARRAY[
     '%p_plan NOT IN (''sms_only'', ''sms_and_chat'', ''full'', ''chat_only'')%',
@@ -189,7 +189,7 @@ SELECT ok(
     WHERE procedure_row.oid = ANY (ARRAY[
       'public.assign_business_partner_billing(uuid,uuid,text,uuid,text)'
         ::regprocedure,
-      'public.sync_stripe_subscription_if_business_active(uuid,text,text,text,text,timestamptz,timestamptz,text,text,text,timestamptz,boolean,timestamptz)'
+      'public.sync_stripe_subscription_before_sms_operations(uuid,text,text,text,text,timestamptz,timestamptz,text,text,text,timestamptz,boolean,timestamptz)'
         ::regprocedure,
       'public.list_admin_business_health_v2(uuid,text,text,uuid,text,text)'
         ::regprocedure,

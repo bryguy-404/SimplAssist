@@ -1,4 +1,5 @@
 import OwnerVoiceSettings from '@/components/settings/OwnerVoiceSettings';
+import BillingPlanChange from '@/components/billing/BillingPlanChange';
 import { getOwnerVoiceSettings } from '@/lib/voice/access.server';
 import { redirect } from "next/navigation";
 import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
@@ -121,15 +122,22 @@ export default async function BillingPage(_props: BillingPageProps) {
 
   const hasActiveSubscription =
     subscription && subscription.status !== "canceled";
-  const usedSmsParts = usagePeriod
-    ? usagePeriod.inbound_sms_parts + usagePeriod.outbound_sms_parts
+  const activePlan = subscription?.plan as SubscriptionPlan | undefined;
+  // Usage rows are created on the first metered event. The latest row may
+  // therefore still belong to the previous subscription period after renewal.
+  const currentUsagePeriod = usagePeriod && subscription &&
+    Date.parse(usagePeriod.period_start) === Date.parse(subscription.current_period_start) &&
+    Date.parse(usagePeriod.period_end) === Date.parse(subscription.current_period_end)
+    ? usagePeriod : null;
+  const usedSmsParts = currentUsagePeriod
+    ? currentUsagePeriod.inbound_sms_parts + currentUsagePeriod.outbound_sms_parts
     : 0;
-  const includedSmsParts = usagePeriod?.included_sms_parts ?? 0;
+  const includedSmsParts = currentUsagePeriod?.included_sms_parts ??
+    (activePlan ? SUBSCRIPTION_PLANS[activePlan]?.includedSmsParts ?? 0 : 0);
   const usagePercent =
     includedSmsParts > 0
       ? Math.min(100, Math.round((usedSmsParts / includedSmsParts) * 100))
       : 0;
-  const activePlan = subscription?.plan as SubscriptionPlan | undefined;
   const [{ brand }, chatOnlyAIReplyUsage, voiceSettings] = await Promise.all([
     getRequestBrand(),
     hasActiveSubscription && activePlan === "chat_only"
@@ -257,6 +265,7 @@ export default async function BillingPage(_props: BillingPageProps) {
         </div>
       )}
 
+      <BillingPlanChange currentPlan={activePlan} active={Boolean(hasActiveSubscription && subscription.status === "active")} />
       {voiceSettings?.visible ? <div className="mt-6"><OwnerVoiceSettings initialSettings={voiceSettings} variant="usage" /></div> : null}
 
       {hasActiveSubscription && activePlan !== "chat_only" && (

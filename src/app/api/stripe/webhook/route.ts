@@ -117,6 +117,8 @@ async function processStripeEvent(
     }
 
     case "customer.subscription.created":
+    case "customer.subscription.pending_update_applied":
+    case "customer.subscription.pending_update_expired":
     case "customer.subscription.updated": {
       await syncStripeSubscription(event.data.object as Stripe.Subscription);
       return null;

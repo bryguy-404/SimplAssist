@@ -273,7 +273,7 @@ SELECT ok(
 
 SELECT ok(
   pg_get_functiondef(
-    'public.sync_stripe_subscription_if_business_active(uuid,text,text,text,text,timestamptz,timestamptz,text,text,text,timestamptz,boolean,timestamptz)'::regprocedure
+    'public.sync_stripe_subscription_before_sms_operations(uuid,text,text,text,text,timestamptz,timestamptz,text,text,text,timestamptz,boolean,timestamptz)'::regprocedure
   ) LIKE '%business.billing_mode = ''stripe''%FOR UPDATE%'
   AND pg_get_functiondef(
     'public.mark_stripe_subscription_past_due_if_business_active(text,timestamptz)'::regprocedure

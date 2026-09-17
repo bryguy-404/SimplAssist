@@ -12,6 +12,7 @@ import {
 } from "./chatOnlyCheckoutAttempt.server";
 import type { SubscriptionPlan, SubscriptionStatus } from "@/types/database";
 import { prepareVoiceSubscription, type VoiceSubscriptionSnapshot } from "./voiceSubscription.server";
+import { bindSmsCheckoutSession, expireSmsCheckout, finishSmsDowngrade, synchronizeSmsBillingOperation } from "./smsBilling.server";
 
 export type SyncedCheckout = {
   businessId: string;
@@ -59,6 +60,15 @@ export async function syncCheckoutSession(
   }
 
   const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+  if (session.metadata?.sms_billing_operation_id) {
+    if (!(await bindSmsCheckoutSession(session))) return null;
+    if (subscription.metadata.sms_billing_operation_id !== session.metadata.sms_billing_operation_id) {
+      // A completed, older Checkout must not reassert its original tier after
+      // a later authorized plan change or replacement.
+      return null;
+    }
+    return syncStripeSubscription(subscription, { businessId });
+  }
   if (chatBinding) {
     assertChatOnlySubscriptionBinding(
       subscription,
@@ -101,6 +111,7 @@ export async function syncCheckoutSession(
 export async function syncExpiredCheckoutSession(
   session: Stripe.Checkout.Session,
 ): Promise<boolean> {
+  if (session.metadata?.sms_billing_operation_id) return expireSmsCheckout(session);
   if (
     session.metadata?.plan !== "chat_only" &&
     !hasChatOnlyCheckoutAttemptMarker(session)
@@ -228,9 +239,25 @@ export async function syncStripeSubscription(
   // Preserve unconditional status validation. Commercial voice additionally
   // versions a fresh provider read, so event arrival order cannot mint minutes.
   normalizeStripeSubscriptionStatus(subscription.status);
+  if (subscription.metadata?.sms_billing_operation_id) {
+    const handled = await synchronizeSmsBillingOperation(subscription);
+    if (handled) {
+      const { data, error } = await supabaseAdmin.from("subscriptions").select("business_id,stripe_customer_id,stripe_subscription_id,plan,status")
+        .eq("business_id", options.businessId ?? subscription.metadata.business_id).maybeSingle();
+      if (error) throw new Error("sms_billing_payment_sync_required");
+      return data?.stripe_subscription_id === subscription.id && data.status === "active"
+        ? { businessId: data.business_id, customerId: data.stripe_customer_id, subscriptionId: data.stripe_subscription_id, plan: data.plan as SubscriptionPlan }
+        : null;
+    }
+    // The event can precede a newer payment or schedule change. The operation
+    // read above is authoritative; never fall back to its stale event payload.
+    subscription = await stripe.subscriptions.retrieve(subscription.id);
+  }
   const voice = await prepareVoiceSubscription(subscription, options.businessId ?? subscription.metadata?.business_id);
   if (voice.ignored) return null;
-  return syncSubscriptionSnapshot(voice.subscription, options, voice);
+  const result = await syncSubscriptionSnapshot(voice.subscription, options, voice);
+  if (result && voice.subscription.metadata?.sms_billing_operation_id) await finishSmsDowngrade(voice.subscription);
+  return result;
 }
 
 async function syncSubscriptionSnapshot(

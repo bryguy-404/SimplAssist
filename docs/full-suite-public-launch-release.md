@@ -4,7 +4,7 @@ Approved scope: [implementation plan](full-suite-public-launch-plan.md). Baselin
 
 ## Current status
 
-Implementation and local verification are complete. Migrations 084–086 are applied and independently verified. The closed application deployment is in progress; Full Suite sales and public voice admission remain closed. No subscription change or launch email has been performed. The prepared sales-opening change must not be deployed until the public opening and recording acceptance below passes.
+Migrations 084–086 and the closed app/worker deployments are applied and independently verified. The first live public-opening rehearsal exposed a protocol error at the handoff into conversation; the worker correction is now deployed and independently verified, awaiting repeat phone acceptance. Full Suite sales and public voice admission remain closed. No subscription change or launch email has been performed. The prepared sales-opening change must not be deployed until the public opening and recording acceptance below passes.
 
 ## Phase 1 — package and capability catalog
 
@@ -15,7 +15,7 @@ Implementation and local verification are complete. Migrations 084–086 are app
 
 ## Pending release evidence
 
-Final billing and database checks; commercial eligibility/accounting and retirement; public disclosure; application/worker build checks; independent sensitive-change review; desktop/mobile walkthrough; independently verified production schema/deployments; public greeting and protected playback acceptance; final sales activation.
+Public greeting and protected playback acceptance; final sales activation and independent readback. The earlier implementation, automated, browser, sensitive-change and closed-deployment checks below have passed.
 
 Do not mark the release complete until the required evidence is recorded. Friend's first actual booking/invitation is the agreed post-launch live verification.
 
@@ -35,10 +35,29 @@ Do not mark the release complete until the required evidence is recorded. Friend
 - Closed release source: `fcea00e7e33671630bb474f35e50c651fc679af2`; private tar SHA-256 `75bc9cdd19457a1239857009629f7e8671ffcc2c4240e491f388530c5c941933`. App and worker archives contain no local environments, dependencies or build artifacts; the worker excludes both app/scan Railway config files.
 - App source was disconnected from the older public GitHub `bryguy-404/SimplAssist` `main` trigger to prevent an unrelated push overwriting the private release. Voice had no connected source. Scan remains connected and unchanged. To reconnect the app later, use the recorded app project/service selectors with `railway service source connect --repo bryguy-404/SimplAssist --branch main`, only after main contains the intended release; then verify trigger settings.
 - Rollback baselines: app `34e7aae2-84e4-4ffb-931f-45d6c83e922c`, voice `ff5d7285-f638-49ef-9ca7-83581be113e7`, unchanged scan `12c2582a-2263-4055-92a8-1f4eaf27c642`. Retain additive schema, paid records and history. Close new admissions/sales before a rollback; never revive a retired pilot exception.
+- Closed app deployment `2651c426-dbb9-4226-95d9-b759507b321e` and voice deployment `0aca703b-b3fb-4e59-af66-869956c3a048` are SUCCESS. Independent verification confirms exact active IDs, healthy app/worker, authenticated readiness 200, commercial protocol 2/action protocol 1, GPT-Live-1/pcm16, zero active calls, and unchanged scan. Unauthenticated worker readiness remains 404; owner voice/billing routes return 401. Database baseline fingerprints remained unchanged after deployment.
+- Live homepage independently read back: Full Suite remains closed, with 100 voice minutes and 2,500 SMS parts displayed.
+- Prepared opening commit `34fcea1134ee6b3084c1100b79db01035376c1e7` is tested and committed but **not deployed**. Its private tar SHA-256 is `e9802d4c931632fea182f552202e7250637ef460bb25ef1c2941be6c9d233428`; app artifact `/private/tmp/simplassist-full-suite-open-34fcea1-app`. The guard-protected final database activation script is `/private/tmp/simplassist-full-suite-activate-after-acceptance.sql`; it is **not executed** and does not replace user acceptance or live protocol verification.
 
 ## Required final phone acceptance
 
 After both closed deployments and readiness checks pass, arm the existing approved caller's single-use public-opening rehearsal. It expires after 30 minutes and changes neither the subscription nor the 200-minute pilot accounting. Check the same-Marin AI/recording notice, continuation into the normal signup conversation, exactly one requested signup text/Lead, and protected recording playback. Inspect stored notice/playback/recording/handoff timestamps. Only after acceptance may the prepared sales-open app and global commercial eligibility/capacity-four setting be activated and independently verified.
+
+The one-call rehearsal was armed on September 17 at approximately 14:07 UTC for the existing approved caller only. Bryan chose to test immediately, and call `04336c36-a744-4d89-bf8e-62d3a7789a98` consumed it. Independent verification confirmed exactly one arm audit, no other caller permission change, and unchanged earlier call records.
+
+**First public rehearsal failed; do not open sales.** The notice completed at 14:09:13.947 UTC; recording started at 14:09:14.182; the handoff started at 14:09:14.246. The call closed with `openai_protocol_error` at 14:09:15.684. No contact/signup action ran, no Lead was created, one recording was retained, and the eligible technical-failure fallback completed. Historical error handling did not retain provider error details, so the exact provider rejection code is unavailable.
+
+Code inspection found the handoff appended the entire voice guide (1,030 words / 6,573 UTF-8 bytes) through an API limited to 500 tokens per append. [OpenAI's session guidance](https://developers.openai.com/api/docs/guides/live-conversations#add-context-during-the-conversation) permits the larger guide at startup. Move the normal guide to startup with an explicit pre-notice gate; use a short acknowledged activation delta after verified notice/recording. Add bounded error-code diagnostics without caller content. Retest and privately deploy the worker correction before re-arming. The older prepared sales-open artifact must be superseded with the corrected source before final activation.
+
+### Handoff correction
+
+- `920aaf3e6b1adb81d02892424aaf468f45b194e1` moves the full accepted guide into session startup behind the public-opening guard. The handoff now sends a fixed 243-byte activation update and waits for its matching acknowledgment before the conversation nudge. Wrong/duplicate acknowledgments are ignored; a missing acknowledgment has an eight-second bound. Normal private-pilot tone, actions and guidance remain unchanged.
+- Safe diagnostics retain bounded provider code/type/parameter and client command identity, never the raw provider message, instructions or caller content.
+- A direct, bounded OpenAI protocol check used only synthetic text and silent audio, with storage disabled and no phone/SMS/business data. The oversized append was rejected with `invalid_value`, parameter `content`, and the documented 500-token limit; a short append was acknowledged. Final reported usage was zero seconds. This reproduces the protocol defect without claiming a recovered historical provider code.
+- **404 files / 6,893 tests passed** after the correction, including both codecs, acknowledgment ordering/timeouts, privacy diagnostics, and the real local four-socket harness. Application/worker types, focused lint and production build passed. No database change was needed.
+- Corrected private archive SHA-256: `7ad0ef4e567bba0fd1a4e3243c4a9e8736022a72f9ee8e215ab950a817b4ca02`. Worker deployment `d8ba4898-c6d0-4038-8a6f-962286b3f00e` is SUCCESS and independently verified as the sole active worker, healthy and ready on protocol 2 with zero calls at verification. App remains on closed source `fcea00e`/deployment `2651c426-dbb9-4226-95d9-b759507b321e`; scanner unchanged.
+- Final opening must use the corrected app archive `/private/tmp/simplassist-full-suite-handoff-920aaf3-app` after live acceptance, not the superseded `34fcea1` archive. The unexecuted activation SQL now excludes failed/fallback rehearsals and requires the signup/Lead evidence, in addition to human greeting and protected-playback acceptance.
+- The same approved caller's single-use public rehearsal was rearmed after verification; it expires **September 17 at 14:54:31 UTC / 10:54:31 AM Eastern**. Bryan was asked to repeat the full signup and protected playback check. No acceptance has been reported for the corrected deployment yet. Public purchases/admissions remain closed, and Bryan's subscription has not changed.
 
 ## Verification in progress — September 17
 

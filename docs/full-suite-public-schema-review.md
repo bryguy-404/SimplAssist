@@ -61,3 +61,21 @@ A separate read-only session verified production after the root applied the atom
 Production catalog SHA-256: `3a2cc3c54743eb9503f4f3fcef9d768ffa9244a3c2c68482008b8a260edb167c`.
 
 The complete machine-readable comparison is `/private/tmp/full-suite-independent-after-report.json`; the independently captured production catalog is `/private/tmp/full-suite-independent-production-catalog.json`. Verification used only explicit read-only transactions on project `inmgpkurctttsofpywuz`.
+
+## Independent deployment verification
+
+The closed application deployment `2651c426-dbb9-4226-95d9-b759507b321e` and voice deployment `0aca703b-b3fb-4e59-af66-869956c3a048` were independently observed as the exact active successful deployments. Scanner deployment `12c2582a-2263-4055-92a8-1f4eaf27c642` was unchanged. The app repository source remained disconnected; the scanner remained connected.
+
+Application and worker health returned 200. Authenticated worker readiness returned `ready=true`, `commercialProtocol=2`, `actionProtocol=1`, `gpt-live-1`, `pcm16`, and zero active calls. Anonymous readiness returned the intended 404; protected voice settings and billing plan-change reads returned 401. No secrets were printed.
+
+A separate read-only database snapshot after deployment matched the post-migration pilot, tester, subscription, history, Leads, and usage fingerprints. Rollout stayed closed at capacity two, with no commercial grants or rehearsal armed. This verification permits the separately authorized single-call rehearsal; it does not itself enable public sales or arm a tester.
+
+Reports: `/private/tmp/full-suite-independent-deployment.json` and `/private/tmp/full-suite-independent-deployment-report.json`.
+
+## Independent rehearsal scope and consumption
+
+After the root armed the approved tester once, a separate read-only check at 14:09:38 UTC observed that the caller had already used it. Call `04336c36-a744-4d89-bf8e-62d3a7789a98`, created at 14:08:52 UTC, matched the approved business and caller, retained pilot accounting, and had `public_notice_rehearsal=true` with disclosure protocol one. Its session was closed when observed. The one-call expiry had cleared atomically.
+
+Exactly one matching rehearsal audit entry exists. No other tester was armed, and existing tester permissions, pilot settings, and subscription fingerprints are unchanged. The fourteen pre-existing call records match their pre-rehearsal fingerprint exactly. The new call changed aggregate call, provider, and SMS usage; Leads were unchanged. Rollout remains closed at capacity two, with no commercial settings, grants, or usage.
+
+This verifies authorization, isolation, and single-use consumption. It does not assert that the call completed its disclosure or conversation successfully; call outcome and audio acceptance are separate checks. Evidence: `/private/tmp/full-suite-independent-rehearsal-report.json`.

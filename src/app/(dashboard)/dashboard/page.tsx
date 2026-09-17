@@ -40,7 +40,13 @@ export default async function DashboardPage() {
       supabase.from('conversations').select('*', { count: 'exact', head: true }).eq('business_id', business.id),
       supabase.from('conversations').select('*', { count: 'exact', head: true }).eq('business_id', business.id).eq('status', 'active'),
       supabase.from('contacts').select('*', { count: 'exact', head: true }).eq('business_id', business.id),
-      supabase.from('messages').select('*', { count: 'exact', head: true }).eq('business_id', business.id).gte('created_at', weekAgoISO),
+      supabase
+        .from('messages')
+        .select('*', { count: 'exact', head: true })
+        .eq('business_id', business.id)
+        .in('role', ['assistant', 'human_agent'])
+        .in('channel', ['sms', 'web_chat'])
+        .gte('created_at', weekAgoISO),
       supabase
         .from('conversations')
         .select('*, contact:contacts(name, phone_number)')
@@ -92,9 +98,10 @@ export default async function DashboardPage() {
     { data: widgetConfig },
   ] = dashboardData;
 
-  // Fetch last message for each recent conversation
+  // Voice fragments are not standalone messages suitable for a list preview.
   const recentConversations = await Promise.all(
     (recentConversationsRaw || []).map(async (conv) => {
+      if (conv.channel === 'voice') return { ...conv, lastMessage: 'View call transcript' };
       const { data: messages } = await supabase
         .from('messages')
         .select('content')

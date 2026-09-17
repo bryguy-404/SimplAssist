@@ -18,6 +18,7 @@ import {
   smsPlanLockedMessage,
 } from "./accessState";
 import { VoiceCallReviewPanel } from "./VoiceCallReview";
+import { VoiceTranscriptPanel } from "./VoiceTranscript";
 
 interface MessageThreadProps {
   conversation: ConversationWithContact;
@@ -103,6 +104,11 @@ export function MessageThread({
 
     let current = true;
     setMessages([]);
+    setIsAiHandling(conversation.is_ai_handling);
+    setToggleError(null);
+    setSendError(null);
+    // Voice history uses timestamped speech instead of one bubble per fragment.
+    if (conversation.channel === "voice") return;
     async function fetchMessages() {
       const { data } = await supabase
         .from("messages")
@@ -114,15 +120,12 @@ export function MessageThread({
     }
 
     fetchMessages();
-    setIsAiHandling(conversation.is_ai_handling);
-    setToggleError(null);
-    setSendError(null);
     return () => { current = false; };
   }, [conversation.id, conversation.channel, conversation.is_ai_handling, supabase, demoMessages]);
 
   // Real-time subscription
   useEffect(() => {
-    if (demoMessages) return;
+    if (demoMessages || conversation.channel === "voice") return;
     const channel = supabase
       .channel(`messages:${conversation.id}`)
       .on(
@@ -382,12 +385,11 @@ export function MessageThread({
       {/* Messages */}
       <div ref={messageScrollRef} className="min-w-0 flex-1 overflow-y-auto px-4 py-4">
         {conversation.channel === "voice" && !demoMessages ? (
-          <div className="mb-6"><VoiceCallReviewPanel key={conversation.id} conversationId={conversation.id} />
-            <h3 className="mb-2 mt-6 text-sm font-semibold">Call transcript</h3>
-            <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">Transcripts may contain errors. Assistant text does not prove every word was heard; use the recording to review interruptions and playback.</p>
+          <div className="space-y-8"><VoiceCallReviewPanel key={conversation.id} conversationId={conversation.id} />
+            <VoiceTranscriptPanel key={`transcript-${conversation.id}`} conversationId={conversation.id} />
           </div>
         ) : null}
-        {messages.length === 0 ? (
+        {conversation.channel === "voice" && !demoMessages ? null : messages.length === 0 ? (
           <div className="flex h-full items-center justify-center text-sm text-stone-400 dark:text-[#bdbdbf]">
             No messages in this conversation yet.
           </div>

@@ -40,7 +40,7 @@ const statCards = [
   { key: 'totalConversations' as const, label: 'Total Conversations', icon: MessageSquare, badge: '0 today', badgeColor: 'bg-[var(--brand-accent-soft)] text-[var(--brand-accent)] border border-[var(--brand-accent-soft-border)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.14)] dark:text-[var(--brand-text-soft-dark)] dark:border-[rgb(var(--brand-primary-dark-rgb)/.22)]' },
   { key: 'activeConversations' as const, label: 'Active Conversations', icon: Zap, badge: 'Live', badgeColor: statusSuccess },
   { key: 'totalContacts' as const, label: 'Total Contacts', icon: Users, badge: 'CRM', badgeColor: 'bg-[var(--brand-accent-soft)] text-[var(--brand-accent)] border border-[var(--brand-accent-soft-border)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.14)] dark:text-[var(--brand-text-soft-dark)] dark:border-[rgb(var(--brand-primary-dark-rgb)/.22)]' },
-  { key: 'messagesThisWeek' as const, label: 'Messages Sent', icon: Mail, badge: 'This week', badgeColor: statusInfo },
+  { key: 'messagesThisWeek' as const, label: 'Messages Sent', icon: Mail, badge: 'Last 7 days', badgeColor: statusInfo },
 ];
 
 /** Layered illustration: large gray circle + dashed chat bubble + overlapping phone badge */
@@ -145,11 +145,12 @@ export default function DashboardOverview({
                 </span>
               </div>
               <p className={`text-sm ${body}`}>
-                {!smsEnabled && card.key === 'messagesThisWeek'
-                  ? 'Web Messages'
-                  : card.label}
+                {card.label}
               </p>
               <p className={`text-3xl font-extrabold tracking-tight ${ink}`}>{stats[card.key]}</p>
+              {card.key === 'messagesThisWeek' && (
+                <p className={`mt-1 text-xs ${body}`}>Outgoing SMS and website chat</p>
+              )}
             </div>
           );
         })}

@@ -110,6 +110,7 @@ function renderOverview(args: {
   totalContacts?: number;
   hotLeads?: DashboardHotLead[];
   smsEnabled?: boolean;
+  messagesThisWeek?: number;
 }): string {
   mocks.stateIndex = 0;
   mocks.stateValues = args.stateValues ?? [];
@@ -121,7 +122,7 @@ function renderOverview(args: {
           totalConversations: 0,
           activeConversations: 0,
           totalContacts: args.totalContacts ?? args.hotLeads?.length ?? 0,
-          messagesThisWeek: 0,
+          messagesThisWeek: args.messagesThisWeek ?? 0,
         }}
         recentConversations={[]}
         hotLeads={args.hotLeads ?? []}
@@ -184,6 +185,18 @@ describe("DashboardOverview hot-lead classification", () => {
   });
 });
 
+describe("DashboardOverview outgoing-message metric", () => {
+  it.each([true, false])("renders the outgoing count and rolling-week scope with SMS enabled=%s", (smsEnabled) => {
+    const html = renderOverview({ requestBrand: DEFAULT_REQUEST_BRAND, phoneNumber: null,
+      messagesThisWeek: 37, smsEnabled });
+    expect(html).toContain("Messages Sent");
+    expect(html).toContain("Last 7 days");
+    expect(html).toMatch(/>37<\/p>/);
+    expect(html).toContain("Outgoing SMS and website chat");
+    expect(html).not.toContain("Web Messages");
+  });
+});
+
 describe("DashboardOverview visible brand copy", () => {
   it("uses widget-first Chat Only copy without phone, carrier, or texting controls", () => {
     const html = renderOverview({
@@ -193,7 +206,7 @@ describe("DashboardOverview visible brand copy", () => {
       stateValues: [true, false],
     });
 
-    expect(html).toContain("Web Messages");
+    expect(html).toContain("Messages Sent");
     expect(html).toContain("Install your website widget and start a test chat.");
     expect(html).toContain(
       "Manage your widget, AI answers, business details, hours, and calendar connection."

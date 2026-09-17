@@ -56,9 +56,10 @@ export default async function ConversationsPage({
     .eq("business_id", business.id)
     .order("last_message_at", { ascending: false });
 
-  // Fetch the last message for each conversation
+  // Voice fragments are not standalone messages suitable for a list preview.
   const conversationsWithPreviews: ConversationWithContact[] = await Promise.all(
     (conversations ?? []).map(async (conv: ConversationWithContact) => {
+      if (conv.channel === "voice") return { ...conv, last_message_preview: "View call transcript" };
       const { data: lastMessage } = await supabase
         .from("messages")
         .select("content")

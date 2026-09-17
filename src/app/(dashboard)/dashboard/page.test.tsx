@@ -86,6 +86,8 @@ interface FeatureStatusBannerProps {
 }
 
 interface DashboardOverviewProps {
+  stats: { messagesThisWeek: number };
+  recentConversations: Array<{ id: string; lastMessage?: string }>;
   billingMode: "stripe" | "invoiced" | "comped";
   isPartnerManagedBilling: boolean;
   hotLeads: Array<Record<string, unknown>>;
@@ -114,6 +116,7 @@ function queryThenable(result: Promise<unknown>) {
   for (const method of [
     "select",
     "eq",
+    "in",
     "gte",
     "order",
     "limit",
@@ -177,6 +180,28 @@ function statusAwareContactsQuery(rows: Array<Record<string, unknown>>) {
   return query;
 }
 
+function outgoingMessageCountQuery(rows: Array<Record<string, unknown>>) {
+  const filters: Array<(row: Record<string, unknown>) => boolean> = [];
+  const query = {
+    select: vi.fn(() => query),
+    eq: vi.fn((column: string, value: unknown) => {
+      filters.push((row) => row[column] === value);
+      return query;
+    }),
+    in: vi.fn((column: string, values: unknown[]) => {
+      filters.push((row) => values.includes(row[column]));
+      return query;
+    }),
+    gte: vi.fn((column: string, value: string) => {
+      filters.push((row) => String(row[column]) >= value);
+      return query;
+    }),
+    then: (resolve: (result: { count: number }) => unknown) =>
+      Promise.resolve({ count: rows.filter((row) => filters.every((filter) => filter(row))).length }).then(resolve),
+  };
+  return query;
+}
+
 function configureResolvedDashboardWithSavedGuardrails({
   partnerId = null,
   billingMode = "stripe",
@@ -185,6 +210,8 @@ function configureResolvedDashboardWithSavedGuardrails({
   bookingEnabled = false,
   canUseCalendar = true,
   hotLeadRows = [],
+  messageRows = [],
+  recentConversationRows = [],
 }: {
   partnerId?: string | null;
   billingMode?: "stripe" | "invoiced" | "comped";
@@ -193,6 +220,8 @@ function configureResolvedDashboardWithSavedGuardrails({
   bookingEnabled?: boolean;
   canUseCalendar?: boolean;
   hotLeadRows?: Array<Record<string, unknown>>;
+  messageRows?: Array<Record<string, unknown>>;
+  recentConversationRows?: Array<Record<string, unknown>>;
 } = {}) {
   const tableCalls = new Map<string, number>();
   const queries: Array<{
@@ -209,13 +238,13 @@ function configureResolvedDashboardWithSavedGuardrails({
     if (table === "conversations" && call <= 2) {
       result = Promise.resolve({ count: 0 });
     } else if (table === "conversations") {
-      result = Promise.resolve({ data: [] });
+      result = Promise.resolve({ data: recentConversationRows });
     } else if (table === "contacts" && call === 1) {
       result = Promise.resolve({ count: 0 });
     } else if (table === "contacts") {
       result = Promise.resolve({ data: [] });
     } else if (table === "messages") {
-      result = Promise.resolve({ count: 0 });
+      result = Promise.resolve(call === 1 ? { count: 0 } : { data: [{ content: "Latest text preview" }] });
     } else if (table === "ai_settings") {
       result = Promise.resolve({
         data: {
@@ -235,7 +264,9 @@ function configureResolvedDashboardWithSavedGuardrails({
     const query =
       table === "contacts" && call === 2
         ? statusAwareContactsQuery(hotLeadRows)
-        : queryThenable(result);
+        : table === "messages" && call === 1
+          ? outgoingMessageCountQuery(messageRows)
+          : queryThenable(result);
     queries.push({ table, call, query });
     return query;
   });
@@ -383,6 +414,53 @@ describe("DashboardPage query scheduling", () => {
 
     preview.resolve({ data: [{ content: "Latest message" }] });
     await expect(page).resolves.toBeDefined();
+  });
+});
+
+describe("DashboardPage outgoing-message count", () => {
+  it("counts only this business's outgoing SMS and website-chat messages in the last seven days", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date("2026-09-18T12:00:00.000Z"));
+    try {
+      const base = { business_id: BUSINESS_ID, created_at: "2026-09-17T12:00:00.000Z" };
+      const included = ["sms", "web_chat"].flatMap((channel) =>
+        ["assistant", "human_agent"].map((role) => ({ ...base, role, channel })));
+      const excluded = [
+        ...["sms", "web_chat"].flatMap((channel) => ["customer", "system"].map((role) => ({ ...base, role, channel }))),
+        ...Array.from({ length: 1200 }, (_, i) => ({ ...base, role: i % 2 ? "assistant" : "customer", channel: "voice" })),
+        { ...base, role: "human_agent", channel: "voice" },
+        { ...base, role: "assistant", channel: "sms", business_id: "other-business" },
+        { ...base, role: "assistant", channel: "web_chat", created_at: "2026-09-11T11:59:59.999Z" },
+      ];
+      const queries = configureResolvedDashboardWithSavedGuardrails({ messageRows: [...included, ...excluded] });
+      const overview = await renderedDashboardOverviewProps();
+      const query = queries.find(({ table }) => table === "messages")!.query as Record<string, ReturnType<typeof vi.fn>>;
+      expect(query.select).toHaveBeenCalledExactlyOnceWith("*", { count: "exact", head: true });
+      expect(query.eq).toHaveBeenCalledExactlyOnceWith("business_id", BUSINESS_ID);
+      expect(query.in.mock.calls).toEqual([["role", ["assistant", "human_agent"]], ["channel", ["sms", "web_chat"]]]);
+      expect(query.gte).toHaveBeenCalledExactlyOnceWith("created_at", "2026-09-11T12:00:00.000Z");
+      expect(overview?.stats.messagesThisWeek).toBe(4);
+    } finally { vi.useRealTimers(); }
+  });
+});
+
+describe("DashboardPage recent conversation previews", () => {
+  it("uses a truthful voice preview without fetching fragments and preserves SMS and website-chat previews", async () => {
+    const queries = configureResolvedDashboardWithSavedGuardrails({ recentConversationRows: [
+      { id: "voice-call", channel: "voice" },
+      { id: "sms-conversation", channel: "sms" },
+      { id: "web-conversation", channel: "web_chat" },
+    ] });
+    const overview = await renderedDashboardOverviewProps();
+    expect(overview?.recentConversations).toEqual([
+      { id: "voice-call", channel: "voice", lastMessage: "View call transcript" },
+      { id: "sms-conversation", channel: "sms", lastMessage: "Latest text preview" },
+      { id: "web-conversation", channel: "web_chat", lastMessage: "Latest text preview" },
+    ]);
+    const previewQueries = queries.filter(({ table, call }) => table === "messages" && call > 1);
+    expect(previewQueries).toHaveLength(2);
+    expect(previewQueries.map(({ query }) => (query.eq as ReturnType<typeof vi.fn>).mock.calls)).toEqual([
+      [["conversation_id", "sms-conversation"]], [["conversation_id", "web-conversation"]],
+    ]);
   });
 });
 

@@ -124,6 +124,22 @@ beforeEach(() => {
 });
 
 describe("ConversationsPage deep links", () => {
+  it("uses a voice transcript preview without fetching fragments while preserving both text-channel previews", async () => {
+    const voice = { ...CONVERSATION, id: "voice-call", channel: "voice" };
+    const sms = { ...CONVERSATION, id: "sms-conversation", channel: "sms" };
+    const web = { ...CONVERSATION, id: "web-conversation", channel: "web_chat" };
+    mocks.conversationOrder.mockResolvedValue({ data: [voice, sms, web], error: null });
+    renderToStaticMarkup(await ConversationsPage({}));
+    expect(mocks.messageEq.mock.calls).toEqual([
+      ["conversation_id", sms.id], ["conversation_id", web.id],
+    ]);
+    expect(mocks.messageSingle).toHaveBeenCalledTimes(2);
+    expect(mocks.inboxLayout).toHaveBeenCalledWith(expect.objectContaining({ conversations: [
+      { ...voice, last_message_preview: "View call transcript" },
+      { ...sms, last_message_preview: "Latest message" },
+      { ...web, last_message_preview: "Latest message" },
+    ] }));
+  });
   const parameterCases: Array<
     [
       string,

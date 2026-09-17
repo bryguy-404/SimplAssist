@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   randomUUID: vi.fn(),
   resolveBusinessEntitlements: vi.fn(),
   canUseFeature: vi.fn(),
+  voiceAccess: vi.fn(),
   getAuthenticatedClient: vi.fn(),
   getCalendarService: vi.fn(),
   from: vi.fn(),
@@ -32,6 +33,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/lib/voice/bookingAccess.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/voice/bookingAccess.server")>()),
+  validateVoiceBookingAccess: mocks.voiceAccess,
+}));
 vi.mock("node:crypto", async (importOriginal) => ({
   ...(await importOriginal<typeof import("node:crypto")>()),
   randomUUID: mocks.randomUUID
@@ -323,6 +328,7 @@ beforeEach(() => {
     error: null
   });
   mocks.assertBookingOperationallyAllowed.mockResolvedValue(undefined);
+  mocks.voiceAccess.mockResolvedValue({ email: params.customerEmail });
   mocks.eventsGet.mockRejectedValue({ response: { status: 404 } });
   mocks.eventsList.mockResolvedValue({ data: { items: [] } });
   mocks.eventsInsert.mockResolvedValue({ data: googleEvent() });
@@ -344,6 +350,54 @@ afterEach(() => {
 });
 
 describe("createBooking lifecycle", () => {
+  it("books voice-confirmed details and invites the current call email without overwriting a conflicting contact", async () => {
+    const voice = { sessionId: "voice-session", actionId: "voice-action" };
+    const voiceParams = { ...params, startTime: "2026-08-01T14:00:00" };
+    mocks.contactSingle.mockResolvedValue({
+      data: { id: CONTACT_ID, business_id: BUSINESS_ID, email: "older@example.com" },
+      error: null,
+    });
+    mocks.rpc.mockResolvedValueOnce({ data: bookingRow(), error: null })
+      .mockResolvedValueOnce({ data: bookingRow({ status: "confirmed", google_event_id: "google-event-1", operation_claim_token: null, operation_claimed_at: null }), error: null });
+
+    await expect(createBooking(BUSINESS_ID, voiceParams, "UTC", linkage, voice))
+      .resolves.toMatchObject({ eventId: "google-event-1" });
+    expect(mocks.voiceAccess).toHaveBeenCalledTimes(2);
+    expect(mocks.voiceAccess).toHaveBeenLastCalledWith(BUSINESS_ID, voice, SOURCE_MESSAGE_ID, voiceParams);
+    expect(mocks.voiceAccess.mock.invocationCallOrder[1]).toBeGreaterThan(mocks.submissionFenceRpc.mock.invocationCallOrder[0]);
+    expect(mocks.voiceAccess.mock.invocationCallOrder[1]).toBeLessThan(mocks.eventsInsert.mock.invocationCallOrder[0]);
+    expect(mocks.eventsInsert).toHaveBeenCalledWith(expect.objectContaining({
+      sendUpdates: "all",
+      requestBody: expect.objectContaining({ attendees: [{ email: "jane@example.com" }] }),
+    }), { retry: false, timeout: 60_000 });
+  });
+
+  it("releases its reservation without inserting when a voice confirmation is superseded during calendar checks", async () => {
+    mocks.voiceAccess.mockResolvedValueOnce({ email: params.customerEmail })
+      .mockRejectedValueOnce(new Error("voice_booking_confirmation_superseded"));
+    mocks.rpc.mockResolvedValueOnce({ data: bookingRow(), error: null })
+      .mockResolvedValueOnce({ data: bookingRow({ status: "failed", operation_claim_token: null, operation_claimed_at: null }), error: null });
+
+    await expect(createBooking(BUSINESS_ID, { ...params, startTime: "2026-08-01T14:00:00" }, "UTC", linkage,
+      { sessionId: "voice-session", actionId: "voice-action" }))
+      .rejects.toThrow("voice_booking_authority_changed_before_submission");
+    expect(mocks.eventsInsert).not.toHaveBeenCalled();
+    expect(mocks.rpc).toHaveBeenLastCalledWith("fail_calendar_booking", expect.objectContaining({
+      p_business_id: BUSINESS_ID, p_booking_id: BOOKING_ID, p_claim_token: CURRENT_CLAIM,
+    }));
+  });
+
+  it("does not fabricate a clean no-submit outcome if reservation cleanup cannot be verified", async () => {
+    mocks.voiceAccess.mockResolvedValueOnce({ email: params.customerEmail })
+      .mockRejectedValueOnce(new Error("voice_booking_not_authorized"));
+    mocks.rpc.mockResolvedValueOnce({ data: bookingRow(), error: null })
+      .mockResolvedValueOnce({ data: null, error: { message: "unavailable" } });
+    await expect(createBooking(BUSINESS_ID, { ...params, startTime: "2026-08-01T14:00:00" }, "UTC", linkage,
+      { sessionId: "voice-session", actionId: "voice-action" }))
+      .rejects.not.toThrow("voice_booking_authority_changed_before_submission");
+    expect(mocks.eventsInsert).not.toHaveBeenCalled();
+  });
+
   it("interprets an offsetless booking as Indianapolis wall time and submits ISO instants to Google", async () => {
     const localParams = {
       ...params,

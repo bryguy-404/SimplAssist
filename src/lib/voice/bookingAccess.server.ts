@@ -1,14 +1,34 @@
 import "server-only";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { voiceActionPayload } from "./actions";
 /** Optional authority is an identifier, never a caller-supplied entitlement flag. */
 export interface VoiceBookingAuthority {
   sessionId: string;
   actionId?: string;
 }
+export interface VoiceBookingRequest {
+  customerName: string;
+  customerPhone?: string;
+  customerEmail?: string;
+  serviceName: string;
+  startTime: string;
+}
+
+/** Proven no-submit outcome, distinct from a timeout after a provider request. */
+export class VoiceBookingNotSubmittedError extends Error {
+  constructor() {
+    super("voice_booking_authority_changed_before_submission");
+    this.name = "VoiceBookingNotSubmittedError";
+  }
+}
+
+const normalizedText = (value: string) => value.normalize("NFKC").trim().replace(/\s+/g, " ");
+
 export async function validateVoiceBookingAccess(
   businessId: string,
   authority: VoiceBookingAuthority,
   sourceMessageId?: string,
+  expected?: VoiceBookingRequest,
 ): Promise<{ email?: string }> {
   const { data: allowed, error } = await supabaseAdmin.rpc(
     "voice_action_allowed",
@@ -45,6 +65,8 @@ export async function validateVoiceBookingAccess(
     )
       throw new Error("voice_demo_calendar_mismatch");
   }
+  if (expected && (!sourceMessageId || !authority.actionId))
+    throw new Error("voice_booking_confirmation_missing");
   if (!sourceMessageId) return {};
   const { data: a, error: ae } = await supabaseAdmin
     .from("voice_actions")
@@ -66,6 +88,17 @@ export async function validateVoiceBookingAccess(
   });
   if (current.error || !current.data)
     throw new Error("voice_booking_confirmation_superseded");
+  const payload = voiceActionPayload.safeParse(a.payload);
+  if (!payload.success || payload.data.kind !== "booking" || payload.data.phone !== s.caller_phone)
+    throw new Error("voice_booking_confirmation_invalid");
+  const confirmed = payload.data;
+  if (expected && (
+    normalizedText(expected.customerName) !== normalizedText(confirmed.name) ||
+    expected.customerPhone !== confirmed.phone ||
+    (expected.customerEmail?.trim().toLowerCase() ?? "") !== (confirmed.email?.toLowerCase() ?? "") ||
+    normalizedText(expected.serviceName).toLowerCase() !== normalizedText(confirmed.service).toLowerCase() ||
+    expected.startTime !== confirmed.startTime
+  )) throw new Error("voice_booking_request_not_confirmed");
   if (s.demo_mode && a.payload.email) {
     const { data: t, error: te } = await supabaseAdmin
       .from("voice_pilot_testers")
@@ -80,5 +113,5 @@ export async function validateVoiceBookingAccess(
     )
       throw new Error("voice_demo_invitation_not_allowed");
   }
-  return { email: a.payload.email };
+  return { email: confirmed.email };
 }

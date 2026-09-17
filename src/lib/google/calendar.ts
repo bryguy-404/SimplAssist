@@ -1,4 +1,4 @@
-import { validateVoiceBookingAccess, type VoiceBookingAuthority } from "@/lib/voice/bookingAccess.server";
+import { validateVoiceBookingAccess, VoiceBookingNotSubmittedError, type VoiceBookingAuthority } from "@/lib/voice/bookingAccess.server";
 import { createHash, randomUUID } from "node:crypto";
 import type { calendar_v3 } from "googleapis";
 import { getAuthenticatedClient, getCalendarService } from "./client";
@@ -962,7 +962,7 @@ export async function createBooking(
   );
   await assertBookingOperationallyAllowed(businessId);
   const voiceConfirmation = voiceAuthority
-    ? await validateVoiceBookingAccess(businessId, voiceAuthority, linkage.sourceMessageId)
+    ? await validateVoiceBookingAccess(businessId, voiceAuthority, linkage.sourceMessageId, params)
     : null;
   if (!voiceAuthority) await requireDirectBooking(businessId);
   const normalizedParams = normalizeBookingParams(params, linkage);
@@ -1273,6 +1273,25 @@ export async function createBooking(
   }
 
   let event;
+  if (voiceAuthority) {
+    try {
+      // Availability and credential checks can take time. Re-read the exact
+      // caller confirmation at the last boundary before any Google mutation.
+      await validateVoiceBookingAccess(businessId, voiceAuthority, linkage.sourceMessageId, params);
+    } catch {
+      // This invocation has not called Google. Its own claim can be released;
+      // a failure to prove cleanup remains an uncertain result for recovery.
+      const stopped = await stopCalendarBookingBeforeProviderSubmission(
+        submissionReservation,
+        claimToken,
+      );
+      if (stopped.status === "confirmed") {
+        assertBookingLinkage(stopped, businessId, linkage, reservation);
+        return bookingResultFromRow(stopped);
+      }
+      throw new VoiceBookingNotSubmittedError();
+    }
+  }
   try {
     event = await calendar.events.insert(
       {

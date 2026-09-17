@@ -17,6 +17,7 @@ import { preflightOutboundSms } from "@/lib/billing/usage";
 import { resolveOutboundSmsOperationalAccess } from "@/lib/messaging/outboundSmsOperational.server";
 import { telnyx } from "@/lib/messaging/client";
 import { normalizeHttpsGoalUrl } from "@/lib/goals/primaryGoal";
+import { VoiceBookingNotSubmittedError } from "./bookingAccess.server";
 
 export async function loadVoiceActionContext(sessionId: string) {
   const { data: session, error } = await db
@@ -526,6 +527,7 @@ async function executeVoiceAction(
         completed.result.summary,
       );
     const status = (failure as { status?: number })?.status;
+    if (failure instanceof VoiceBookingNotSubmittedError) submitted = false;
     if (status && [400, 401, 403, 404, 422].includes(status)) submitted = false;
     await db
       .from("voice_actions")

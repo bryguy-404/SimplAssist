@@ -9,6 +9,8 @@ const m = vi.hoisted(() => ({
   operational: vi.fn(),
   bookkeeping: vi.fn(),
   calendar: vi.fn(),
+  book: vi.fn(),
+  requestBooking: vi.fn(),
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/admin", () => ({
@@ -29,10 +31,11 @@ vi.mock("./actionRecovery.server", () => ({
 }));
 vi.mock("@/lib/google/calendar", () => ({
   checkAvailability: m.calendar,
-  createBooking: vi.fn(),
+  createBooking: m.book,
 }));
-vi.mock("@/lib/ai/bookingRequests", () => ({ recordBookingRequest: vi.fn() }));
+vi.mock("@/lib/ai/bookingRequests", () => ({ recordBookingRequest: m.requestBooking }));
 import { runVoiceDecision } from "./actionService.server";
+import { VoiceBookingNotSubmittedError } from "./bookingAccess.server";
 import type { ActionDecision } from "./actions";
 type Row = Record<string, unknown>;
 let tables: Record<string, Row[]>;
@@ -264,6 +267,8 @@ beforeEach(() => {
   m.operational.mockResolvedValue({ allowed: true });
   m.send.mockResolvedValue({ data: { id: "message-1" } });
   m.bookkeeping.mockResolvedValue(undefined);
+  m.book.mockResolvedValue({ eventId: "event", summary: "Estimate", startTime: "2026-10-01T14:00:00Z" });
+  m.requestBooking.mockResolvedValue(undefined);
   m.optouts.mockImplementation(async function* () {});
 });
 const propose: ActionDecision = {
@@ -360,6 +365,83 @@ describe("voice signup execution", () => {
     tables.businesses[0].primary_goal = "book";
     await expect(runVoiceDecision(sid, propose)).rejects.toThrow("disabled");
     expect(m.send).not.toHaveBeenCalled();
+  });
+});
+
+describe("voice booking execution", () => {
+  const booking: ActionDecision = {
+    intent: "propose",
+    payload: { kind: "booking", name: "Caller", phone: "+15555550101", email: "caller@example.test", service: "Estimate", startTime: "2026-10-01T10:00:00" },
+    requestEventIds: ["request"],
+  };
+  beforeEach(() => {
+    tables.businesses[0].primary_goal = "book";
+    Object.assign(tables.ai_settings[0], { booking_enabled: true, booking_mode: "schedule_direct" });
+    tables.voice_availability = [{ session_id: sid, date: "2026-10-01", slots: ["10:00 AM"], checked_at: new Date().toISOString() }];
+  });
+
+  it.each(["Yes, please", "Sure", "Yeah, that's fine"])("books exactly once after the complete interpreted confirmation: %s", async (reply) => {
+    expect((await runVoiceDecision(sid, booking)).confirmationActionId).toBe(aid);
+    expect(m.book).not.toHaveBeenCalled();
+    tables.voice_transcript_fragments[0].content = reply;
+    const result = await runVoiceDecision(sid, confirm);
+    expect(result.text).toContain("appointment is confirmed");
+    expect(m.book).toHaveBeenCalledWith("business", {
+      customerName: "Caller", customerPhone: "+15555550101", customerEmail: "caller@example.test",
+      serviceName: "Estimate", startTime: "2026-10-01T10:00:00",
+    }, "America/Indiana/Indianapolis", {
+      contactId: "contact", conversationId: "conversation", sourceMessageId: "source",
+    }, { sessionId: sid, actionId: aid });
+    await runVoiceDecision(sid, confirm);
+    expect(m.book).toHaveBeenCalledOnce();
+    expect(m.send).not.toHaveBeenCalled();
+  });
+
+  it("requires fresh offered availability before proposing an appointment", async () => {
+    tables.voice_availability[0].checked_at = new Date(Date.now() - 301_000).toISOString();
+    expect((await runVoiceDecision(sid, booking)).text).toContain("Check current availability");
+    expect(tables.voice_actions).toHaveLength(0);
+    expect(m.book).not.toHaveBeenCalled();
+  });
+
+  it("does not execute a yes that omits a later caller correction", async () => {
+    await runVoiceDecision(sid, booking);
+    tables.voice_transcript_fragments.push({ ...tables.voice_transcript_fragments[0], event_id: "correction", start_ms: 700, content: ", wait, use another day" });
+    expect((await runVoiceDecision(sid, confirm)).confirmationActionId).toBe(aid);
+    expect(m.book).not.toHaveBeenCalled();
+  });
+
+  it("reports proven pre-submission refusal as failed and does not retry it", async () => {
+    await runVoiceDecision(sid, booking);
+    m.book.mockRejectedValue(new VoiceBookingNotSubmittedError());
+    expect((await runVoiceDecision(sid, confirm)).text).toContain("could not be completed");
+    expect(tables.voice_actions[0].status).toBe("failed");
+    await runVoiceDecision(sid, confirm);
+    expect(m.book).toHaveBeenCalledOnce();
+  });
+
+  it("does not claim success or submit again after an uncertain calendar result", async () => {
+    await runVoiceDecision(sid, booking);
+    m.book.mockRejectedValue(new Error("provider timeout"));
+    expect((await runVoiceDecision(sid, confirm)).text).toContain("couldn't verify");
+    expect(tables.voice_actions[0].status).toBe("uncertain");
+    await runVoiceDecision(sid, confirm);
+    expect(m.book).toHaveBeenCalledOnce();
+  });
+
+  it("saves a request in collect-info mode without claiming an appointment or inviting anyone", async () => {
+    tables.ai_settings[0].booking_mode = "collect_info";
+    await runVoiceDecision(sid, { intent: "propose", payload: {
+      kind: "booking_request", name: "Caller", phone: "+15555550101", email: "caller@example.test",
+      service: "Estimate", requestedTime: "Next week in the morning",
+    }, requestEventIds: ["request"] });
+    expect((await runVoiceDecision(sid, confirm)).text).toContain("not a confirmed appointment");
+    expect(m.requestBooking).toHaveBeenCalledWith(expect.objectContaining({
+      businessId: "business", requestedTimeText: "Next week in the morning", customerEmail: "caller@example.test",
+    }));
+    await runVoiceDecision(sid, confirm);
+    expect(m.requestBooking).toHaveBeenCalledOnce();
+    expect(m.book).not.toHaveBeenCalled();
   });
 });
 

@@ -21,6 +21,7 @@ import { SETUP_FEE_CENTS, SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
 import { FULL_SUITE_DESCRIPTION, FULL_SUITE_HIGHLIGHTS, FULL_SUITE_USAGE_NOTE } from "@/lib/billing/fullSuitePresentation";
 import { OpenChatButton } from "./open-chat-button";
 import { HomepageChatWidget } from "./homepage-chat-widget";
+import cardStyles from "./card-interactions.module.css";
 import {
   getHomepageJsonLd,
   getHomepageSeoContent,
@@ -34,7 +35,6 @@ import {
   btnPrimaryWide,
   btnSecondary,
   card,
-  cardHover,
   darkAmbient,
   fontStack,
   ink,
@@ -499,7 +499,7 @@ function HeroStatCards() {
   return (
     <>
       {heroStats.map((item) => (
-        <div key={item.stat} className={`p-5 ${card} ${cardHover}`}>
+        <div key={item.stat} className={`p-5 ${card} ${cardStyles.card}`}>
           <strong className={`block text-[22px] mb-2 ${ink}`}>{item.stat}</strong>
           <span className={`text-sm ${body}`}>{item.label}</span>
         </div>
@@ -751,24 +751,9 @@ export default function HomePage() {
             </div>
           </Reveal>
 
-          {/* Hero panel — animated conversation demo (all widths) */}
+          {/* Sculpted device — animated conversation demo (all widths) */}
           <Reveal priority delayMs={140}>
-            <div className={`p-5 relative overflow-hidden ${card}`}>
-              {/* Ambient corner tint (dark only) */}
-              <div
-                className="absolute pointer-events-none hidden dark:block"
-                style={{
-                  bottom: "-30%",
-                  right: "-15%",
-                  width: 240,
-                  height: 240,
-                  borderRadius: "50%",
-                  background: "radial-gradient(circle, rgba(255,145,77,.32), transparent 65%)",
-                  filter: "blur(18px)",
-                }}
-              />
-              <HeroDemo />
-            </div>
+            <HeroDemo />
           </Reveal>
 
           {/* Mini stat cards — mobile/tablet: after the demo */}
@@ -786,7 +771,7 @@ export default function HomePage() {
           className="py-10 sm:py-14"
         >
           <Reveal>
-            <div className={`p-6 sm:p-8 ${card}`}>
+            <div className={`p-6 sm:p-8 ${card} ${cardStyles.card} ${cardStyles.wide}`}>
               <h2
                 id="what-is-simplassist-heading"
                 className={`text-[clamp(26px,3.5vw,40px)] leading-[1.08] tracking-[-0.035em] font-extrabold ${ink}`}
@@ -815,14 +800,15 @@ export default function HomePage() {
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {features.map((feature, i) => (
               <Reveal key={feature.title} delayMs={i * 75} className="h-full">
-                <div className={`p-6 sm:p-8 relative overflow-hidden h-full ${card} ${cardHover}`}>
+                <div className={`p-6 sm:p-8 relative overflow-hidden h-full ${card} ${cardStyles.card}`}>
                   <div
-                    className="
+                    className={`
                       w-14 h-14 rounded-[22px] grid place-items-center mb-4
                       bg-[#fdf1e7] border border-[#f5dcc4]
                       dark:bg-transparent dark:bg-[linear-gradient(135deg,rgba(255,145,77,.22),rgba(255,255,255,.08))]
                       dark:border-white/[0.10]
-                    "
+                      ${cardStyles.art}
+                    `}
                   >
                     <feature.icon className="w-6 h-6 text-[#ea580c] dark:text-[#ff914d]" />
                   </div>
@@ -866,9 +852,9 @@ export default function HomePage() {
           {/* lg+: one soft panel, two overlapping dashboard views */}
           <Reveal delayMs={100}>
             <div className="hidden lg:block rounded-[28px] overflow-hidden px-10 pt-10 bg-[#f2eee5] border border-black/[0.03] dark:bg-white/[0.05] dark:border-white/[0.07]">
-              <div className="group flex items-end">
+              <div className="flex items-end">
                 <div
-                  className={`relative z-10 w-[59%] shrink-0 aspect-video ${paneFrame} shadow-[0_12px_40px_-12px_rgba(28,25,23,0.22)] transition-[opacity,transform] duration-300 group-hover:opacity-60 hover:!opacity-100 hover:-translate-y-1.5`}
+                  className={`relative z-10 w-[59%] shrink-0 aspect-video ${paneFrame} shadow-[0_12px_40px_-12px_rgba(28,25,23,0.22)] ${cardStyles.preview}`}
                 >
                   <PaneShot
                     base="pane-messages"
@@ -877,7 +863,7 @@ export default function HomePage() {
                   />
                 </div>
                 <div
-                  className={`relative z-0 hover:z-20 w-[52%] -ml-[11%] shrink-0 aspect-[15/8] ${paneFrame} shadow-[0_12px_40px_-12px_rgba(28,25,23,0.18)] transition-[opacity,transform] duration-300 group-hover:opacity-60 hover:!opacity-100 hover:-translate-y-1.5`}
+                  className={`relative z-0 w-[52%] -ml-[11%] shrink-0 aspect-[15/8] ${paneFrame} shadow-[0_12px_40px_-12px_rgba(28,25,23,0.18)] ${cardStyles.preview}`}
                 >
                   <PaneShot
                     base="pane-calendar"
@@ -896,7 +882,7 @@ export default function HomePage() {
                 <h3 className={`text-base font-bold ${ink} mb-1.5`}>{view.title}</h3>
                 <p className={`${body} text-[15px] leading-[1.65]`}>{view.description}</p>
                 <div className="mt-4 rounded-2xl overflow-hidden p-3 pb-0 bg-[#f2eee5] border border-black/[0.03] dark:bg-white/[0.05] dark:border-white/[0.07]">
-                  <div className={`relative ${view.aspect} ${paneFrame} rounded-t-xl`}>
+                  <div className={`relative ${view.aspect} ${paneFrame} rounded-t-xl ${cardStyles.preview}`}>
                     <PaneShot base={view.base} alt={view.alt} sizes="90vw" />
                   </div>
                 </div>
@@ -919,7 +905,7 @@ export default function HomePage() {
 
           <div className="grid gap-5 sm:grid-cols-2">
             <Reveal className="h-full">
-              <article className={`flex h-full flex-col p-6 sm:p-8 ${card}`}>
+              <article className={`flex h-full flex-col p-6 sm:p-8 ${card} ${cardStyles.card}`}>
                 <h3 className={`text-xl font-bold sm:text-[22px] ${ink}`}>
                   Make the call. We won’t answer.
                   <br />
@@ -945,7 +931,7 @@ export default function HomePage() {
             </Reveal>
 
             <Reveal delayMs={90} className="h-full">
-              <article className={`flex h-full flex-col p-6 sm:p-8 ${card}`}>
+              <article className={`flex h-full flex-col p-6 sm:p-8 ${card} ${cardStyles.card}`}>
                 <h3 className={`text-xl font-bold sm:text-[22px] ${ink}`}>
                   Ask away. SimplAssist can take it.
                 </h3>
@@ -1009,10 +995,11 @@ export default function HomePage() {
                         dark:outline-[rgba(255,145,77,.42)]
                         dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_24px_56px_-16px_rgba(0,0,0,0.7)]
                         dark:backdrop-blur-[18px]
+                        ${cardStyles.card}
                       `
-                        : `p-7 flex h-full flex-col relative ${card} ${
+                        : `p-7 flex h-full flex-col relative ${card} ${cardStyles.card} ${
                             available
-                              ? cardHover
+                              ? ""
                               : "bg-stone-50/90 dark:bg-white/[0.035]"
                           }`
                     }
@@ -1245,7 +1232,7 @@ export default function HomePage() {
           <div className="grid gap-4">
             {seoContent.faqs.map((faq, i) => (
               <Reveal key={faq.question} delayMs={Math.min(i * 45, 180)}>
-                <details className={`sa-faq-disclosure group overflow-hidden ${card}`}>
+                <details className={`sa-faq-disclosure group overflow-hidden ${card} ${cardStyles.card} ${cardStyles.wide}`}>
                   <summary className="min-h-[76px] cursor-pointer list-none p-6 outline-none transition-colors hover:bg-[#faf6ef] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#ea580c]/60 dark:hover:bg-white/[0.04] dark:focus-visible:ring-[#ff914d]/60 sm:px-7 [&::-webkit-details-marker]:hidden">
                     <h3 className={`flex items-center justify-between gap-5 text-lg sm:text-xl font-bold leading-snug ${ink}`}>
                       <span>{faq.question}</span>
@@ -1269,7 +1256,7 @@ export default function HomePage() {
         {/* ── CTA — headline + the "two Tuesdays" race vignette; both columns
             stretch so neither side leaves dead space ── */}
         <Reveal>
-          <section className={`my-6 p-6 sm:p-8 grid lg:grid-cols-[1.1fr_.9fr] gap-6 lg:gap-10 ${card}`}>
+          <section className={`my-6 p-6 sm:p-8 grid lg:grid-cols-[1.1fr_.9fr] gap-6 lg:gap-10 ${card} ${cardStyles.card} ${cardStyles.wide}`}>
             <div className="lg:pt-1.5 flex flex-col">
               <h2 className={`text-balance text-[clamp(28px,4vw,48px)] font-extrabold leading-[1.05] tracking-[-0.04em] mb-3 ${ink}`}>
                 Your voicemail isn&apos;t closing deals.
@@ -1326,14 +1313,14 @@ export default function HomePage() {
             {trustedTechnologies.map(({ name, logo }) => (
               <li
                 key={name}
-                className="flex min-h-[76px] items-center justify-center gap-3 rounded-[22px] border border-[#e8e0d5] bg-white px-3 py-4 shadow-[0_1px_2px_rgba(28,25,23,0.03)] dark:border-white/[0.10] dark:bg-white/[0.08] dark:shadow-none"
+                className={`flex min-h-[76px] items-center justify-center gap-3 rounded-[22px] border border-[#e8e0d5] bg-white px-3 py-4 shadow-[0_1px_2px_rgba(28,25,23,0.03)] dark:border-white/[0.10] dark:bg-white/[0.08] dark:shadow-none ${cardStyles.card}`}
               >
                 <Image
                   src={logo}
                   alt={name}
                   width={40}
                   height={32}
-                  className="h-8 w-10 shrink-0 object-contain"
+                  className={`h-8 w-10 shrink-0 object-contain ${cardStyles.art}`}
                 />
                 <span className={`text-sm font-semibold leading-tight ${ink}`}>
                   {name}

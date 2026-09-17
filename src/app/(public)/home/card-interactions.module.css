@@ -1,0 +1,82 @@
+/* Homepage-only elevation. Individual transforms preserve the featured
+   pricing card's resting offset and the parent scroll-reveal animation. */
+.card,
+.preview {
+  --card-hover-scale: 1.015;
+  --card-hover-lift: -4px;
+  --card-hover-shadow: 0 3px 8px -5px rgb(67 49 34 / .06),
+    0 28px 58px -20px rgb(67 49 34 / .16);
+  transition:
+    scale 320ms cubic-bezier(.22, 1, .36, 1),
+    translate 320ms cubic-bezier(.22, 1, .36, 1),
+    box-shadow 320ms ease,
+    border-color 320ms ease;
+}
+
+.wide {
+  --card-hover-scale: 1.005;
+  --card-hover-lift: -3px;
+}
+
+.art,
+.preview img {
+  transition: scale 400ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.preview img {
+  transform-origin: center top;
+}
+
+:global(.dark) .card,
+:global(.dark) .preview {
+  --card-hover-shadow: inset 0 1px 0 rgb(255 255 255 / .09),
+    0 8px 20px -12px rgb(0 0 0 / .25),
+    0 32px 68px -22px rgb(0 0 0 / .5);
+}
+
+/* Keyboard users get the same elevation cue when focusing a link or button. */
+.card:has(:focus-visible) {
+  box-shadow: var(--card-hover-shadow);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .card:hover,
+  .preview:hover {
+    box-shadow: var(--card-hover-shadow);
+    border-color: #e0d5c7;
+  }
+
+  :global(.dark) .card:hover,
+  :global(.dark) .preview:hover {
+    border-color: rgb(255 255 255 / .19);
+  }
+
+  .preview:hover {
+    z-index: 20;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .card:hover,
+  .preview:hover {
+    scale: var(--card-hover-scale);
+    translate: 0 var(--card-hover-lift);
+  }
+
+  .card:hover .art {
+    scale: 1.055;
+  }
+
+  .preview:hover img {
+    scale: 1.025;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .preview,
+  .art,
+  .preview img {
+    transition: none;
+  }
+}

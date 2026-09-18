@@ -684,13 +684,21 @@ export default function HomePage() {
       <MarketingHeader />
 
       {/* ── Container ── */}
-      <div className="relative z-[1] w-[min(calc(100%-32px),1200px)] mx-auto pt-[5.25rem] sm:pt-24">
+      <div className="relative z-[1] w-[min(calc(100%-32px),1200px)] mx-auto pt-28 sm:pt-40 lg:pt-44">
         {/* ── Hero ── */}
         <section id="hero" className="grid lg:grid-cols-[1.12fr_.88fr] gap-7 items-center pt-4 pb-10">
           <Reveal priority>
             <div className="flex flex-col items-start">
-              <h1 className={`text-[clamp(40px,6vw,68px)] font-extrabold leading-[1.02] tracking-[-0.05em] mb-5 mt-12 sm:mt-0 ${ink}`}>
-                Missed call text back. <span className={accentText}>Keep the conversation going.</span>
+              <h1 className={`mb-5 ${ink}`}>
+                <span className={`mb-4 block text-sm font-semibold leading-6 tracking-wide sm:text-base ${body}`}>
+                  Missed call text back for small businesses.
+                </span>
+                {" "}
+                <span className="block text-[clamp(40px,6vw,68px)] font-extrabold leading-[1.02] tracking-[-0.05em]">
+                  Stop losing <span className={accentText}>money</span>{" "}
+                  <br className="hidden sm:block" />
+                  to missed calls.
+                </span>
               </h1>
 
               <p className={`text-[clamp(17px,2.3vw,20px)] leading-[1.7] ${body} max-w-[680px] mb-7`}>

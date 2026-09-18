@@ -102,12 +102,11 @@ describe("AISettingsForm Google Calendar connection state", () => {
       business_voice: "business_name",
       language: "both",
       sms_response_delay_seconds: 15,
-      guardrails_text: "",
+      guardrails_text: "Never promise a fixed price",
       booking_enabled: true,
       booking_mode: "schedule_direct",
     };
     const commonPolicy = {
-      guardrails: ["Never promise a fixed price"],
       canCustomizeAi: true,
       canUseCalendar: true,
       canUseGuardrails: true,
@@ -247,6 +246,73 @@ describe("AISettingsForm Google Calendar connection state", () => {
     expect(html).toContain("Connected");
     expect(html).toContain("Disconnect");
     expect(html).not.toContain("Connect Google Calendar");
+  });
+});
+
+describe("AISettingsForm guardrail saving", () => {
+  const policy = {
+    canCustomizeAi: true,
+    canUseCalendar: false,
+    canUseGuardrails: true,
+  };
+  const formData = {
+    ...SETTINGS,
+    guardrails_text: "",
+  };
+
+  it("saves typed rules directly, including multiline pastes and blank lines", () => {
+    const updates = buildAISettingsUpdates({
+      ...formData,
+      guardrails_text: "  Use the approved $10 Chat Only price.\r\n\r\n Describe Full Suite voice accurately.  \n",
+    }, policy);
+
+    expect(updates.guardrails).toEqual([
+      "Use the approved $10 Chat Only price.",
+      "Describe Full Suite voice accurately.",
+    ]);
+  });
+
+  it("loads saved rules into the editable box and keeps them on an unchanged save", () => {
+    const rules = ["Use approved prices.", "Never promise discounts."];
+    const html = renderToStaticMarkup(
+      <AISettingsForm
+        settings={{ ...SETTINGS, guardrails: rules }}
+        businessName="Example Business"
+        fullSuiteAvailable
+      />
+    );
+
+    expect(html).toMatch(/<textarea[^>]*>Use approved prices\.\nNever promise discounts\.<\/textarea>/);
+    expect(html).not.toContain("+ Add rules");
+    expect(buildAISettingsUpdates({
+      ...formData,
+      guardrails_text: rules.join("\n"),
+    }, policy).guardrails).toEqual(rules);
+  });
+
+  it("saves an empty list when the owner clears the box", () => {
+    expect(buildAISettingsUpdates({
+      ...formData,
+      guardrails_text: " \n\n ",
+    }, policy).guardrails).toEqual([]);
+  });
+
+  it("does not overwrite saved guardrails when the feature is locked", () => {
+    const updates = buildAISettingsUpdates({
+      ...formData,
+      guardrails_text: "Changed while access is unavailable",
+    }, { ...policy, canUseGuardrails: false });
+
+    expect(updates).not.toHaveProperty("guardrails");
+    const html = renderToStaticMarkup(
+      <AISettingsForm
+        settings={{ ...SETTINGS, guardrails: ["Keep this saved rule."] }}
+        businessName="Example Business"
+        canUseGuardrails={false}
+        fullSuiteAvailable
+      />
+    );
+    expect(html).toMatch(/<textarea[^>]*disabled[^>]*>Keep this saved rule\.<\/textarea>/);
   });
 });
 

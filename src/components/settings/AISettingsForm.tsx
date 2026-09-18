@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import Link from 'next/link';
-import { Lock, X } from 'lucide-react';
+import { Lock } from 'lucide-react';
 import type { AISettings } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import GoogleCalendarConnect from './GoogleCalendarConnect';
@@ -18,7 +18,7 @@ const aiSettingsSchema = z.object({
   business_voice: z.enum(['we', 'business_name'] as const),
   language: z.enum(['en', 'es', 'both'] as const),
   sms_response_delay_seconds: z.number().min(0).max(60),
-  guardrails_text: z.string().optional(),
+  guardrails_text: z.string(),
   booking_enabled: z.boolean(),
   booking_mode: z.enum(['collect_info', 'schedule_direct'] as const),
 });
@@ -76,13 +76,11 @@ function UpgradeNotice({
 export function buildAISettingsUpdates(
   data: AISettingsData,
   {
-    guardrails,
     canCustomizeAi,
     canUseCalendar,
     calendarGoalAvailable = true,
     canUseGuardrails,
   }: {
-    guardrails: string[];
     canCustomizeAi: boolean;
     canUseCalendar: boolean;
     calendarGoalAvailable?: boolean;
@@ -106,7 +104,10 @@ export function buildAISettingsUpdates(
     });
   }
   if (canUseGuardrails) {
-    updates.guardrails = guardrails;
+    updates.guardrails = data.guardrails_text
+      .split('\n')
+      .map((rule) => rule.trim())
+      .filter(Boolean);
   }
   return updates;
 }
@@ -127,14 +128,13 @@ export default function AISettingsForm({
 }: AISettingsFormProps) {
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
-  const [guardrails, setGuardrails] = useState<string[]>(settings.guardrails || []);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const {
     register,
     control,
     handleSubmit,
     watch,
-    setValue,
   } = useForm<AISettingsData>({
     resolver: zodResolver(aiSettingsSchema),
     defaultValues: {
@@ -142,7 +142,7 @@ export default function AISettingsForm({
       business_voice: settings.business_voice,
       language: settings.language,
       sms_response_delay_seconds: settings.sms_response_delay_seconds,
-      guardrails_text: '',
+      guardrails_text: (settings.guardrails || []).join('\n'),
       booking_enabled: settings.booking_enabled,
       booking_mode: settings.booking_mode,
     },
@@ -153,20 +153,6 @@ export default function AISettingsForm({
   const responseDelay = watch('sms_response_delay_seconds');
   const selectedTone = watch('tone');
 
-  const addGuardrail = (text: string) => {
-    if (!canUseGuardrails) return;
-    const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
-    if (lines.length > 0) {
-      setGuardrails((prev) => [...prev, ...lines]);
-      setValue('guardrails_text', '');
-    }
-  };
-
-  const removeGuardrail = (index: number) => {
-    if (!canUseGuardrails) return;
-    setGuardrails((prev) => prev.filter((_, i) => i !== index));
-  };
-
   const getDelayLabel = (seconds: number) => {
     if (seconds === 0) return 'Instant';
     if (seconds < 60) return `${seconds} seconds`;
@@ -176,10 +162,10 @@ export default function AISettingsForm({
   const onSubmit = async (data: AISettingsData) => {
     setSaving(true);
     setSuccess(false);
+    setSaveError(null);
     try {
       const supabase = createClient();
       const updates = buildAISettingsUpdates(data, {
-        guardrails,
         canCustomizeAi,
         canUseCalendar,
         calendarGoalAvailable,
@@ -189,19 +175,21 @@ export default function AISettingsForm({
       const { error } = await supabase
         .from('ai_settings')
         .update(updates)
-        .eq('id', settings.id);
+        .eq('id', settings.id)
+        .select('id')
+        .single();
       if (error) throw error;
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch {
-      // Handle silently
+      setSaveError('Could not save settings. Your changes are still here. Please try again.');
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
+    <form onSubmit={handleSubmit(onSubmit)} onChange={() => setSuccess(false)} className="space-y-8">
       {/* Section 1: Tone & Voice */}
       <section>
         <h3 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Tone & Voice</h3>
@@ -441,7 +429,9 @@ export default function AISettingsForm({
 
       {/* Section 5: Guardrails */}
       <section>
-        <h3 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Guardrails</h3>
+        <h3 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">
+          <label htmlFor="ai-settings-guardrails">Guardrails</label>
+        </h3>
         <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">Rules that guide what your AI can and can&apos;t say.</p>
 
         {!canUseGuardrails && (!planActive || fullSuiteAvailable) && (
@@ -449,55 +439,22 @@ export default function AISettingsForm({
         )}
 
         <div className={!canUseGuardrails ? 'opacity-60' : undefined}>
-        {guardrails.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-3">
-            {guardrails.map((rule, index) => (
-              <span
-                key={index}
-                className="inline-flex items-center gap-1 px-3 py-1 bg-[#f0e9de] dark:bg-white/[0.08] text-stone-700 dark:text-[#bdbdbf] text-sm rounded-full"
-              >
-                {rule}
-                <button
-                  type="button"
-                  onClick={() => removeGuardrail(index)}
-                  disabled={!canUseGuardrails}
-                  className="text-stone-400 dark:text-[#666] hover:text-red-500"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
-
-        <textarea
-          {...register('guardrails_text')}
-          rows={3}
-          placeholder={"Don't give quotes over $500\nDon't promise same-day service\nAlways suggest calling for emergencies"}
-          className="w-full px-3 py-2 rounded-lg bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] focus:outline-none resize-none"
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              const target = e.target as HTMLTextAreaElement;
-              if (target.value.trim()) {
-                addGuardrail(target.value);
-              }
-            }
-          }}
-          disabled={!canUseGuardrails}
+        <Controller
+          name="guardrails_text"
+          control={control}
+          render={({ field }) => (
+            <textarea
+              {...field}
+              id="ai-settings-guardrails"
+              aria-describedby="ai-settings-guardrails-help"
+              rows={5}
+              placeholder={"Don't give quotes over $500\nDon't promise same-day service\nAlways suggest calling for emergencies"}
+              className="w-full px-3 py-2 rounded-lg bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] focus:outline-none resize-y"
+              disabled={!canUseGuardrails || saving}
+            />
+          )}
         />
-        <p className="text-xs text-stone-400 dark:text-[#666] mt-1">Type a rule and press Enter, or add multiple rules (one per line).</p>
-        <button
-          type="button"
-          onClick={() => {
-            const text = watch('guardrails_text');
-            if (text?.trim()) addGuardrail(text);
-          }}
-          disabled={!canUseGuardrails}
-          className="text-xs text-[var(--brand-accent)] hover:text-[var(--brand-primary-active)] dark:text-[var(--brand-accent-dark)] dark:hover:text-[var(--brand-primary-soft-dark)] mt-1"
-        >
-          + Add rules
-        </button>
+        <p id="ai-settings-guardrails-help" className="text-xs text-stone-400 dark:text-[#666] mt-1">Write one rule per line, then click Save Settings. Edit or remove rules directly in this box.</p>
         </div>
       </section>
 
@@ -518,7 +475,10 @@ export default function AISettingsForm({
           )}
         </button>
         {success && (
-          <span className="text-sm text-green-600 dark:text-green-400 font-medium">Settings saved successfully!</span>
+          <span role="status" className="text-sm text-green-600 dark:text-green-400 font-medium">Settings saved successfully!</span>
+        )}
+        {saveError && (
+          <span role="alert" className="text-sm text-red-600 dark:text-red-400">{saveError}</span>
         )}
       </div>
     </form>

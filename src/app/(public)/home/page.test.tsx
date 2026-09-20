@@ -245,7 +245,7 @@ describe("canonical homepage static HTML", () => {
     );
   });
 
-  it("renders all four public plans with a complete plan matrix", () => {
+  it("renders three main plans with an SMS-only link and a complete plan matrix", () => {
     const html = renderHomepage(true);
     const pricing = html.match(
       /<section id="pricing"[\s\S]*?<\/section>/,
@@ -287,7 +287,7 @@ describe("canonical homepage static HTML", () => {
     ];
 
     expect(pricing).toBeDefined();
-    expect(topPlanKeys).toEqual(["chat_only", "sms_only", "sms_and_chat", "full"]);
+    expect(topPlanKeys).toEqual(["chat_only", "sms_and_chat", "full"]);
     expect(text).toContain("Chat Only");
     expect(text).toMatch(/\$10\s*\/mo/);
     expect(text).toContain("200 completed AI replies/month");
@@ -328,7 +328,15 @@ describe("canonical homepage static HTML", () => {
     expect(comparisonToggle).toContain('aria-hidden="true"');
     expect(comparisonToggle).not.toContain("<button");
     expect(comparisonToggle).not.toContain("<a");
-    expect(pricing).toContain('aria-label="Get started with SMS Only"');
+    const smsOnlyFootnote = pricing?.match(
+      /<p data-sms-only-footnote[^>]*>[\s\S]*?<\/p>/,
+    )?.[0];
+    expect(smsOnlyFootnote).toContain('aria-label="Get started with SMS Only"');
+    expect(smsOnlyFootnote).toContain('href="/signup"');
+    expect(visibleText(smsOnlyFootnote ?? "")).toContain("SMS Only — $25/mo");
+    expect(pricing?.indexOf("data-sms-only-footnote")).toBeGreaterThan(
+      pricing?.lastIndexOf("</article>") ?? -1,
+    );
     expect(text).toContain("SMS + Web Chat");
     expect(text).toContain("Full Suite");
     expect(text.match(/Most Popular/g)).toHaveLength(1);

@@ -629,7 +629,9 @@ export default function HomePage() {
   const comparisonPlans = publicChatOnlyAvailable
     ? [chatOnlyPlan, ...existingPlans]
     : existingPlans;
-  const pricingCardPlans = comparisonPlans;
+  const pricingCardPlans = publicChatOnlyAvailable
+    ? comparisonPlans.filter((plan) => plan.planKey !== "sms_only")
+    : comparisonPlans;
 
   return (
     <div className={`${pageShell} isolate`} style={{ fontFamily: fontStack }}>
@@ -1001,7 +1003,7 @@ export default function HomePage() {
             }
           />
 
-          <div className={`mx-auto grid max-w-[1200px] items-stretch gap-5 ${publicChatOnlyAvailable ? "md:grid-cols-2 xl:grid-cols-4" : "lg:grid-cols-3"}`}>
+          <div className="mx-auto grid max-w-[1160px] items-stretch gap-5 lg:grid-cols-3">
             {pricingCardPlans.map((plan, i) => {
               const available =
                 plan.planKey === "chat_only"
@@ -1052,7 +1054,7 @@ export default function HomePage() {
                     <h3 id={cardHeadingId} className={`text-2xl font-bold lg:min-h-16 ${ink}`}>
                       {plan.name}
                     </h3>
-                    <p className={`${body} mt-2 leading-[1.65] mb-6 lg:min-h-24 ${publicChatOnlyAvailable ? "xl:min-h-36" : ""}`}>
+                    <p className={`${body} mt-2 leading-[1.65] mb-6 lg:min-h-24`}>
                       {plan.description}
                     </p>
                     <div className={`mb-1 text-[50px] font-extrabold tracking-[-0.05em] ${ink}`}>
@@ -1062,7 +1064,7 @@ export default function HomePage() {
                       </span>
                       <span className="sr-only">{plan.price} per month</span>
                     </div>
-                    <p className={`mb-6 min-h-6 text-sm font-bold text-[#c2410c] dark:text-[#ffb080] ${publicChatOnlyAvailable ? "xl:min-h-10" : ""}`}>
+                    <p className="mb-6 min-h-6 text-sm font-bold text-[#c2410c] dark:text-[#ffb080]">
                       {plan.billingNote}
                     </p>
                     <ul
@@ -1096,6 +1098,23 @@ export default function HomePage() {
           <p className={`mt-5 text-center text-sm leading-6 ${body}`}>
             {FULL_SUITE_USAGE_NOTE}
           </p>
+
+          {publicChatOnlyAvailable && (
+            <p
+              data-sms-only-footnote
+              className={`mt-5 text-center text-sm leading-6 ${body}`}
+            >
+              Just need missed-call texting without web chat?{" "}
+              <Link
+                href="/signup"
+                aria-label="Get started with SMS Only"
+                className={`${inlineLink} font-semibold underline-offset-4 hover:underline`}
+              >
+                SMS Only — {formattedPlanPrice("sms_only")}/mo{" "}
+                <span aria-hidden="true">&rarr;</span>
+              </Link>
+            </p>
+          )}
 
           <Reveal className="mt-7">
             <details className="sa-pricing-comparison group">

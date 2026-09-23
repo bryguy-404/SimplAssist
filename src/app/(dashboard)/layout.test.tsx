@@ -103,6 +103,21 @@ beforeEach(() => {
 });
 
 describe("DashboardLayout access gate", () => {
+  it("keeps paid pending-upgrade Chat accessible without initial-onboarding or carrier reads", async () => {
+    mocks.getDashboardPageEntitlements.mockResolvedValue({ status: "resolved", entitlements: {
+      ...ENTITLEMENTS, plan: "chat_only", textingUpgradePending: true,
+    } });
+    await expect(DashboardLayout({ children: <div>Existing chat</div> })).resolves.toBeDefined();
+    expect(mocks.getOnboardingStateForOwnerReadOnly).not.toHaveBeenCalled();
+    expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+  });
+
+  it("does not let pending-upgrade continuity restore inactive billing", async () => {
+    mocks.getDashboardPageEntitlements.mockResolvedValue({ status: "resolved", entitlements: {
+      ...ENTITLEMENTS, plan: "chat_only", active: false, textingUpgradePending: true,
+    } });
+    await expect(DashboardLayout({ children: <div>Existing chat</div> })).rejects.toThrow("redirect:/onboarding");
+  });
   it("redirects an unauthenticated workspace before dashboard data reads", async () => {
     mocks.getWorkspaceAccess.mockResolvedValue({ status: "unauthenticated" });
     mocks.workspacePageRedirectTarget.mockReturnValue("/login");

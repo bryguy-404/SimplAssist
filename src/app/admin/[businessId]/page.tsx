@@ -116,6 +116,13 @@ type PhoneAssignmentRow = {
   telnyx_campaign_assignment_updated_at: string | null;
 };
 
+type PaidTextingUpgradeHint = {
+  state: string;
+  paid_at: string | null;
+  activated_at: string | null;
+  owner_id: string;
+};
+
 export default async function AdminBusinessPage({
   params,
 }: {
@@ -199,6 +206,7 @@ export default async function AdminBusinessPage({
       data: phoneAssignmentRows,
       error: phoneAssignmentError,
     },
+    { data: textingUpgrade, error: textingUpgradeError },
   ] = await Promise.all([
     supabaseAdmin
       .from("billing_usage_periods")
@@ -224,6 +232,12 @@ export default async function AdminBusinessPage({
       .eq("is_active", true)
       .eq("resource_status", "active")
       .returns<PhoneAssignmentRow[]>(),
+    supabaseAdmin
+      .from("chat_texting_upgrades")
+      .select("state, paid_at, activated_at, owner_id")
+      .eq("business_id", params.businessId)
+      .in("state", ["carrier_pending", "support_required"])
+      .maybeSingle<PaidTextingUpgradeHint>(),
   ]);
 
   if (partnersError) {
@@ -415,6 +429,15 @@ export default async function AdminBusinessPage({
           campaignStatus={effectiveHealth.registration.campaignStatus}
           healthActivePhoneCount={effectiveHealth.phone.activeCount}
           phoneSnapshot={phoneSnapshot}
+          paidTextingUpgradePending={
+            !textingUpgradeError &&
+            Boolean(
+              textingUpgrade?.paid_at &&
+                !textingUpgrade.activated_at &&
+                textingUpgrade.owner_id === business.owner_id &&
+                ["carrier_pending", "support_required"].includes(textingUpgrade.state),
+            )
+          }
         />
       </section>
 

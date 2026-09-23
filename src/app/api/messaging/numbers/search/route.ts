@@ -6,6 +6,7 @@ import {
 } from "@/lib/messaging/numbers";
 import { resolveSmsProvisioningAccess } from "@/lib/billing/entitlements";
 import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
+import { textingUpgradeFailure } from "@/lib/billing/textingUpgradeResponse.server";
 
 export async function GET(request: NextRequest) {
   const workspaceGate = await requireWorkspaceRouteAccess();
@@ -42,6 +43,20 @@ export async function GET(request: NextRequest) {
 
   if (authError || !user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const upgradeId = request.nextUrl.searchParams.get("textingUpgradeId");
+  if (upgradeId) {
+    // Inventory lookup only. A saved upgrade grants neither purchase nor SMS access.
+    try {
+      const { getTextingUpgradeState } = await import("@/lib/billing/textingUpgrade.server");
+      const state = await getTextingUpgradeState(workspaceGate.access.business.id, user.id);
+      if (state.upgrade?.id !== upgradeId || !state.eligible ||
+          !(state.actions.canReplacePhone || (state.actions.canSave && ["phone", "review"].includes(state.currentStep)))) {
+        return NextResponse.json({ error: "texting_upgrade_number_selection_forbidden" }, { status: 403 });
+      }
+      return NextResponse.json({ numbers: await searchAvailableNumbers(areaCode) });
+    } catch (error) { return textingUpgradeFailure(error); }
   }
 
   const smsAccess = await resolveSmsProvisioningAccess(

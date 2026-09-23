@@ -55,6 +55,8 @@ interface BusinessInfoFormProps {
   onNext: (data: BusinessInfoData, scrapedData: ScrapedData | null) => void;
   onBack?: () => void;
   richerScanEnabled?: boolean;
+  allowWebsiteScan?: boolean;
+  saveRequest?: SaveBusinessInfoFetch;
 }
 
 type SaveBusinessInfoFetch = (
@@ -117,6 +119,8 @@ export default function BusinessInfoForm({
   onNext,
   onBack,
   richerScanEnabled = true,
+  allowWebsiteScan = true,
+  saveRequest,
 }: BusinessInfoFormProps) {
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState('');
@@ -224,7 +228,8 @@ export default function BusinessInfoForm({
     try {
       await persistOnboardingBusinessInfo(
         data,
-        Intl.DateTimeFormat().resolvedOptions().timeZone
+        Intl.DateTimeFormat().resolvedOptions().timeZone,
+        saveRequest
       );
       onNext(data, scrapedData);
     } catch (error) {
@@ -286,7 +291,7 @@ export default function BusinessInfoForm({
           placeholder="https://www.example.com"
           className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] disabled:cursor-not-allowed disabled:opacity-60"
         />
-        {richerScanEnabled && (
+        {allowWebsiteScan && richerScanEnabled && (
           <WebsiteScanLauncher
             url={websiteValue || ''}
             trigger="onboarding"
@@ -295,7 +300,7 @@ export default function BusinessInfoForm({
             compact
           />
         )}
-        {websiteValue && !richerScanEnabled && (
+        {allowWebsiteScan && websiteValue && !richerScanEnabled && (
           <button
             type="button"
             onClick={handleLegacyScan}

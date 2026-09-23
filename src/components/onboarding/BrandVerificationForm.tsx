@@ -131,6 +131,7 @@ interface BrandVerificationFormProps {
   initialData?: BrandVerificationInitialData;
   onNext: (data: BrandVerificationData) => void;
   onBack: () => void;
+  saveRequest?: typeof fetch;
 }
 
 const ENTITY_TYPE_OPTIONS: { value: Exclude<BusinessEntityType, 'sole_proprietor'>; label: string }[] = [
@@ -159,6 +160,7 @@ export default function BrandVerificationForm({
   initialData,
   onNext,
   onBack,
+  saveRequest = fetch,
 }: BrandVerificationFormProps) {
   const brand = useBrand();
   const [saving, setSaving] = useState(false);
@@ -196,7 +198,7 @@ export default function BrandVerificationForm({
     setSubmitError('');
     try {
       if (data.has_ein === 'no') {
-        const response = await fetch('/api/onboarding/brand-verification', {
+        const response = await saveRequest('/api/onboarding/brand-verification', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -225,7 +227,7 @@ export default function BrandVerificationForm({
         return;
       }
 
-      const response = await fetch('/api/onboarding/brand-verification', {
+      const response = await saveRequest('/api/onboarding/brand-verification', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

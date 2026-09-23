@@ -330,6 +330,57 @@ describe("AdminSmsComplianceCard", () => {
     );
   });
 
+  it.each(["assigned", "unassigned", "failed"] as const)(
+    "allows audited paid-upgrade recovery for %s after carrier correction",
+    (assignmentStatus) => {
+      const value = props({
+        paidTextingUpgradePending: true,
+        onboardingRegistrationStatus: "failed",
+        phoneSnapshot: {
+          directActiveCount: 1,
+          assignmentStatus,
+          assignmentUpdatedAt: CHECKED_AT,
+          campaignMatch: assignmentStatus === "unassigned" ? "unavailable" : "yes",
+        },
+      });
+      expect(getAdminSmsComplianceBlocker(value).retryable).toBe(true);
+      expect(render(value)).toMatch(
+        /<button(?![^>]*disabled="")[^>]*>Recheck assignment<\/button>/,
+      );
+      expect(render(value)).toContain("It does not charge again.");
+    },
+  );
+
+  it.each([
+    { operationsSuspended: true },
+    { submissionDisabled: true },
+    { riskInputCurrent: false },
+    { riskReviewStatus: "blocked" as const },
+    { brandStatus: "pending" as const },
+    { campaignStatus: "rejected" as const },
+    { healthActivePhoneCount: 2 },
+    { phoneSnapshot: null },
+    { registrationSubmissionStale: true },
+    {
+      phoneSnapshot: {
+        directActiveCount: 1,
+        assignmentStatus: "assigned" as const,
+        assignmentUpdatedAt: CHECKED_AT,
+        campaignMatch: "no" as const,
+      },
+    },
+  ])("does not bypass a current prerequisite for paid-upgrade recovery: %j", (overrides) => {
+    const value = props({
+      paidTextingUpgradePending: true,
+      onboardingRegistrationStatus: "failed",
+      ...overrides,
+    });
+    expect(getAdminSmsComplianceBlocker(value).retryable).toBe(false);
+    expect(render(value)).not.toMatch(
+      /<button(?![^>]*disabled="")[^>]*>Recheck assignment<\/button>/,
+    );
+  });
+
   it("fails closed without exposing partial phone detail when the query is unavailable", () => {
     const html = render(props({ phoneSnapshot: null }));
 

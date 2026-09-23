@@ -3,6 +3,7 @@ import "server-only";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { isChatOnlyDirectAcquisitionEnabledForBusiness } from "@/lib/billing/chatOnlyRollout.server";
 import { hasValidChatOnlyStripePrice } from "@/lib/stripe/config";
+import { canContinueTextingUpgradeProvisioning } from "./textingUpgradeActivation.server";
 import type {
   BillingMode,
   SubscriptionPlan,
@@ -34,6 +35,8 @@ export interface BusinessEntitlements {
   source: EntitlementSource;
   active: boolean;
   cancelAtPeriodEnd: boolean;
+  /** Exact paid cross-family upgrade; usable services remain Chat until activation. */
+  textingUpgradePending?: true;
 }
 
 export type SmsProvisioningAccessDecision =
@@ -158,7 +161,26 @@ export async function resolveBusinessEntitlements(
   businessId: string
 ): Promise<BusinessEntitlements> {
   const snapshot = await loadBusinessEntitlementSnapshot(businessId);
-  return resolveBusinessEntitlementsFromSnapshot(businessId, snapshot);
+  const billed = resolveBusinessEntitlementsFromSnapshot(businessId, snapshot);
+  if (billed.source !== "subscription" || billed.plan === "chat_only") return billed;
+
+  // This service-role SQL read shares the payment/binding policy with metering,
+  // widget and calendar admission. Ordinary billing provenance stays unchanged.
+  const { data, error } = await supabaseAdmin.rpc("get_business_effective_service_plan", {
+    p_business_id: businessId,
+    p_billed_plan: billed.plan,
+  });
+  if (error || (data !== billed.plan && data !== "chat_only")) {
+    throw new EntitlementResolutionError({
+      code: "subscription_lookup_failed",
+      businessId,
+      message: "Unable to resolve the effective texting-upgrade service plan.",
+      cause: error,
+    });
+  }
+  return data === "chat_only"
+    ? { ...billed, plan: "chat_only", textingUpgradePending: true }
+    : billed;
 }
 
 /**
@@ -219,6 +241,22 @@ export async function resolveSmsProvisioningAccess(
       source: entitlements.source,
       plan: entitlements.plan,
     };
+  }
+
+  // Provisioning deliberately uses the billed plan, not the temporary Chat
+  // service overlay. A paid upgrade still cannot provision after cancellation
+  // has been requested or while support must resolve its registration.
+  try {
+    if (!(await canContinueTextingUpgradeProvisioning(businessId))) {
+      return {
+        allowed: false,
+        reason: "plan_not_entitled",
+        source: entitlements.source,
+        plan: entitlements.plan,
+      };
+    }
+  } catch {
+    return { allowed: false, reason: "billing_state_unavailable" };
   }
 
   return {

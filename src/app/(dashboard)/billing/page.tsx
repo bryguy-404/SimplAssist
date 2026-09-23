@@ -1,3 +1,4 @@
+import TextingUpgradeEntry from "@/components/billing/TextingUpgradeEntry";
 import OwnerVoiceSettings from '@/components/settings/OwnerVoiceSettings';
 import BillingPlanChange from '@/components/billing/BillingPlanChange';
 import { getOwnerVoiceSettings } from '@/lib/voice/access.server';
@@ -13,7 +14,7 @@ import {
 import { getPlanPresentation } from "@/lib/billing/planPresentation";
 import { getRequestBrand } from "@/lib/branding/requestBrand.server";
 import { secondaryCtaClass } from "@/lib/glass";
-import { getDashboardBusinessContext } from "@/lib/dashboard/context";
+import { getDashboardBusinessContext, getDashboardPageEntitlements } from "@/lib/dashboard/context";
 import { requireWorkspacePageAccess } from "@/lib/customer/workspaceRouteResponse.server";
 import {
   partnerManagedBillingMessage,
@@ -105,7 +106,7 @@ export default async function BillingPage(_props: BillingPageProps) {
     );
   }
 
-  const [{ data: subscription }, { data: usagePeriod }] = await Promise.all([
+  const [{ data: subscription }, { data: usagePeriod }, entitlementResult] = await Promise.all([
     supabase
       .from("subscriptions")
       .select("*")
@@ -118,11 +119,14 @@ export default async function BillingPage(_props: BillingPageProps) {
       .order("period_start", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    getDashboardPageEntitlements(business.id),
   ]);
 
   const hasActiveSubscription =
     subscription && subscription.status !== "canceled";
   const activePlan = subscription?.plan as SubscriptionPlan | undefined;
+  const servicePlan = entitlementResult.status === "resolved" ? entitlementResult.entitlements.plan : activePlan;
+  const textingUpgradePending = entitlementResult.status === "resolved" && entitlementResult.entitlements.textingUpgradePending === true;
   // Usage rows are created on the first metered event. The latest row may
   // therefore still belong to the previous subscription period after renewal.
   const currentUsagePeriod = usagePeriod && subscription &&
@@ -140,7 +144,7 @@ export default async function BillingPage(_props: BillingPageProps) {
       : 0;
   const [{ brand }, chatOnlyAIReplyUsage, voiceSettings] = await Promise.all([
     getRequestBrand(),
-    hasActiveSubscription && activePlan === "chat_only"
+    hasActiveSubscription && servicePlan === "chat_only"
       ? loadChatOnlyAIReplyUsage(business.id)
       : Promise.resolve(null),
     voiceSettingsPromise,
@@ -265,10 +269,11 @@ export default async function BillingPage(_props: BillingPageProps) {
         </div>
       )}
 
-      <BillingPlanChange currentPlan={activePlan} active={Boolean(hasActiveSubscription && subscription.status === "active")} />
+      <TextingUpgradeEntry currentPlan={activePlan} />
+      {!textingUpgradePending && <BillingPlanChange currentPlan={activePlan} active={Boolean(hasActiveSubscription && subscription.status === "active")} />}
       {voiceSettings?.visible ? <div className="mt-6"><OwnerVoiceSettings initialSettings={voiceSettings} variant="usage" /></div> : null}
 
-      {hasActiveSubscription && activePlan !== "chat_only" && (
+      {hasActiveSubscription && servicePlan !== "chat_only" && (
         <div className={`mt-6 p-6 ${card}`}>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div>
@@ -308,7 +313,7 @@ export default async function BillingPage(_props: BillingPageProps) {
       )}
 
       {hasActiveSubscription &&
-        activePlan === "chat_only" &&
+        servicePlan === "chat_only" &&
         chatOnlyAIReplyUsage && (
           <section
             className={`mt-6 p-6 ${card}`}

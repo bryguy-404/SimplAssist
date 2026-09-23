@@ -1,4 +1,6 @@
 import "server-only";
+import { normalizeStripeSubscriptionStatus } from "./subscriptionStatus";
+export { normalizeStripeSubscriptionStatus } from "./subscriptionStatus";
 
 import type Stripe from "stripe";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -10,8 +12,9 @@ import {
   completeChatOnlyCheckoutAttempt,
   expireChatOnlyCheckoutAttempt,
 } from "./chatOnlyCheckoutAttempt.server";
-import type { SubscriptionPlan, SubscriptionStatus } from "@/types/database";
+import type { SubscriptionPlan } from "@/types/database";
 import { prepareVoiceSubscription, type VoiceSubscriptionSnapshot } from "./voiceSubscription.server";
+import { synchronizeTextingUpgradeSubscription } from "./textingUpgrade.server";
 import { bindSmsCheckoutSession, expireSmsCheckout, finishSmsDowngrade, synchronizeSmsBillingOperation } from "./smsBilling.server";
 
 export type SyncedCheckout = {
@@ -60,6 +63,14 @@ export async function syncCheckoutSession(
   }
 
   const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+  if (chatBinding) {
+    const transition = await synchronizeTextingUpgradeSubscription(subscription);
+    if (transition.paid || transition.owned) {
+      await syncStripeSubscription(subscription, { businessId });
+      // A replayed initial Checkout cannot repeat signup or restore Chat billing.
+      return null;
+    }
+  }
   if (session.metadata?.sms_billing_operation_id) {
     if (!(await bindSmsCheckoutSession(session))) return null;
     if (subscription.metadata.sms_billing_operation_id !== session.metadata.sms_billing_operation_id) {
@@ -234,12 +245,16 @@ export async function syncStripeSubscription(
     setupFeePaidAt?: string | null;
     setupFeePriceId?: string | null;
     expectedPlan?: SubscriptionPlan;
+    /** The explicit refresh orchestrator runs registration once after billing sync. */
+    deferTextingUpgradeRegistration?: boolean;
   } = {},
 ): Promise<SyncedCheckout | null> {
   // Preserve unconditional status validation. Commercial voice additionally
   // versions a fresh provider read, so event arrival order cannot mint minutes.
   normalizeStripeSubscriptionStatus(subscription.status);
-  if (subscription.metadata?.sms_billing_operation_id) {
+  const transition = await synchronizeTextingUpgradeSubscription(subscription);
+  subscription = transition.subscription;
+  if (!transition.owned && subscription.metadata?.sms_billing_operation_id) {
     const handled = await synchronizeSmsBillingOperation(subscription);
     if (handled) {
       const { data, error } = await supabaseAdmin.from("subscriptions").select("business_id,stripe_customer_id,stripe_subscription_id,plan,status")
@@ -255,8 +270,12 @@ export async function syncStripeSubscription(
   }
   const voice = await prepareVoiceSubscription(subscription, options.businessId ?? subscription.metadata?.business_id);
   if (voice.ignored) return null;
-  const result = await syncSubscriptionSnapshot(voice.subscription, options, voice);
+  const result = await syncSubscriptionSnapshot(voice.subscription, { ...options, chatUpgradeAuthorized: transition.paid }, voice);
   if (result && voice.subscription.metadata?.sms_billing_operation_id) await finishSmsDowngrade(voice.subscription);
+  if (transition.paid && result && !options.deferTextingUpgradeRegistration) {
+    const { continueTextingUpgradeRegistration } = await import("@/lib/billing/textingUpgradeReconciliation.server");
+    await continueTextingUpgradeRegistration(result.businessId);
+  }
   return result;
 }
 
@@ -268,6 +287,7 @@ async function syncSubscriptionSnapshot(
     setupFeePaidAt?: string | null;
     setupFeePriceId?: string | null;
     expectedPlan?: SubscriptionPlan;
+    chatUpgradeAuthorized?: boolean;
   },
   voice: VoiceSubscriptionSnapshot,
 ): Promise<SyncedCheckout | null> {
@@ -278,8 +298,8 @@ async function syncSubscriptionSnapshot(
   const primaryItem = subscription.items.data[0];
   const priceId = primaryItem?.price.id ?? null;
   const hasChatOnlyAttemptAuthority =
-    subscription.metadata?.plan === "chat_only" ||
-    hasChatOnlySubscriptionAttemptMarker(subscription);
+    !options.chatUpgradeAuthorized && (subscription.metadata?.plan === "chat_only" ||
+    hasChatOnlySubscriptionAttemptMarker(subscription));
   const configuredPlan = hasChatOnlyAttemptAuthority
     ? null
     : planFromStripePriceId(priceId);
@@ -468,40 +488,4 @@ function isSecondAlignedTimestamp(value: string): boolean {
     Number.isFinite(milliseconds) &&
     milliseconds % 1_000 === 0
   );
-}
-
-// Deliberate projection of Stripe's full documented status union onto the
-// 4-status local model. Never-successfully-paying states map to 'canceled'
-// so consumers route recovery through checkout (the plan cards) — the
-// billing portal cannot complete an initial payment. Typed as a complete
-// Record over the SDK union: a missing key fails the BUILD when an SDK
-// upgrade widens the union, and an absent/unknown runtime status misses
-// the lookup and throws below.
-const STRIPE_STATUS_PROJECTION: Record<
-  Stripe.Subscription.Status,
-  SubscriptionStatus
-> = {
-  active: "active",
-  trialing: "trialing",
-  past_due: "past_due",
-  canceled: "canceled",
-  unpaid: "canceled", // dunning exhausted — dead subscription
-  incomplete_expired: "canceled", // initial payment never completed
-  incomplete: "canceled", // never paid — recovery is checkout, not the portal
-  paused: "canceled", // never paid (trial ended without a payment method)
-};
-
-export function normalizeStripeSubscriptionStatus(
-  status: Stripe.Subscription.Status,
-): SubscriptionStatus {
-  const mapped = STRIPE_STATUS_PROJECTION[status];
-  if (mapped === undefined) {
-    // Fail closed on anything outside Stripe's documented union — including
-    // an absent status at runtime (types are compile-time only). Webhook
-    // callers surface this as a recorded, re-claimable failure.
-    throw new Error(
-      `[stripe:sync] Unrecognized Stripe subscription status: ${String(status)}`,
-    );
-  }
-  return mapped;
 }

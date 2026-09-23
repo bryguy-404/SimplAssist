@@ -1,5 +1,5 @@
+import { smsUseCaseSchema } from "@/lib/onboarding/formValidation.server";
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { ensureUniqueSlug } from "@/lib/util/slug.server";
@@ -14,7 +14,6 @@ import {
   serializeError,
 } from "@/lib/messaging/registration/audit";
 import {
-  A2P_RISK_CHECKLIST_ANSWERS,
   isA2pRiskSelection,
 } from "@/lib/messaging/registration/riskCategories";
 import {
@@ -43,8 +42,6 @@ const REGISTRATION_LOCKED_MESSAGE =
 const REGISTRATION_STATE_CHANGED_MESSAGE =
   "Registration state changed while saving. Refresh the page and try again.";
 
-const PLACEHOLDER_PATTERN = /\[.+?\]/;
-const STOP_PATTERN = /\bstop\b/i;
 
 type SmsUseCaseBusinessRow = {
   id: string;
@@ -126,49 +123,6 @@ async function registrationSnapshotMissResponse(args: {
     { status: 409 }
   );
 }
-
-const smsUseCaseSchema = z
-  .object({
-    businessId: z.string().uuid(),
-    use_case_description: z.string().min(40),
-    estimated_monthly_volume: z.enum([
-      "under_1k",
-      "1k_10k",
-      "10k_100k",
-      "over_100k",
-    ]),
-    sample_messages: z
-      .array(
-        z
-          .string()
-          .min(1)
-          .refine(
-            (value) => !PLACEHOLDER_PATTERN.test(value),
-            "Sample messages cannot contain placeholders"
-          )
-      )
-      .min(3)
-      .max(5),
-    opt_in_description: z.string().min(40),
-    a2p_risk_checklist_answer: z.enum(A2P_RISK_CHECKLIST_ANSWERS),
-    a2p_risk_checklist_selections: z.array(z.string()).default([]),
-  })
-  .refine(
-    (data) =>
-      data.a2p_risk_checklist_answer !== "restricted" ||
-      data.a2p_risk_checklist_selections.some(isA2pRiskSelection),
-    {
-      message: "Select at least one restricted category, or choose a different answer",
-      path: ["a2p_risk_checklist_selections"],
-    }
-  )
-  .refine(
-    (data) => data.sample_messages.some((sample) => STOP_PATTERN.test(sample)),
-    {
-      message: "At least one sample message must mention STOP opt-out wording",
-      path: ["sample_messages"],
-    }
-  );
 
 export async function POST(request: NextRequest) {
   const workspaceGate = await requireWorkspaceRouteAccess();

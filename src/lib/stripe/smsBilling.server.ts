@@ -10,7 +10,7 @@ import type { BillingChangeView, SmsPlan } from "./smsBilling";
 import { SmsBillingError } from "./smsBilling";
 export { SmsBillingError } from "./smsBilling";
 
-const operationSchema = z.object({
+export const operationSchema = z.object({
   id: z.string().uuid(), business_id: z.string().uuid(), owner_id: z.string().uuid(),
   kind: z.enum(["checkout", "upgrade", "downgrade"]),
   state: z.enum(["prepared", "confirming", "pending", "scheduled", "applied", "expired"]),
@@ -41,7 +41,7 @@ async function rpcOperation(name: string, args: Record<string, unknown>): Promis
   if (!result.success) throw new SmsBillingError("sms_billing_invalid_state", 503);
   return result.data;
 }
-async function operation(operationId: string, businessId?: string): Promise<SmsBillingOperation> {
+export async function operation(operationId: string, businessId?: string): Promise<SmsBillingOperation> {
   if (!uuid.safeParse(operationId).success) throw new SmsBillingError("sms_billing_not_found", 404);
   let query = supabaseAdmin.from("sms_billing_operations").select("*").eq("id", operationId);
   if (businessId) query = query.eq("business_id", businessId);
@@ -59,7 +59,7 @@ async function operationForProvider(operationId: string, businessId: string | un
     throw error;
   }
 }
-async function record(op: SmsBillingOperation, details: Record<string, unknown>) {
+export async function record(op: SmsBillingOperation, details: Record<string, unknown>) {
   return rpcOperation("record_sms_billing_operation", { p_operation_id: op.id, p_details: details });
 }
 async function localSubscription(businessId: string) {
@@ -205,6 +205,7 @@ export async function confirmSmsPlanChange(businessId: string, ownerId: string, 
   await owner(businessId, ownerId);
   let op = await operation(operationId, businessId);
   if (op.owner_id !== ownerId) throw new SmsBillingError("sms_billing_forbidden", 403);
+  if (op.source_plan === "chat_only") throw new SmsBillingError("texting_upgrade_required");
   if (op.kind === "checkout") {
     if (op.state === "applied" || op.state === "expired") return view(op);
     const url = await createSmsCheckout({ businessId, plan: op.target_plan, priceId: op.target_price_id,
@@ -307,6 +308,7 @@ export async function readSmsBillingChange(businessId: string, ownerId: string, 
     op = operationSchema.parse(data);
   }
   if (op.owner_id !== ownerId) throw new SmsBillingError("sms_billing_forbidden", 403);
+  if (op.source_plan === "chat_only") throw new SmsBillingError("texting_upgrade_required");
   if (op.kind === "checkout") {
     let paymentUrl: string | undefined;
     if (op.checkout_session_id && op.state !== "expired" && op.state !== "applied") {
@@ -344,7 +346,7 @@ export async function readSmsBillingChange(businessId: string, ownerId: string, 
   }
   return { ...view(op), ...(paymentUrl ? { paymentUrl } : {}) };
 }
-function view(op: SmsBillingOperation): BillingChangeView {
+export function view(op: SmsBillingOperation): BillingChangeView {
   return { operationId: op.id, kind: op.kind, state: op.state, targetPlan: op.target_plan,
     amountDueCents: Number(op.quote.amountDueCents ?? 0), currency: String(op.quote.currency ?? "usd"), monthlyPriceCents: Number(op.quote.monthlyPriceCents ?? SUBSCRIPTION_PLANS[op.target_plan].price * 100),
     effectiveAt: op.kind === "downgrade" ? op.source_period_end! : op.payment_effective_at ?? op.proration_at ?? op.created_at,
@@ -448,6 +450,7 @@ export async function cancelSmsBillingOperation(businessId: string, ownerId: str
   await owner(businessId, ownerId);
   const op = await operation(operationId, businessId);
   if (op.owner_id !== ownerId) throw new SmsBillingError("sms_billing_forbidden", 403);
+  if (op.source_plan === "chat_only") throw new SmsBillingError("texting_upgrade_required");
   if (op.state === "expired") return;
   if (op.state === "applied") throw new SmsBillingError("sms_billing_already_applied");
   if (op.state === "prepared") { await record(op, { state: "expired" }); return; }

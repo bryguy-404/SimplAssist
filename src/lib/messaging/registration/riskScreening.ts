@@ -526,6 +526,8 @@ export async function screenA2pRiskForBusiness(
      * auto-clearing on resubmission.
      */
     force?: boolean;
+    /** Assess a draft without writes; its owner persists the result atomically. */
+    persist?: boolean;
   } = {}
 ): Promise<A2pRiskReviewResult> {
   const { input, business } = await buildA2pRiskInputForBusiness(
@@ -584,13 +586,11 @@ export async function screenA2pRiskForBusiness(
     };
   }
 
-  await persistRiskResult({
-    businessId,
-    input,
-    result,
-  });
+  if (options.persist !== false) {
+    await persistRiskResult({ businessId, input, result });
+  }
 
-  if (result.status === "pending_review") {
+  if (options.persist !== false && result.status === "pending_review") {
     await notifyReviewIfNeeded({
       businessId,
       businessName: input.businessName,
@@ -606,6 +606,13 @@ export async function screenA2pRiskForBusiness(
     registrationStarted,
     reusedExisting: false,
   };
+}
+
+/** Uses the established scanner without updating shared business state or sending mail. */
+export async function assessA2pRiskForBusiness(
+  businessId: string, candidate: A2pRiskCandidateFields,
+): Promise<A2pRiskReviewResult> {
+  return screenA2pRiskForBusiness(businessId, candidate, { persist: false });
 }
 
 async function runDeterministicScan(

@@ -41,6 +41,8 @@ interface PhoneNumberSelectorProps {
   initialPhoneNumberPending?: boolean;
   initialConsentAgreed?: boolean;
   initialFailureReason?: string | null;
+  request?: typeof fetch;
+  pendingDescription?: string;
   onConsentChange?: (agreed: boolean) => void;
   onNumberPurchased?: (phoneNumber: string) => void;
   onReplacementModeChange?: (replacing: boolean) => void;
@@ -64,6 +66,8 @@ export default function PhoneNumberSelector({
   initialPhoneNumberPending = false,
   initialConsentAgreed = false,
   initialFailureReason = null,
+  request = fetch,
+  pendingDescription = "We will activate this number after checkout. If it becomes unavailable, you can choose another number without paying again.",
   onConsentChange,
   onNumberPurchased,
   onReplacementModeChange,
@@ -122,7 +126,7 @@ export default function PhoneNumberSelector({
     setPurchased(null);
 
     try {
-      const res = await fetch(
+      const res = await request(
         `/api/messaging/numbers/search?areaCode=${areaCode}`
       );
       const data = await res.json();
@@ -148,7 +152,7 @@ export default function PhoneNumberSelector({
     setError(null);
 
     try {
-      const res = await fetch("/api/messaging/numbers/purchase", {
+      const res = await request("/api/messaging/numbers/purchase", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phoneNumber }),
@@ -192,7 +196,7 @@ export default function PhoneNumberSelector({
         </p>
         <p className="mt-1 text-sm text-green-600">
           {purchased.pending === true
-            ? "We will activate this number after checkout. If it becomes unavailable, you can choose another number without paying again."
+            ? pendingDescription
             : "This number is already active."}
         </p>
         {error && (

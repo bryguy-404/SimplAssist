@@ -53,7 +53,12 @@ export default async function DashboardLayout({
   const { entitlements } = entitlementResult;
   let dashboardReady: boolean;
 
-  if (entitlements.plan === "chat_only") {
+  if (entitlements.textingUpgradePending === true) {
+    // The trusted entitlement read verifies a paid upgrade from completed Chat.
+    // Initial onboarding describes the billed SMS plan and cannot gate access
+    // while its carrier setup is pending.
+    dashboardReady = entitlements.active;
+  } else if (entitlements.plan === "chat_only") {
     const onboardingState = await getOnboardingStateForOwnerReadOnly(user.id);
     dashboardReady = Boolean(
       onboardingState?.dashboardReady === true &&

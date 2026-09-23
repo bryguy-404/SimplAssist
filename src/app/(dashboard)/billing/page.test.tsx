@@ -39,6 +39,7 @@ const mocks = vi.hoisted(() => ({
   redirect: vi.fn(),
   requireWorkspacePageAccess: vi.fn(),
   getDashboardBusinessContext: vi.fn(),
+  getDashboardPageEntitlements: vi.fn(),
   from: vi.fn(),
   resolveAssignedPartnerName: vi.fn(),
   getRequestBrand: vi.fn(),
@@ -52,6 +53,7 @@ vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
 }));
 vi.mock("@/lib/dashboard/context", () => ({
   getDashboardBusinessContext: mocks.getDashboardBusinessContext,
+  getDashboardPageEntitlements: mocks.getDashboardPageEntitlements,
 }));
 vi.mock("@/lib/branding/requestBrand.server", () => ({
   getRequestBrand: mocks.getRequestBrand,
@@ -162,6 +164,7 @@ function setDirectActiveChatOnlyBilling(
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getOwnerVoiceSettings.mockResolvedValue(null);
+  mocks.getDashboardPageEntitlements.mockResolvedValue({ status: "subscription_missing" });
   mocks.redirect.mockImplementation((path: string) => {
     throw new Error(`redirect:${path}`);
   });
@@ -178,6 +181,17 @@ beforeEach(() => {
 });
 
 describe("BillingPage", () => {
+  it("shows existing Chat allowance while a paid texting upgrade waits for activation", async () => {
+    setDirectActiveChatOnlyBilling();
+    mocks.getDashboardPageEntitlements.mockResolvedValue({ status: "resolved", entitlements: { plan: "chat_only", active: true, textingUpgradePending: true } });
+    mocks.from.mockImplementation((table: string) => queryThenable(Promise.resolve({ data: table === "subscriptions" ? { plan: "sms_and_chat", status: "active", current_period_end: "2026-10-01" } : null })));
+    const html = renderToStaticMarkup(await BillingPage({}));
+    expect(html).toContain("Growth / SMS + Web Chat");
+    expect(html).toContain("AI reply usage");
+    expect(html).not.toContain("SMS usage");
+    expect(html).not.toContain("Change your plan");
+    expect(mocks.getCurrentAIReplyUsage).toHaveBeenCalledWith("business-1");
+  });
   it("starts subscription and usage reads together", async () => {
     const subscription = deferred<{ data: null }>();
     const usage = deferred<{ data: null }>();

@@ -5,9 +5,11 @@ const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
   retrieve: vi.fn(),
   prepareVoice: vi.fn(),
+  upgrade: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/lib/billing/textingUpgradeStore.server", () => ({ getTextingUpgrade: mocks.upgrade }));
 vi.mock("./voiceSubscription.server", () => ({ prepareVoiceSubscription: mocks.prepareVoice }));
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { rpc: mocks.rpc },
@@ -104,6 +106,7 @@ function chatOnlySubscription(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.upgrade.mockResolvedValue(null);
   mocks.prepareVoice.mockImplementation(async (subscription) => ({ subscription, revision: null, observedAt: null }));
   vi.stubEnv("STRIPE_PRICE_SMS_ONLY", "price_sms_only_test");
   vi.stubEnv("STRIPE_PRICE_SMS_AND_CHAT", "price_sms_chat_test");

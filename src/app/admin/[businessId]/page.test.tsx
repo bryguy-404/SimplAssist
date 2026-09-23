@@ -93,6 +93,7 @@ vi.mock("./AdminSmsComplianceCard", () => ({
     hasEin,
     healthActivePhoneCount,
     phoneSnapshot,
+    paidTextingUpgradePending,
   }: {
     hasEin: boolean;
     healthActivePhoneCount: number;
@@ -101,6 +102,7 @@ vi.mock("./AdminSmsComplianceCard", () => ({
       campaignMatch: string;
       assignmentStatus: string | null;
     } | null;
+    paidTextingUpgradePending: boolean;
   }) => (
     <div
       data-has-ein={String(hasEin)}
@@ -112,6 +114,7 @@ vi.mock("./AdminSmsComplianceCard", () => ({
         phoneSnapshot?.assignmentStatus ?? "unavailable"
       }
       data-campaign-match={phoneSnapshot?.campaignMatch ?? "unavailable"}
+      data-paid-upgrade-pending={String(paidTextingUpgradePending)}
     >
       SMS_COMPLIANCE_CARD
     </div>
@@ -253,6 +256,7 @@ beforeEach(() => {
     ["businesses", { data: storedBusiness(), error: null }],
     ["billing_usage_periods", { data: null, error: null }],
     ["partners", { data: [], error: null }],
+    ["chat_texting_upgrades", { data: null, error: null }],
     [
       "phone_numbers",
       {
@@ -281,6 +285,7 @@ beforeEach(() => {
     const query = {
       select: vi.fn(),
       eq: vi.fn(),
+      in: vi.fn(),
       order: vi.fn(),
       limit: vi.fn(),
       maybeSingle: vi.fn(),
@@ -288,6 +293,7 @@ beforeEach(() => {
     };
     query.select.mockReturnValue(query);
     query.eq.mockReturnValue(query);
+    query.in.mockReturnValue(query);
     query.order.mockReturnValue(query);
     query.limit.mockReturnValue(query);
     query.maybeSingle.mockImplementation(async () => mocks.results.get(table));
@@ -297,6 +303,44 @@ beforeEach(() => {
 });
 
 describe("AdminBusinessPage account lifecycle rendering", () => {
+  it.each(["support_required", "carrier_pending"])(
+    "provides a paid-upgrade recovery hint for %s",
+    async (state) => {
+      mocks.results.set("chat_texting_upgrades", {
+        data: { state, paid_at: "2026-08-04T12:00:00Z", activated_at: null, owner_id: OWNER_ID },
+        error: null,
+      });
+      const html = renderToStaticMarkup(
+        await AdminBusinessPage({ params: { businessId: BUSINESS_ID } }),
+      );
+      expect(html).toContain('data-paid-upgrade-pending="true"');
+    },
+  );
+
+  it.each([
+    { paid_at: null },
+    { activated_at: "2026-08-04T12:05:00Z" },
+    { state: "draft" },
+    { owner_id: "another-owner" },
+  ])("withholds paid-upgrade recovery for an invalid ledger hint: %j", async (overrides) => {
+    mocks.results.set("chat_texting_upgrades", {
+      data: { state: "support_required", paid_at: "2026-08-04T12:00:00Z", activated_at: null, owner_id: OWNER_ID, ...overrides },
+      error: null,
+    });
+    const html = renderToStaticMarkup(
+      await AdminBusinessPage({ params: { businessId: BUSINESS_ID } }),
+    );
+    expect(html).toContain('data-paid-upgrade-pending="false"');
+  });
+
+  it("withholds paid-upgrade recovery when the ledger read fails", async () => {
+    mocks.results.set("chat_texting_upgrades", { data: null, error: { message: "unavailable" } });
+    const html = renderToStaticMarkup(
+      await AdminBusinessPage({ params: { businessId: BUSINESS_ID } }),
+    );
+    expect(html).toContain('data-paid-upgrade-pending="false"');
+  });
+
   it("renders a compact arrow Back control to the admin account list", async () => {
     const html = renderToStaticMarkup(
       await AdminBusinessPage({ params: { businessId: BUSINESS_ID } }),

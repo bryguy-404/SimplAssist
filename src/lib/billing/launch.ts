@@ -5,6 +5,11 @@ import {
 } from "@/lib/account/operationalControls.server";
 import { resolveSmsProvisioningAccess } from "@/lib/billing/entitlements";
 import { claimSmsLaunchPlanFamily } from "@/lib/billing/smsLaunchFamily.server";
+import {
+  assertTextingUpgradeProvisioningAllowed,
+  reconcileTextingUpgradeActivationForBusiness,
+  TextingUpgradeProvisioningStoppedError,
+} from "@/lib/billing/textingUpgradeActivation.server";
 import { planRequiresSmsProvisioning } from "@/lib/billing/features";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
@@ -96,7 +101,7 @@ const EXISTING_BRAND_RETRY_MESSAGE =
 export const SERVICES_FAQS_REQUIRED_MESSAGE =
   "Add at least 3 distinct services and 3 answered FAQs so your AI has enough accurate information to help customers.";
 
-type LaunchSource = "stripe_finalize" | "stripe_webhook" | "onboarding_retry";
+type LaunchSource = "stripe_finalize" | "stripe_webhook" | "onboarding_retry" | "texting_upgrade";
 
 export type LaunchResult =
   | { status: "submitted" | "in_progress" | "already_submitted"; message?: string }
@@ -248,6 +253,7 @@ export async function attemptPaidLaunch(
   const claim = await claimRegistrationAttempt(businessId);
   if (!claim.claimed) {
     if (claim.reason === "already_submitted") {
+      await reconcileTextingUpgradeActivationForBusiness(businessId);
       return { status: "already_submitted" };
     }
     if (claim.reason === "already_submitting") {
@@ -266,6 +272,7 @@ export async function attemptPaidLaunch(
     // between those operations and leave a freshly claimed `failed` row in
     // `submitting`; refresh now before any provider work.
     await assertNoCarrierRejectionForBusiness(businessId);
+    await assertTextingUpgradeProvisioningAllowed(businessId);
 
     // Preflight the shared Telnyx name invariant before any carrier mutation.
     // The creators repeat this check against their fresh business reads.
@@ -331,20 +338,24 @@ export async function attemptPaidLaunch(
     linkedExistingBrandConsumed =
       existingBrandPreparation.status === "consumed";
 
+    await assertTextingUpgradeProvisioningAllowed(businessId);
     await registerBrand(businessId);
 
     // A number order needs both routing resources. Each helper recovers an
     // exact business-scoped provider resource before creating, closing the
     // provider-success/local-save retry gap.
     await assertNoCarrierRejectionForBusiness(businessId);
+    await assertTextingUpgradeProvisioningAllowed(businessId);
     await createMessagingProfile(businessId);
     await assertNoCarrierRejectionForBusiness(businessId);
+    await assertTextingUpgradeProvisioningAllowed(businessId);
     await createVoiceApplication(businessId);
 
     // Number attachment/purchase is another paid provider boundary. In
     // particular, registerBrand may have reused an existing ID and returned
     // without creating anything, so do not rely on its create-only check.
     await assertNoCarrierRejectionForBusiness(businessId);
+    await assertTextingUpgradeProvisioningAllowed(businessId);
 
     const latestNumber = await readActiveNumber(businessId);
     if (latestNumber) {
@@ -394,6 +405,7 @@ export async function attemptPaidLaunch(
       language: business.ai_settings?.language ?? "en",
     });
 
+    await assertTextingUpgradeProvisioningAllowed(businessId);
     await registerCampaign(businessId);
 
     // Existing campaign IDs return without a charged submit. Refresh before
@@ -433,8 +445,12 @@ export async function attemptPaidLaunch(
           "Registration state changed while setup was finishing. Refresh before retrying.",
       };
     }
+    await reconcileTextingUpgradeActivationForBusiness(businessId);
     return { status: "submitted" };
   } catch (err) {
+    if (err instanceof TextingUpgradeProvisioningStoppedError) {
+      return { status: "billing_required", message: err.message };
+    }
     if (err instanceof CarrierRejectionSupportRequiredError) {
       // A provider helper found a carrier rejection on its fresh, last-moment
       // status read. Release only OUR exact claim; if the rejection webhook

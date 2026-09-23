@@ -9,6 +9,7 @@ import { PRIVATE_ROUTE_METADATA } from '@/lib/seo/privateMetadata';
 import { getWorkspaceAccess } from '@/lib/customer/workspaceAccess.server';
 import { workspacePageRedirectTarget } from '@/lib/customer/workspaceRouteResponse.server';
 import { AccountServiceStatusBanner } from '@/components/account/AccountServiceStatusBanner';
+import { resolveBusinessEntitlements } from '@/lib/billing/entitlements';
 
 export const metadata = PRIVATE_ROUTE_METADATA;
 
@@ -36,13 +37,20 @@ export default async function OnboardingLayout({
   const { data: business } = await supabase
     .from('businesses')
     .select(
-      'id, deleted_at, operations_suspended_at, ai_replies_paused_at, texting_paused_at, bookings_paused_at'
+      'id, deleted_at, onboarding_completed_at, operations_suspended_at, ai_replies_paused_at, texting_paused_at, bookings_paused_at'
     )
     .eq('owner_id', user.id)
     .single();
 
   if (business?.deleted_at) {
     redirect('/account-deleted');
+  }
+
+  if (business?.onboarding_completed_at) {
+    const entitlements = await resolveBusinessEntitlements(business.id);
+    if (entitlements.textingUpgradePending && entitlements.active) {
+      redirect('/billing/add-texting');
+    }
   }
 
   const onboardingState = await getOnboardingStateForOwner(user.id);

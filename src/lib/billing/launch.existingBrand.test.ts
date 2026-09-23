@@ -68,10 +68,17 @@ const mocks = vi.hoisted(() => {
     resolveProviderCreateIntent: vi.fn(),
     readProviderCreateIntentForPayload: vi.fn(),
     assertNoCarrierRejectionForBusiness: vi.fn(),
+    assertTextingUpgradeProvisioningAllowed: vi.fn(),
+    reconcileTextingUpgradeActivationForBusiness: vi.fn(),
   };
 });
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/lib/billing/textingUpgradeActivation.server", () => ({
+  assertTextingUpgradeProvisioningAllowed: mocks.assertTextingUpgradeProvisioningAllowed,
+  reconcileTextingUpgradeActivationForBusiness: mocks.reconcileTextingUpgradeActivationForBusiness,
+  TextingUpgradeProvisioningStoppedError: class extends Error {},
+}));
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { from: mocks.from },
 }));
@@ -237,6 +244,8 @@ beforeEach(() => {
     plan: "full",
   });
   mocks.claimSmsLaunchPlanFamily.mockResolvedValue(true);
+  mocks.assertTextingUpgradeProvisioningAllowed.mockResolvedValue(undefined);
+  mocks.reconcileTextingUpgradeActivationForBusiness.mockResolvedValue(false);
   mocks.claim.mockResolvedValue({
     claimed: true,
     claimedFrom: "not_started",

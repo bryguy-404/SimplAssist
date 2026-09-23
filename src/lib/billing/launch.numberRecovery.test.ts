@@ -29,9 +29,16 @@ const mocks = vi.hoisted(() => ({
   resolveProviderCreateIntent: vi.fn(),
   readProviderCreateIntentForPayload: vi.fn(),
   assertNoCarrierRejectionForBusiness: vi.fn(),
+  assertTextingUpgradeProvisioningAllowed: vi.fn(),
+  reconcileTextingUpgradeActivationForBusiness: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/lib/billing/textingUpgradeActivation.server", () => ({
+  assertTextingUpgradeProvisioningAllowed: mocks.assertTextingUpgradeProvisioningAllowed,
+  reconcileTextingUpgradeActivationForBusiness: mocks.reconcileTextingUpgradeActivationForBusiness,
+  TextingUpgradeProvisioningStoppedError: class extends Error {},
+}));
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { from: mocks.from, rpc: mocks.rpc },
 }));
@@ -110,6 +117,7 @@ vi.mock("@/lib/onboarding/contentQuality.server", () => ({
 }));
 
 import { attemptPaidLaunch } from "./launch";
+import { TextingUpgradeProvisioningStoppedError } from "./textingUpgradeActivation.server";
 import {
   CarrierRejectionSupportRequiredError,
   REJECTION_SUPPORT_MESSAGE,
@@ -214,6 +222,8 @@ beforeEach(() => {
     plan: "full",
   });
   mocks.claimSmsLaunchPlanFamily.mockResolvedValue(true);
+  mocks.assertTextingUpgradeProvisioningAllowed.mockResolvedValue(undefined);
+  mocks.reconcileTextingUpgradeActivationForBusiness.mockResolvedValue(false);
   mocks.claimRegistrationAttempt.mockResolvedValue({
     claimed: true,
     claimedFrom: "not_started",
@@ -534,6 +544,24 @@ describe("attemptPaidLaunch carrier rejection guard", () => {
 });
 
 describe("attemptPaidLaunch number purchase recovery", () => {
+  it("stops a canceled paid upgrade at the final provider boundary without creating a brand", async () => {
+    queueResults({ data: LAUNCH_BUSINESS, error: null });
+    mocks.assertTextingUpgradeProvisioningAllowed.mockRejectedValue(new TextingUpgradeProvisioningStoppedError());
+    const result = await attemptPaidLaunch(BUSINESS_ID, "texting_upgrade");
+    expect(result.status).toBe("billing_required");
+    expect(mocks.registerBrand).not.toHaveBeenCalled();
+    expect(mocks.purchaseNumber).not.toHaveBeenCalled();
+    expect(mocks.markRegistrationFailed).not.toHaveBeenCalled();
+  });
+
+  it("reconciles activation after an already-submitted upgrade without recreating registration", async () => {
+    queueResults({ data: LAUNCH_BUSINESS, error: null });
+    mocks.claimRegistrationAttempt.mockResolvedValue({ claimed: false, reason: "already_submitted" });
+    await expect(attemptPaidLaunch(BUSINESS_ID, "texting_upgrade")).resolves.toEqual({ status: "already_submitted" });
+    expect(mocks.reconcileTextingUpgradeActivationForBusiness).toHaveBeenCalledWith(BUSINESS_ID);
+    expect(mocks.registerBrand).not.toHaveBeenCalled();
+    expect(mocks.purchaseNumber).not.toHaveBeenCalled();
+  });
   it.each([
     [
       "a canceled Chat Checkout family lock",

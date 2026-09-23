@@ -107,6 +107,7 @@ interface SmsUseCaseFormProps {
   initialData?: SmsUseCaseInitialData | null;
   onNext: (data: SmsUseCaseData) => void;
   onBack: () => void;
+  saveRequest?: typeof fetch;
 }
 
 interface RiskReviewResponse {
@@ -140,6 +141,7 @@ export default function SmsUseCaseForm({
   initialData,
   onNext,
   onBack,
+  saveRequest = fetch,
 }: SmsUseCaseFormProps) {
   const brand = useBrand();
   const [saving, setSaving] = useState(false);
@@ -221,7 +223,7 @@ export default function SmsUseCaseForm({
     setHeldRiskReview(null);
 
     try {
-      const response = await fetch('/api/onboarding/sms-use-case', {
+      const response = await saveRequest('/api/onboarding/sms-use-case', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

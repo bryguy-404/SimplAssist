@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   requireWorkspaceRouteAccess: vi.fn(),
+  getTextingUpgradeState: vi.fn(),
   createClient: vi.fn(),
   getUser: vi.fn(),
   searchAvailableNumbers: vi.fn(),
@@ -23,6 +24,8 @@ vi.mock("@/lib/messaging/numbers", () => ({
 vi.mock("@/lib/billing/entitlements", () => ({
   resolveSmsProvisioningAccess: mocks.resolveSmsProvisioningAccess,
 }));
+
+vi.mock("@/lib/billing/textingUpgrade.server", () => ({ getTextingUpgradeState: mocks.getTextingUpgradeState }));
 
 import { GET } from "./route";
 
@@ -167,5 +170,32 @@ describe("GET /api/messaging/numbers/search", () => {
       "business-1",
       { allowDirectPrecheckout: true },
     );
+  });
+});
+
+
+describe("upgrade-scoped number search", () => {
+  const upgradeRequest = () => new NextRequest("http://localhost/api/messaging/numbers/search?areaCode=317&textingUpgradeId=upgrade");
+  const state = { upgrade: { id: "upgrade" }, eligible: true, currentStep: "phone", actions: { canSave: true, canReplacePhone: false } };
+  it("allows inventory only for the owner's eligible completed draft", async () => {
+    mocks.getTextingUpgradeState.mockResolvedValue(state); mocks.searchAvailableNumbers.mockResolvedValue([{ phoneNumber: "+13175550100" }]);
+    const response = await GET(upgradeRequest()); expect(response.status).toBe(200);
+    expect(mocks.getTextingUpgradeState).toHaveBeenCalledWith("business-1", "owner-1");
+    expect(mocks.resolveSmsProvisioningAccess).not.toHaveBeenCalled(); expect(mocks.searchAvailableNumbers).toHaveBeenCalledWith("317");
+  });
+  it.each([
+    { ...state, upgrade: { id: "different" } }, { ...state, eligible: false }, { ...state, currentStep: "verification" }, { ...state, actions: { canSave: false, canReplacePhone: false } },
+  ])("denies mismatched, ineligible, incomplete, and locked upgrades before Telnyx", async (value) => {
+    mocks.getTextingUpgradeState.mockResolvedValue(value);
+    expect((await GET(upgradeRequest())).status).toBe(403); expect(mocks.searchAvailableNumbers).not.toHaveBeenCalled();
+  });
+  it("allows a server-authorized paid number replacement without widening ordinary plan access", async () => {
+    mocks.getTextingUpgradeState.mockResolvedValue({ ...state, currentStep: "status", actions: { canSave: false, canReplacePhone: true } });
+    expect((await GET(upgradeRequest())).status).toBe(200); expect(mocks.resolveSmsProvisioningAccess).not.toHaveBeenCalled();
+  });
+  it("fails closed when upgrade state cannot be verified", async () => {
+    mocks.getTextingUpgradeState.mockRejectedValue(new Error("database unavailable"));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const response = await GET(upgradeRequest()); expect(response.status).toBe(503); expect(mocks.searchAvailableNumbers).not.toHaveBeenCalled(); error.mockRestore();
   });
 });

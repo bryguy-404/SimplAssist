@@ -1117,7 +1117,24 @@ export async function registerCampaign(businessId: string): Promise<void> {
     };
     submissionAuditSnapshot = currentSubmissionAuditSnapshot;
 
-    if (campaignFiling.persistSamples) {
+    // A paid Chat upgrade freezes customer-entered compliance details. Its
+    // guarded RPC permits only this final generated filing copy while the
+    // exact paid registration claim is still eligible to submit.
+    const { data: upgradeCopySaved, error: upgradeCopyError } = await supabaseAdmin.rpc(
+      "persist_chat_texting_upgrade_campaign_copy",
+      {
+        p_business_id: businessId,
+        p_sample_messages: campaignFiling.persistSamples ? filingSamples : null,
+        p_opt_in_description: complianceCopy.messageFlow,
+      }
+    );
+    if (upgradeCopyError || typeof upgradeCopySaved !== "boolean") {
+      throw new Error(
+        `[registration:campaign] Failed to persist guarded campaign copy for business ${businessId}: ${upgradeCopyError?.message ?? "invalid result"}`
+      );
+    }
+
+    if (!upgradeCopySaved && campaignFiling.persistSamples) {
       const { error: sampleMessagesUpdateError } = await supabaseAdmin
         .from("businesses")
         .update({ sample_messages: filingSamples })
@@ -1132,10 +1149,12 @@ export async function registerCampaign(businessId: string): Promise<void> {
       }
     }
 
-    const { error: optInUpdateError } = await supabaseAdmin
-      .from("businesses")
-      .update({ opt_in_description: complianceCopy.messageFlow })
-      .eq("id", businessId);
+    const { error: optInUpdateError } = upgradeCopySaved
+      ? { error: null }
+      : await supabaseAdmin
+          .from("businesses")
+          .update({ opt_in_description: complianceCopy.messageFlow })
+          .eq("id", businessId);
 
     if (optInUpdateError) {
       throw new Error(

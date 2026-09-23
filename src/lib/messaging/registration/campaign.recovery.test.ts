@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   qualify: vi.fn(),
   deactivate: vi.fn(),
   from: vi.fn(),
+  rpc: vi.fn(),
   appendRegistrationEvent: vi.fn(),
   buildSmsComplianceCopy: vi.fn(),
   resolveLegalUrls: vi.fn(),
@@ -32,7 +33,7 @@ vi.mock("@/lib/messaging/client", () => ({
   },
 }));
 vi.mock("@/lib/supabase/admin", () => ({
-  supabaseAdmin: { from: mocks.from },
+  supabaseAdmin: { from: mocks.from, rpc: mocks.rpc },
 }));
 vi.mock("./audit", () => ({
   appendRegistrationEvent: mocks.appendRegistrationEvent,
@@ -288,6 +289,7 @@ beforeEach(() => {
   sampleMessagesUpdateError = null;
   operationTrace = [];
   setCampaigns([]);
+  mocks.rpc.mockResolvedValue({ data: false, error: null });
   mocks.from.mockImplementation((table: string) => {
     if (table === "businesses") return businessQuery();
     if (table === "rejected_campaigns") {
@@ -340,6 +342,34 @@ describe("goal-aware signup campaign filing", () => {
   ];
   const generatedSignupSample =
     "Thanks for contacting Acme Camps. To sign up, visit https://signup.example.com/enroll. Reply STOP to opt out.";
+
+  it("persists paid-upgrade generated copy through the guarded registration RPC", async () => {
+    business = { ...business, name: "Acme Camps", primary_goal: "signup", goal_url: normalizedGoalUrl, sample_messages: [...storedSamples] };
+    mocks.rpc.mockResolvedValue({ data: true, error: null });
+
+    await registerCampaign(BUSINESS_ID);
+
+    expect(mocks.rpc).toHaveBeenCalledWith("persist_chat_texting_upgrade_campaign_copy", {
+      p_business_id: BUSINESS_ID,
+      p_sample_messages: [storedSamples[0], storedSamples[1], generatedSignupSample, storedSamples[3], storedSamples[4]],
+      p_opt_in_description: expect.any(String),
+    });
+    expect(updates.some((update) => owns(update, "sample_messages") || owns(update, "opt_in_description"))).toBe(false);
+    expect(mocks.submit).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { data: null, error: { message: "texting_upgrade_registration_stopped" } },
+    { data: null, error: null },
+  ])("never falls back or submits when the guarded copy write is denied", async (result) => {
+    mocks.rpc.mockResolvedValue(result);
+
+    await expect(registerCampaign(BUSINESS_ID)).rejects.toThrow("Failed to persist guarded campaign copy");
+
+    expect(updates.some((update) => owns(update, "sample_messages") || owns(update, "opt_in_description"))).toBe(false);
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(mocks.getCost).not.toHaveBeenCalled();
+  });
 
   it("files and persists a clean signup-link sample before submission", async () => {
     business = {

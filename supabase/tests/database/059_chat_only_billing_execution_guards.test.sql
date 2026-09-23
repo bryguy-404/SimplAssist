@@ -139,9 +139,13 @@ SELECT ok(
     'public.claim_business_plan_family(uuid,text,text)',
     'EXECUTE'
   )
-  AND pg_get_functiondef(
+  -- 091 keeps the original evidence checks in a private delegate, with a
+  -- narrowly verified paid-conversion wrapper. Inspect the evidence body in
+  -- either schema version rather than requiring its old physical name.
+  AND pg_get_functiondef(COALESCE(
+    to_regprocedure('public.infer_business_plan_family_before_chat_upgrade(uuid)'),
     'public.infer_business_plan_family(uuid)'::regprocedure
-  ) LIKE ALL (ARRAY[
+  )) LIKE ALL (ARRAY[
     '%subscription.pending_plan%',
     '%partner_client_provisioning_jobs%',
     '%telnyx_voice_application_id%',

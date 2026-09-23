@@ -2,12 +2,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
+  canContinueTextingUpgradeProvisioning: vi.fn(),
+  assertTextingUpgradeProvisioningAllowed: vi.fn(),
+  reconcileTextingUpgradeActivationForBusiness: vi.fn(),
   retrieveAssignment: vi.fn(),
   retrieveTaskStatus: vi.fn(),
   createAssignment: vi.fn(),
   bulkAssignProfile: vi.fn(),
   appendRegistrationEvent: vi.fn(),
   serializeError: vi.fn(),
+}));
+
+vi.mock("@/lib/billing/textingUpgradeActivation.server", () => ({
+  canContinueTextingUpgradeProvisioning: mocks.canContinueTextingUpgradeProvisioning,
+  assertTextingUpgradeProvisioningAllowed: mocks.assertTextingUpgradeProvisioningAllowed,
+  reconcileTextingUpgradeActivationForBusiness: mocks.reconcileTextingUpgradeActivationForBusiness,
 }));
 
 vi.mock("@/lib/supabase/admin", () => ({
@@ -415,6 +424,9 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date(NOW));
   vi.clearAllMocks();
+  mocks.canContinueTextingUpgradeProvisioning.mockResolvedValue(true);
+  mocks.assertTextingUpgradeProvisioningAllowed.mockResolvedValue(undefined);
+  mocks.reconcileTextingUpgradeActivationForBusiness.mockResolvedValue(false);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
@@ -454,6 +466,60 @@ afterEach(() => {
 });
 
 describe("ensureCampaignAssignmentForBusiness safety gates", () => {
+  it("does not claim numbers or contact Telnyx after upgrade cancellation", async () => {
+    mocks.canContinueTextingUpgradeProvisioning.mockResolvedValue(false);
+    await ensureCampaignAssignmentForBusiness(BUSINESS_ID, { force: true });
+    expect(phoneQueries()).toHaveLength(0);
+    expect(mocks.retrieveAssignment).not.toHaveBeenCalled();
+    expect(mocks.createAssignment).not.toHaveBeenCalled();
+    expect(mocks.reconcileTextingUpgradeActivationForBusiness).not.toHaveBeenCalled();
+  });
+
+  it("rechecks upgrade authority immediately before a charged assignment mutation", async () => {
+    mocks.assertTextingUpgradeProvisioningAllowed.mockRejectedValue(new Error("upgrade canceled"));
+    await expect(ensureCampaignAssignmentForBusiness(BUSINESS_ID, { force: true })).rejects.toThrow("upgrade canceled");
+    expect(mocks.retrieveAssignment).toHaveBeenCalled();
+    expect(mocks.createAssignment).not.toHaveBeenCalled();
+    expect(claimedPhoneIds.size).toBe(0);
+  });
+
+  it("attempts atomic upgrade activation after persisting the assigned number", async () => {
+    mocks.createAssignment.mockResolvedValue({
+      phoneNumber: PHONE_NUMBER, campaignId: CAMPAIGN_ID, assignmentStatus: "ASSIGNED",
+    });
+    await ensureCampaignAssignmentForBusiness(BUSINESS_ID, { force: true });
+    expect(phoneRows[0].telnyx_campaign_assignment_status).toBe("assigned");
+    expect(mocks.reconcileTextingUpgradeActivationForBusiness).toHaveBeenCalledWith(BUSINESS_ID);
+  });
+
+  it("finishes an audited support recheck using the already-owned assigned number without a new assignment", async () => {
+    phoneRows[0] = {
+      ...phoneRows[0],
+      telnyx_campaign_assignment_status: "assigned",
+      telnyx_campaign_assignment_campaign_id: CAMPAIGN_ID,
+      telnyx_campaign_assigned_at: NOW,
+    };
+    mocks.retrieveAssignment.mockResolvedValue({
+      phoneNumber: PHONE_NUMBER, campaignId: CAMPAIGN_ID, assignmentStatus: "ASSIGNED",
+    });
+
+    await ensureCampaignAssignmentForBusiness(BUSINESS_ID, { force: true, reason: "admin_recheck" });
+
+    expect(mocks.retrieveAssignment).toHaveBeenCalledOnce();
+    expect(mocks.createAssignment).not.toHaveBeenCalled();
+    expect(mocks.reconcileTextingUpgradeActivationForBusiness).toHaveBeenCalledExactlyOnceWith(BUSINESS_ID);
+    expect(phoneRows[0].telnyx_campaign_assignment_campaign_id).toBe(CAMPAIGN_ID);
+  });
+
+  it("still blocks an explicit staff recheck when paid support recovery has not been authorized", async () => {
+    mocks.canContinueTextingUpgradeProvisioning.mockResolvedValue(false);
+
+    await ensureCampaignAssignmentForBusiness(BUSINESS_ID, { force: true, reason: "admin_recheck" });
+
+    expect(mocks.retrieveAssignment).not.toHaveBeenCalled();
+    expect(mocks.createAssignment).not.toHaveBeenCalled();
+    expect(mocks.reconcileTextingUpgradeActivationForBusiness).not.toHaveBeenCalled();
+  });
   const unsafeBusinesses: Array<[string, Partial<BusinessState>]> = [
     ["campaign not approved", { campaign_status: "rejected" }],
     ["brand not approved", { brand_status: "pending" }],

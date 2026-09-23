@@ -12,9 +12,11 @@ const mocks = vi.hoisted(() => ({
   eq: vi.fn(),
   single: vi.fn(),
   getOnboardingStateForOwner: vi.fn(),
+  resolveBusinessEntitlements: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/lib/billing/entitlements", () => ({ resolveBusinessEntitlements: mocks.resolveBusinessEntitlements }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("@/lib/customer/workspaceAccess.server", () => ({
   getWorkspaceAccess: mocks.getWorkspaceAccess,
@@ -51,6 +53,7 @@ const BUSINESS = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.resolveBusinessEntitlements.mockResolvedValue({ active: true, plan: "chat_only" });
   mocks.redirect.mockImplementation((path: string) => {
     throw new Error(`redirect:${path}`);
   });
@@ -83,6 +86,12 @@ beforeEach(() => {
 });
 
 describe("OnboardingLayout workspace access", () => {
+  it("returns paid pending upgrades to Add Texting without syncing initial onboarding", async () => {
+    mocks.single.mockResolvedValue({ data: { ...BUSINESS, onboarding_completed_at: "2026-09-01T00:00:00Z" }, error: null });
+    mocks.resolveBusinessEntitlements.mockResolvedValue({ active: true, plan: "chat_only", textingUpgradePending: true });
+    await expect(OnboardingLayout({ children: <main>Setup</main> })).rejects.toThrow("redirect:/billing/add-texting");
+    expect(mocks.getOnboardingStateForOwner).not.toHaveBeenCalled();
+  });
   it("renders incomplete onboarding only after the shared workspace decision resolves", async () => {
     const layout = await OnboardingLayout({
       children: <main>Onboarding</main>,

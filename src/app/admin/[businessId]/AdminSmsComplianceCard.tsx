@@ -41,6 +41,7 @@ export type AdminSmsComplianceCardProps = {
   campaignStatus: RegistrationStatus | null;
   healthActivePhoneCount: number;
   phoneSnapshot: AdminSmsCompliancePhoneSnapshot | null;
+  paidTextingUpgradePending?: boolean;
 };
 
 type ComplianceBlocker = {
@@ -60,10 +61,9 @@ export function AdminSmsComplianceCard(
   const countMatchesHealth =
     props.phoneSnapshot !== null &&
     props.phoneSnapshot.directActiveCount === props.healthActivePhoneCount;
-  const retryCandidate = assignmentIsRetryCandidate(
-    props.phoneSnapshot,
-    props.checkedAt,
-  );
+  const retryCandidate =
+    assignmentIsRetryCandidate(props.phoneSnapshot, props.checkedAt) ||
+    canRecheckPaidTextingUpgrade(props);
   const actionEnabled =
     retryCandidate && blocker.retryable && countMatchesHealth;
 
@@ -167,6 +167,9 @@ export function AdminSmsComplianceCard(
         Recheck assignment reconciles the current assignment against Telnyx. It
         may start an assignment only when Telnyx reports it missing. It does not
         resubmit the brand or campaign.
+        {props.paidTextingUpgradePending
+          ? " For a paid texting upgrade, an accepted recheck can also resume the existing upgrade after carrier corrections. It does not charge again."
+          : null}
       </p>
 
       {retryCandidate ? (
@@ -206,7 +209,11 @@ export function getAdminSmsComplianceBlocker(
   if (!riskCleared(props.riskReviewStatus)) {
     return blocker(4, "Pre-submission risk screen is not cleared.");
   }
-  if (props.onboardingRegistrationStatus === "failed") {
+  const paidUpgradeRecovery = canRecheckPaidTextingUpgrade(props);
+  if (
+    props.onboardingRegistrationStatus === "failed" &&
+    !paidUpgradeRecovery
+  ) {
     return blocker(5, "Registration submission failed.");
   }
   if (props.registrationSubmissionStale) {
@@ -248,7 +255,7 @@ export function getAdminSmsComplianceBlocker(
 
   const assignmentStatus = props.phoneSnapshot.assignmentStatus;
   if (assignmentStatus === null || assignmentStatus === "unassigned") {
-    return blocker(9, "Campaign assignment is missing.");
+    return blocker(9, "Campaign assignment is missing.", paidUpgradeRecovery);
   }
   if (assignmentStatus === "failed") {
     return blocker(9, "Campaign assignment failed.", true);
@@ -269,7 +276,29 @@ export function getAdminSmsComplianceBlocker(
         : "Campaign assignment campaign is unavailable.",
     );
   }
+  if (paidUpgradeRecovery) {
+    return blocker(9, "Paid texting upgrade is waiting for a support recheck.", true);
+  }
   return blocker(10, "No current blocker.");
+}
+
+function canRecheckPaidTextingUpgrade(
+  props: AdminSmsComplianceCardProps,
+): boolean {
+  const phone = props.phoneSnapshot;
+  if (
+    !props.paidTextingUpgradePending ||
+    props.brandStatus !== "approved" ||
+    props.campaignStatus !== "approved" ||
+    !phone ||
+    phone.directActiveCount !== 1 ||
+    props.healthActivePhoneCount !== 1
+  ) return false;
+  return (
+    phone.assignmentStatus === "unassigned" ||
+    (phone.assignmentStatus === "assigned" && phone.campaignMatch === "yes") ||
+    assignmentIsRetryCandidate(phone, props.checkedAt)
+  );
 }
 
 export function pendingAssignmentIsRetryable(

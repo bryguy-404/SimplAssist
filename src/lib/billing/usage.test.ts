@@ -104,7 +104,10 @@ beforeEach(() => {
     data: { ...defaultUsagePeriod },
     error: null,
   });
-  mocks.rpc.mockResolvedValue({ data: true, error: null });
+  mocks.rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => ({
+    data: name === "get_business_effective_service_plan" ? args.p_billed_plan : true,
+    error: null,
+  }));
   mocks.from.mockImplementation((table: string) => {
     const chain: Record<string, ReturnType<typeof vi.fn>> = {};
     for (const method of ["select", "eq", "is"]) {
@@ -130,6 +133,35 @@ beforeEach(() => {
 });
 
 describe("preflightOutboundSms", () => {
+  it.each(["sms_only", "sms_and_chat", "full"] as const)(
+    "denies outbound SMS while a paid %s upgrade still provides Chat service",
+    async (plan) => {
+      mocks.results.set("subscriptions", { data: { ...defaultSubscription, plan }, error: null });
+      mocks.rpc.mockResolvedValue({ data: "chat_only", error: null });
+
+      await expect(preflightOutboundSms({ businessId: BUSINESS_ID, text: "Hello" }))
+        .resolves.toMatchObject({ allowed: false, reason: "plan_not_entitled" });
+
+      expect(mocks.rpc).toHaveBeenCalledWith("get_business_effective_service_plan", {
+        p_business_id: BUSINESS_ID, p_billed_plan: plan,
+      });
+      expect(mocks.from).not.toHaveBeenCalledWith("billing_usage_periods");
+      expect(mocks.writes).toEqual([]);
+    },
+  );
+
+  it.each([
+    { data: null, error: { message: "unavailable" } },
+    { data: "full", error: null },
+  ])("fails closed before usage writes when the service projection is unavailable or unexpected", async (result) => {
+    mocks.rpc.mockResolvedValue(result);
+
+    await expect(preflightOutboundSms({ businessId: BUSINESS_ID, text: "Hello" }))
+      .rejects.toThrow("Effective service plan unavailable");
+
+    expect(mocks.writes).toEqual([]);
+  });
+
   it("blocks suspension before billing-period writes and gives it precedence", async () => {
     setBusiness({
       operations_suspended_at: "2026-08-04T12:00:00.000Z",
@@ -797,6 +829,22 @@ describe("preflightOutboundSms", () => {
 });
 
 describe("recordInboundMessagingUsage", () => {
+  it("keeps inbound accounting on the billed plan without consulting service activation", async () => {
+    mocks.results.set("subscriptions", { data: { ...defaultSubscription, plan: "full" }, error: null });
+    mocks.queuedResults.set("billing_usage_periods", [
+      { data: null, error: null },
+      { data: { ...defaultUsagePeriod, plan: "full", included_sms_parts: 2500 }, error: null },
+    ]);
+
+    await recordInboundMessagingUsage({ businessId: BUSINESS_ID, text: "Hello", mediaCount: 0, source: "test", providerEventId: "evt_pending_upgrade" });
+
+    expect(mocks.rpc).not.toHaveBeenCalledWith("get_business_effective_service_plan", expect.anything());
+    expect(mocks.writes).toContainEqual(expect.objectContaining({
+      table: "billing_usage_periods", operation: "insert",
+      values: expect.objectContaining({ plan: "full", included_sms_parts: 2500 }),
+    }));
+  });
+
   it("continues inbound accounting while operations and texting are paused", async () => {
     setBusiness({
       operations_suspended_at: "2026-08-04T12:00:00.000Z",

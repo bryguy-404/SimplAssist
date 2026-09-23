@@ -134,7 +134,8 @@ export async function preflightOutboundSms(args: {
   ) {
     return blocked("canceled", smsParts);
   }
-  if (!canPlanUseFeature(context.plan, smsFeatureForPurpose(args.purpose))) {
+  const servicePlan = await resolveOutboundServicePlan(context);
+  if (!canPlanUseFeature(servicePlan, smsFeatureForPurpose(args.purpose))) {
     return blocked("plan_not_entitled", smsParts);
   }
 
@@ -253,6 +254,19 @@ function smsFeatureForPurpose(purpose: OutboundSmsPurpose): FeatureKey {
     case "mms_fallback":
       return "ai_sms_conversations";
   }
+}
+
+/** Service availability can lag billing while a paid Chat upgrade is reviewed. */
+async function resolveOutboundServicePlan(context: UsageContext): Promise<SubscriptionPlan> {
+  if (context.source !== "subscription" || context.plan === "chat_only") return context.plan;
+  const { data, error } = await supabaseAdmin.rpc("get_business_effective_service_plan", {
+    p_business_id: context.business.id,
+    p_billed_plan: context.plan,
+  });
+  if (error || (data !== context.plan && data !== "chat_only")) {
+    throw new Error("[billing:usage] Effective service plan unavailable");
+  }
+  return data;
 }
 
 async function resolveUsageContext(businessId: string): Promise<UsageContext> {

@@ -2,13 +2,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
+  rpc: vi.fn(),
+  canContinueTextingUpgradeProvisioning: vi.fn(),
   results: new Map<string, { data: unknown; error: unknown }>(),
   rejectedTables: new Map<string, Error>(),
 }));
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/admin", () => ({
-  supabaseAdmin: { from: mocks.from },
+  supabaseAdmin: { from: mocks.from, rpc: mocks.rpc },
+}));
+vi.mock("./textingUpgradeActivation.server", () => ({
+  canContinueTextingUpgradeProvisioning: mocks.canContinueTextingUpgradeProvisioning,
 }));
 
 import {
@@ -51,6 +56,8 @@ function entitlementSnapshot(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.rpc.mockImplementation(async (_name, args) => ({ data: args.p_billed_plan, error: null }));
+  mocks.canContinueTextingUpgradeProvisioning.mockResolvedValue(true);
   vi.stubEnv("CHAT_ONLY_DIRECT_SALES_ENABLED", "1");
   vi.stubEnv("STRIPE_PRICE_CHAT_ONLY", "price_chat_only_test");
   mocks.results.clear();
@@ -83,6 +90,37 @@ afterEach(() => {
 });
 
 describe("resolveBusinessEntitlements", () => {
+  it.each(["sms_only", "sms_and_chat", "full"])("keeps paid %s upgrades on Chat services until authoritative activation", async (plan) => {
+    mocks.results.set("subscriptions", { data: { ...SUBSCRIPTION, plan }, error: null });
+    mocks.rpc.mockResolvedValue({ data: "chat_only", error: null });
+    const access = await resolveBusinessEntitlements(BUSINESS_ID);
+    expect(access).toMatchObject({ plan: "chat_only", active: true, textingUpgradePending: true });
+    expect(canUseFeature(access, "web_chat")).toBe(true);
+    expect(canUseFeature(access, "manual_sms")).toBe(false);
+    expect(canUseFeature(access, "ai_voice_answering")).toBe(false);
+    expect(mocks.rpc).toHaveBeenCalledWith("get_business_effective_service_plan", {
+      p_business_id: BUSINESS_ID, p_billed_plan: plan,
+    });
+  });
+
+  it("does not turn canceled billing active through the service overlay", async () => {
+    mocks.results.set("subscriptions", { data: { ...SUBSCRIPTION, status: "canceled" }, error: null });
+    mocks.rpc.mockResolvedValue({ data: "chat_only", error: null });
+    expect(canUseFeature(await resolveBusinessEntitlements(BUSINESS_ID), "web_chat")).toBe(false);
+  });
+
+  it("fails closed on an unavailable or mismatched service projection", async () => {
+    mocks.rpc.mockResolvedValue({ data: "full", error: null });
+    await expect(resolveBusinessEntitlements(BUSINESS_ID)).rejects.toMatchObject({ code: "subscription_lookup_failed" });
+    mocks.rpc.mockResolvedValue({ data: null, error: { message: "unavailable" } });
+    await expect(resolveBusinessEntitlements(BUSINESS_ID)).rejects.toMatchObject({ code: "subscription_lookup_failed" });
+  });
+
+  it("does not consult upgrade service authority for ordinary Chat", async () => {
+    mocks.results.set("subscriptions", { data: { ...SUBSCRIPTION, plan: "chat_only" }, error: null });
+    expect((await resolveBusinessEntitlements(BUSINESS_ID)).plan).toBe("chat_only");
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
   it.each(["active", "trialing", "past_due"] as const)(
     "keeps the synchronized plan active while status is %s",
     async (status) => {
@@ -498,6 +536,24 @@ describe("resolveBusinessEntitlementsFromSnapshot", () => {
 });
 
 describe("resolveSmsProvisioningAccess", () => {
+  it("authorizes paid upgrade provisioning from billing without granting SMS runtime services", async () => {
+    mocks.rpc.mockResolvedValue({ data: "chat_only", error: null });
+    expect((await resolveBusinessEntitlements(BUSINESS_ID)).plan).toBe("chat_only");
+    await expect(resolveSmsProvisioningAccess(BUSINESS_ID, { allowDirectPrecheckout: false })).resolves.toMatchObject({
+      allowed: true, plan: "sms_and_chat",
+    });
+    expect(mocks.canContinueTextingUpgradeProvisioning).toHaveBeenCalledWith(BUSINESS_ID);
+  });
+
+  it("blocks provider work when a paid upgrade is canceled or held for support", async () => {
+    mocks.canContinueTextingUpgradeProvisioning.mockResolvedValue(false);
+    await expect(resolveSmsProvisioningAccess(BUSINESS_ID, { allowDirectPrecheckout: false })).resolves.toMatchObject({ allowed: false });
+  });
+
+  it("fails closed if the upgrade provisioning authority cannot be read", async () => {
+    mocks.canContinueTextingUpgradeProvisioning.mockRejectedValue(new Error("db offline"));
+    await expect(resolveSmsProvisioningAccess(BUSINESS_ID, { allowDirectPrecheckout: false })).resolves.toEqual({ allowed: false, reason: "billing_state_unavailable" });
+  });
   it.each([
     ["subscription", "stripe"],
     ["partner_billing", "invoiced"],

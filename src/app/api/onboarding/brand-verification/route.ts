@@ -1,5 +1,5 @@
+import { brandVerificationServerSchema } from "@/lib/onboarding/formValidation.server";
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { registrationHasStartedForRisk } from "@/lib/messaging/registration/riskScreening";
@@ -94,43 +94,6 @@ async function registrationSnapshotMissResponse(args: {
     { status: 409 },
   );
 }
-
-function hasFirstAndLastName(value: string): boolean {
-  return value.trim().split(/\s+/).length >= 2;
-}
-
-const einPathSchema = z.object({
-  businessId: z.string().uuid(),
-  has_ein: z.literal(true),
-  legal_business_name: z.string().min(1),
-  business_entity_type: z.enum(["llc", "c_corp", "s_corp", "nonprofit", "partnership"]),
-  business_registration_state: z
-    .string()
-    .min(2)
-    .refine((value) => Boolean(normalizeUsStateCode(value))),
-  ein: z.string().regex(/^\d{2}-\d{7}$/),
-  authorized_rep_name: z
-    .string()
-    .min(1)
-    .refine(
-      hasFirstAndLastName,
-      "Representative name must include first and last name"
-    ),
-  authorized_rep_title: z.string().min(1),
-  authorized_rep_email: z.string().email(),
-  authorized_rep_phone: z.string().min(10),
-});
-
-const noEinPathSchema = z.object({
-  businessId: z.string().uuid(),
-  has_ein: z.literal(false),
-  join_waitlist: z.boolean().optional(),
-});
-
-const brandVerificationServerSchema = z.discriminatedUnion("has_ein", [
-  einPathSchema,
-  noEinPathSchema,
-]);
 
 export async function POST(request: NextRequest) {
   const workspaceGate = await requireWorkspaceRouteAccess();

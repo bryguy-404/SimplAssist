@@ -3,6 +3,11 @@ import { telnyx } from "@/lib/messaging/client";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { CampaignAssignmentStatus } from "@/types/database";
 import { appendRegistrationEvent, serializeError } from "./audit";
+import {
+  assertTextingUpgradeProvisioningAllowed,
+  canContinueTextingUpgradeProvisioning,
+  reconcileTextingUpgradeActivationForBusiness,
+} from "@/lib/billing/textingUpgradeActivation.server";
 
 const PENDING_REFRESH_COOLDOWN_MS = 60_000;
 const FAILED_RETRY_COOLDOWN_MS = 5 * 60_000;
@@ -91,6 +96,7 @@ export async function ensureCampaignAssignmentForBusiness(
   if (!isAssignmentBusinessSafe(business)) {
     return;
   }
+  if (!(await canContinueTextingUpgradeProvisioning(businessId))) return;
   if (hasFreshBusinessAssignmentClaim(business)) {
     return;
   }
@@ -168,6 +174,7 @@ export async function ensureCampaignAssignmentForBusiness(
   } finally {
     await releaseBusinessProfileAssignmentClaim(lease.business);
   }
+  await reconcileTextingUpgradeActivationForBusiness(businessId);
 }
 
 function isAssignmentBusinessSafe(
@@ -446,6 +453,7 @@ async function processPhoneAssignmentCandidate(args: {
       return;
     }
 
+    await assertTextingUpgradeProvisioningAllowed(lease.business.id);
     providerMutationAttempted = true;
     const response =
       await telnyx.messaging10dlc.phoneNumberCampaigns.create(

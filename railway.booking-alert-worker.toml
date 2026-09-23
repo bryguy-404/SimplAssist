@@ -1,0 +1,11 @@
+[build]
+builder = "NIXPACKS"
+buildCommand = "npx tsc --project tsconfig.booking-alert-worker.json --noEmit"
+
+[deploy]
+startCommand = "npm run start:booking-alert-worker"
+healthcheckPath = "/health"
+healthcheckTimeout = 120
+restartPolicyType = "ALWAYS"
+numReplicas = 1
+sleepApplication = false

@@ -11,6 +11,7 @@
     "start": "next start",
     "start:scan-worker": "tsx scripts/website-scan-worker.ts",
     "start:voice-worker": "tsx scripts/voice-worker.ts",
+    "start:booking-alert-worker": "tsx scripts/booking-alert-worker.ts",
     "lint": "next lint",
     "test": "vitest run",
     "test:db:local": "node scripts/test-database-local.mjs",

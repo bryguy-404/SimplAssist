@@ -30,9 +30,10 @@ function isPreviewPageRequest(request: NextRequest): boolean {
   const isPageMethod = request.method === "GET" || request.method === "HEAD";
   const isApiPath = pathname === "/api" || pathname.startsWith("/api/");
 
-  // The embed script is the only non-/api route handler matched by the root
-  // middleware. It must retain its host-invariant public cache behavior.
-  return isPageMethod && !isApiPath && pathname !== "/widget/embed.js";
+  // Public route handlers resolve their own invariant destinations/cache rules.
+  // Brand preview must never influence SMS dashboard navigation.
+  return isPageMethod && !isApiPath && pathname !== "/widget/embed.js" &&
+    !pathname.startsWith("/booking-alerts/open/");
 }
 
 function countRawCookies(request: NextRequest, cookieName: string): number {

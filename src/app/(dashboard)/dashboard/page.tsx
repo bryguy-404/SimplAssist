@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import DashboardOverview from '@/components/dashboard/DashboardOverview';
+import BookingAlertNudge from '@/components/owner-booking-alerts/BookingAlertNudge';
 import { card } from '@/lib/theme-v2/theme';
 import { getFirstNameFromAuthMetadata } from '@/lib/utils';
 import { getSmsReadinessForBusiness } from '@/lib/messaging/lookup';
@@ -185,6 +186,8 @@ export default async function DashboardPage() {
           </div>
         </div>
       )}
+
+      {!signupMode && canUseCalendar && calendarToken && aiSettings?.booking_enabled && aiSettings.booking_mode === 'schedule_direct' ? <BookingAlertNudge key={business.id} /> : null}
 
       <DashboardOverview
         stats={{

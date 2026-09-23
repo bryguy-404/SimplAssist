@@ -131,6 +131,12 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 
 ## Railway operations
 
+Owner booking SMS alerts use the separate, default-off platform sender and
+independent worker described in
+[`docs/owner-booking-alerts-operations.md`](docs/owner-booking-alerts-operations.md).
+Apply migration 093 before its application release; keep sending disabled until
+the implemented consent flow and revised Telnyx campaign have been reviewed.
+
 Railway is the application host. Database migrations are applied separately to
 Supabase and must precede any Railway application version that calls their new
 RPCs or reads their new columns. Migration 063 was not safe as an ordinary

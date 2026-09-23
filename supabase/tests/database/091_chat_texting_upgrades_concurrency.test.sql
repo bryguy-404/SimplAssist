@@ -197,6 +197,9 @@ ALTER TABLE public.voice_billing_payments ENABLE TRIGGER guard_voice_payment_his
 DELETE FROM public.sms_billing_operations WHERE business_id IN (SELECT b FROM upgrade_fixture);
 DELETE FROM public.sms_billing_accounts WHERE business_id IN (SELECT b FROM upgrade_fixture);
 DELETE FROM public.chat_only_checkout_attempts WHERE business_id IN (SELECT b FROM upgrade_fixture);
+-- Audit rows survive account deletion with a NULL business id. Remove only
+-- this test's synthetic audit records before the fixture links are cleared.
+DELETE FROM public.voice_commercial_audit WHERE business_id IN (SELECT b FROM upgrade_fixture);
 DELETE FROM public.businesses WHERE id IN (SELECT b FROM upgrade_fixture);
 DELETE FROM auth.users WHERE id IN (SELECT o FROM upgrade_fixture);
 $cleanup$);

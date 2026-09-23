@@ -83,6 +83,9 @@ vi.mock('@/components/settings/CompliancePanel', () => ({
 vi.mock('@/components/settings/DangerZone', () => ({
   default: () => <div>Danger zone</div>,
 }));
+vi.mock('@/components/owner-booking-alerts/OwnerBookingAlerts', () => ({
+  default: () => <section id="booking-alerts">Owner booking alerts</section>,
+}));
 vi.mock('@/components/entitlements/LockedFeatureCard', () => ({
   LockedFeatureCard: () => <div>Locked feature</div>,
 }));
@@ -452,6 +455,8 @@ describe('SettingsPage registration-sensitive settings', () => {
     expect(markup).not.toContain('Phone number section');
     expect(markup).not.toContain('Compliance');
     expect(markup).not.toContain('Compliance panel');
+    expect(markup).toContain('id="booking-alerts"');
+    expect(markup).toContain('Owner booking alerts');
     expect(mocks.compliancePanel).not.toHaveBeenCalled();
     expect(mocks.aiSettingsForm).toHaveBeenCalledWith(
       expect.objectContaining({ showSmsResponseDelay: false })

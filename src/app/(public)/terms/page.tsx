@@ -10,6 +10,7 @@ export default function TermsPage() {
   return (
     <LegalDocLayout
       title="Terms of Service"
+      lastUpdated="September 23, 2026"
       siblingHref="/privacy"
       siblingLabel="Privacy Policy"
     >
@@ -89,6 +90,16 @@ export default function TermsPage() {
           .
         </p>
       </LegalSection>
+
+      <div id="owner-booking-alerts" className="scroll-mt-6">
+        <LegalSection title="5A. SimplAssist Owner Booking-Alert SMS Terms">
+          <p className="mb-4">The SimplAssist booking-alert program sends optional automated enrollment confirmations and notifications to business account holders after SimplAssist confirms a new appointment in their connected calendar. It does not send marketing messages. Eligible Chat Only accounts may receive these alerts without a customer-texting subscription.</p>
+          <p className="mb-4">Enroll in Settings → Booking alerts by entering a US mobile you control, selecting the separate, unchecked SMS-consent checkbox, and sending the displayed one-time verification text to the SimplAssist number. Consent is not a condition of purchase or account access. An onboarding or call-forwarding number is not enrolled automatically. Alerts remain off until verification and service availability are confirmed.</p>
+          <p className="mb-4">Message frequency varies with confirmed bookings. Message and data rates may apply. Reply STOP to pause all SimplAssist booking-alert texts to that mobile and receive an opt-out confirmation. To enroll again, text START to the same number, then complete enrollment in Settings for each business you want to enable. Turning off alerts in one business’s Settings affects that business only.</p>
+          <p className="mb-4">Reply HELP for help or email {SUPPORT_EMAIL}. Carriers are not liable for delayed or undelivered messages. Messages are informational and delivery is not guaranteed; check your connected calendar or dashboard for appointment details. A delayed or failed notification does not cancel a booking.</p>
+          <p>Read the <Link href="/privacy#owner-booking-alerts" className={linkClass}>Privacy Policy</Link> for how we handle mobile and consent data, and visit <Link href="/booking-alerts" className={linkClass}>booking alerts</Link> for the signup process.</p>
+        </LegalSection>
+      </div>
 
       <LegalSection title="6. Subscription and Billing">
         <p className="mb-4">

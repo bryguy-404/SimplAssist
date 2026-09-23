@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import OwnerVoiceSettings from '@/components/settings/OwnerVoiceSettings';
+import OwnerBookingAlerts from '@/components/owner-booking-alerts/OwnerBookingAlerts';
 import { getOwnerVoiceSettings } from '@/lib/voice/access.server';
 import BookingSettingsForm from '@/components/settings/BookingSettingsForm';
 import AISettingsForm from '@/components/settings/AISettingsForm';
@@ -120,6 +121,8 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
       </div>}
 
       <OwnerVoiceSettings initialSettings={voiceSettings} />
+
+      <OwnerBookingAlerts key={business.id} />
 
       {/* Business Email */}
       <div className={`p-6 ${card}`}>

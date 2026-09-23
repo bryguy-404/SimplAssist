@@ -10,10 +10,11 @@ export default function PrivacyPage() {
   return (
     <LegalDocLayout
       title="Privacy Policy"
+      lastUpdated="September 23, 2026"
       siblingHref="/terms"
       siblingLabel="Terms of Service"
     >
-      <p className={`-mt-8 text-sm ${body}`}>Effective date: September 17, 2026</p>
+      <p className={`-mt-8 text-sm ${body}`}>Effective date: September 23, 2026</p>
 
       <LegalSection title="1. Introduction">
         <p>
@@ -131,6 +132,17 @@ export default function PrivacyPage() {
         </p>
       </LegalSection>
 
+      <div id="owner-booking-alerts" className="scroll-mt-6">
+        <LegalSection title="5A. SimplAssist Owner Booking Alerts">
+          <p className="mb-4">Business account holders may separately opt in to receive automated booking-alert texts from SimplAssist. Entering a phone number during account registration or call-forwarding setup does not enroll you in this program. In Settings → Booking alerts, you choose your mobile, agree to the SMS disclosure, and verify control of that mobile by sending the one-time verification text displayed in the form.</p>
+          <p className="mb-4">We store the alert mobile, associated business and account, consent and verification timestamps, disclosure version, opt-out status, and notification delivery records to operate the program, honor your choices, and prevent duplicate or unauthorized alerts. We use Telnyx and our hosting and database service providers to deliver and support these messages.</p>
+          <p className="mb-4">Expired verification records are removed after one day, processed notification webhook records after 30 days, and completed notification records after 90 days. Consent records remain with the business account until permanent cleanup. We retain a minimal mobile-number opt-out record to honor STOP requests, including after account deletion; it is not used for marketing. Deleting or transferring an account disables its booking-alert enrollment, and restoring the account does not automatically turn alerts back on.</p>
+          <p className="mb-4">We do not sell or share mobile information, SMS opt-in data, or consent with third parties for marketing or promotional purposes. We share this information with service providers only as needed to operate and support the messaging program.</p>
+          <p className="mb-4">Reply STOP to pause all SimplAssist booking alerts to your mobile. You can also disable alerts for an individual business in Settings. Reply HELP for assistance or email {SUPPORT_EMAIL}. Message frequency varies with bookings. Message and data rates may apply.</p>
+          <p>See <Link href="/booking-alerts" className={linkClass}>how booking alerts work</Link> and the <Link href="/terms#owner-booking-alerts" className={linkClass}>owner booking-alert SMS terms</Link>.</p>
+        </LegalSection>
+      </div>
+
       <LegalSection title="6. Data Storage and Security">
         <p className="mb-4">
           All data is stored securely using Supabase (PostgreSQL). Conversations are encrypted in
@@ -162,7 +174,9 @@ export default function PrivacyPage() {
         </p>
         <p className="mb-4">
           After 60 days, your data is permanently processed as follows: personal information
-          (names, email addresses, phone numbers) is removed from all records. Conversation
+          (names, email addresses, phone numbers) is removed from account records, except
+          for the minimal SMS opt-out record described above. Processed notification
+          webhooks expire on their separate 30-day schedule. Conversation
           content is erased. Anonymous, aggregated metadata (lead scores, message counts,
           timestamps) may be retained for service improvement and analytics.
         </p>

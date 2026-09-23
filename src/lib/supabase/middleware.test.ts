@@ -621,6 +621,8 @@ describe("updateSession", () => {
     ["POST pages", "POST", "/login?brand=alpha-dog"],
     ["API routes", "GET", "/api/health?brand=alpha-dog"],
     ["the public embed script", "GET", "/widget/embed.js?brand=alpha-dog"],
+    ["booking alert navigation", "GET", "/booking-alerts/open/token?brand=alpha-dog"],
+    ["booking alert carrier preview", "HEAD", "/booking-alerts/open/token?brand=alpha-dog"],
   ])("does not apply preview to %s", async (_, method, path) => {
     scriptClient(null);
 

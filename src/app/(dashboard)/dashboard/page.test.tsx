@@ -62,6 +62,9 @@ vi.mock("@/components/dashboard/callForwardingNudgeEligibility", () => ({
 vi.mock("@/components/dashboard/DashboardOverview", () => ({
   default: mocks.dashboardOverview,
 }));
+vi.mock('@/components/owner-booking-alerts/BookingAlertNudge', () => ({
+  default: () => <section aria-label="Set up booking alerts">Owner booking alert nudge</section>,
+}));
 vi.mock("@/components/entitlements/FeatureStatusBanners", () => ({
   FeatureStatusBanners: mocks.featureStatusBanners,
 }));
@@ -208,6 +211,7 @@ function configureResolvedDashboardWithSavedGuardrails({
   primaryGoal = null,
   calendarConnected = false,
   bookingEnabled = false,
+  bookingMode = 'collect_info',
   canUseCalendar = true,
   hotLeadRows = [],
   messageRows = [],
@@ -218,6 +222,7 @@ function configureResolvedDashboardWithSavedGuardrails({
   primaryGoal?: PrimaryGoal | null;
   calendarConnected?: boolean;
   bookingEnabled?: boolean;
+  bookingMode?: 'collect_info' | 'schedule_direct';
   canUseCalendar?: boolean;
   hotLeadRows?: Array<Record<string, unknown>>;
   messageRows?: Array<Record<string, unknown>>;
@@ -249,7 +254,7 @@ function configureResolvedDashboardWithSavedGuardrails({
       result = Promise.resolve({
         data: {
           booking_enabled: bookingEnabled,
-          booking_mode: "collect_info",
+          booking_mode: bookingMode,
           guardrails: ["Never promise a fixed price"],
         },
       });
@@ -465,6 +470,25 @@ describe("DashboardPage recent conversation previews", () => {
 });
 
 describe("DashboardPage Chat Only projection", () => {
+  it('offers owner alert setup for direct bookings without a customer SMS plan', async () => {
+    configureResolvedDashboardWithSavedGuardrails({ primaryGoal: 'book', calendarConnected: true,
+      bookingEnabled: true, bookingMode: 'schedule_direct' });
+    mocks.getDashboardPageEntitlements.mockResolvedValue({ status: 'resolved', entitlements: { ...ENTITLEMENTS, plan: 'chat_only' } });
+    mocks.planRequiresSmsProvisioning.mockReturnValue(false);
+    const html = renderToStaticMarkup(await DashboardPage());
+    expect(html).toContain('Owner booking alert nudge');
+    expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { primaryGoal: 'signup' as const, calendarConnected: true, bookingEnabled: true, bookingMode: 'schedule_direct' as const },
+    { primaryGoal: 'book' as const, calendarConnected: false, bookingEnabled: true, bookingMode: 'schedule_direct' as const },
+    { primaryGoal: 'book' as const, calendarConnected: true, bookingEnabled: true, bookingMode: 'collect_info' as const },
+  ])('keeps owner setup invitation hidden without direct calendar booking: %j', async (setup) => {
+    configureResolvedDashboardWithSavedGuardrails(setup);
+    expect(renderToStaticMarkup(await DashboardPage())).not.toContain('Owner booking alert nudge');
+  });
+
   it("does not read phone or side-effectful SMS readiness and marks the overview no-SMS", async () => {
     configureResolvedDashboardWithSavedGuardrails({ primaryGoal: "book" });
     mocks.getDashboardPageEntitlements.mockResolvedValue({

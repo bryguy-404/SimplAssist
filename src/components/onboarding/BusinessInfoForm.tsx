@@ -7,7 +7,7 @@ import { useCallback, useState } from 'react';
 import type { BusinessType } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { normalizeUsStateCode, US_STATES } from '@/lib/usStates';
-import { primaryCtaInlineClass } from '@/lib/glass';
+import { primaryCtaInlineClass, secondaryCtaClass } from '@/lib/glass';
 import { WebsiteScanLauncher } from '@/components/website-scans/WebsiteScanLauncher';
 import {
   isWebsiteScanReviewable,
@@ -53,6 +53,7 @@ interface BusinessInfoFormProps {
   businessId: string;
   initialData?: Partial<BusinessInfoData>;
   onNext: (data: BusinessInfoData, scrapedData: ScrapedData | null) => void;
+  onBack?: () => void;
   richerScanEnabled?: boolean;
 }
 
@@ -114,6 +115,7 @@ const BUSINESS_TYPE_OPTIONS: { value: BusinessType; label: string }[] = [
 export default function BusinessInfoForm({
   initialData,
   onNext,
+  onBack,
   richerScanEnabled = true,
 }: BusinessInfoFormProps) {
   const [saving, setSaving] = useState(false);
@@ -374,7 +376,17 @@ export default function BusinessInfoForm({
         <p className="text-sm text-red-600 dark:text-red-400">{submitError}</p>
       )}
 
-      <div className="flex justify-end pt-4">
+      <div className={`flex pt-4 ${onBack ? 'justify-between' : 'justify-end'}`}>
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            disabled={saving || scanBlocking || legacyScanning}
+            className={secondaryCtaClass}
+          >
+            Back
+          </button>
+        )}
         <button
           type="submit"
           disabled={saving || scanBlocking || legacyScanning}

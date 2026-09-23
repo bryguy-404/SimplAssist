@@ -42,4 +42,16 @@ describe('BusinessInfoForm website scan rollout', () => {
     expect(markup).toContain('Checking for an existing scan');
     expect(markup).not.toContain('>Scan Website<');
   });
+
+  it('offers Back to plan choice only when the wizard allows it', () => {
+    const props = {
+      businessId: '00000000-0000-4000-8000-000000000001',
+      initialData,
+      richerScanEnabled: false,
+      onNext: vi.fn(),
+    };
+    expect(renderToStaticMarkup(<BusinessInfoForm {...props} />)).not.toContain('>Back<');
+    const markup = renderToStaticMarkup(<BusinessInfoForm {...props} onBack={vi.fn()} />);
+    expect(markup).toMatch(/<button[^>]*type="button"[^>]*>Back<\/button>/);
+  });
 });

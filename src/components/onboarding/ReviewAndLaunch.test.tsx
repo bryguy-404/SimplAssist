@@ -425,6 +425,20 @@ describe("buildOnboardingLaunchRequest", () => {
 });
 
 describe("ReviewAndLaunch Chat Only review", () => {
+  it("explains a locked family choice without suggesting that checkout charged the customer", () => {
+    const markup = renderReview(DEFAULT_REQUEST_BRAND, {
+      ...baseProps,
+      effectivePlan: "chat_only",
+      chatOnly: true,
+      familyChangeRequiresSupport: true,
+    });
+
+    expect(markup).toContain("Switching between Chat Only and texting requires support for this account.");
+    expect(markup).toContain('href="/support?category=billing"');
+    expect(markup).not.toContain("Payment is complete");
+    expect(markup).toContain("Pay $10");
+  });
+
   it("omits every SMS/setup surface even when stale carrier data exists", () => {
     const markup = renderReview(DEFAULT_REQUEST_BRAND, {
       ...baseProps,

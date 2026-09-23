@@ -5,7 +5,10 @@ import {
   SERVICES_FAQS_REQUIRED_MESSAGE,
 } from "@/lib/billing/launch";
 import { finalizePaidCheckout } from "@/lib/billing/finalizePaidCheckout.server";
-import { getOnboardingStateForBusinessId } from "@/lib/onboarding/state";
+import {
+  getOnboardingCheckoutContextForBusinessIdReadOnly,
+  getOnboardingStateForBusinessId,
+} from "@/lib/onboarding/state";
 import {
   hasCarrierRejection,
   REJECTION_SUPPORT_MESSAGE,
@@ -167,6 +170,70 @@ export async function POST(request: NextRequest) {
         },
         { status: 409 },
       );
+    }
+
+    // Only a first, unclaimed direct checkout gets the new setup gate. A
+    // durable checkout/family claim must retain its existing retry identity,
+    // even when the customer never returned from Stripe. Read-only state
+    // checks neither synchronize progress nor provision Telnyx resources.
+    if (
+      !subscription &&
+      business.partner_id === null &&
+      !business.billing_pilot &&
+      !business.billing_comped &&
+      !business.billing_exempt &&
+      shouldEnforceInitialContentQuality(business)
+    ) {
+      const context =
+        await getOnboardingCheckoutContextForBusinessIdReadOnly(business.id);
+      if (!context) {
+        return NextResponse.json(
+          {
+            error: "Could not verify your setup. Please try again.",
+            code: "onboarding_state_unavailable",
+          },
+          { status: 503 },
+        );
+      }
+
+      if (context.freshInitialDirectAcquisition) {
+        const { state } = context;
+        // A caller-controlled mode must not bypass setup or the exact saved
+        // intent claim that onboarding checkout performs atomically.
+        if (mode !== "onboarding") {
+          return NextResponse.json(
+            {
+              error: "Finish setup and continue to payment from onboarding.",
+              code: "onboarding_checkout_required",
+              state,
+            },
+            { status: 409 },
+          );
+        }
+        if (state.currentStep !== "review_submit") {
+          return NextResponse.json(
+            {
+              error: "Complete your setup before continuing to payment.",
+              code: "onboarding_incomplete",
+              state,
+            },
+            { status: 409 },
+          );
+        }
+        if (
+          state.planSelection.position === "start" &&
+          state.planSelection.effectivePlan !== selectedPlan
+        ) {
+          return NextResponse.json(
+            {
+              error: "Your saved onboarding plan does not match this checkout.",
+              code: "onboarding_plan_mismatch",
+              state,
+            },
+            { status: 409 },
+          );
+        }
+      }
     }
 
     // Phase 2 supports Chat Only through onboarding only. Existing paid

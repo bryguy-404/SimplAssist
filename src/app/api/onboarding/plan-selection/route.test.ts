@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   directAcquisition: vi.fn(),
   validChatPrice: vi.fn(),
   isPlanAvailable: vi.fn(),
+  getCheckoutContext: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -22,6 +23,9 @@ vi.mock("@/lib/billing/chatOnlyRollout.server", () => ({
 }));
 vi.mock("@/lib/stripe/config", () => ({
   hasValidChatOnlyStripePrice: mocks.validChatPrice,
+}));
+vi.mock("@/lib/onboarding/state", () => ({
+  getOnboardingCheckoutContextForBusinessIdReadOnly: mocks.getCheckoutContext,
 }));
 vi.mock("@/lib/billing/planAvailability", () => ({
   isPlanAvailable: mocks.isPlanAvailable,
@@ -113,10 +117,56 @@ beforeEach(() => {
     (plan: string) => plan === "sms_only" || plan === "sms_and_chat",
   );
   mocks.rpc.mockResolvedValue({ data: true, error: null });
+  mocks.getCheckoutContext.mockResolvedValue({
+    state: {
+      planSelection: {
+        chatOnlyDirectSalesAvailable: true,
+        familyChangeRequiresSupport: false,
+      },
+    },
+    freshInitialDirectAcquisition: true,
+  });
   queueResults();
 });
 
 describe("POST /api/onboarding/plan-selection", () => {
+  it("rejects Chat Only when read-only policy finds SMS history or a family lock", async () => {
+    mocks.directAcquisition.mockReturnValue(true);
+    mocks.validChatPrice.mockReturnValue(true);
+    queueResults({ data: business(), error: null }, { data: null, error: null });
+    mocks.getCheckoutContext.mockResolvedValue({
+      state: { planSelection: { chatOnlyDirectSalesAvailable: false, familyChangeRequiresSupport: true } },
+      freshInitialDirectAcquisition: false,
+    });
+    const response = await POST(request({ plan: "chat_only" }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "plan_family_transition_not_supported" });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each(["missing", "failed"])("fails closed on %s read-only policy", async (failure) => {
+    mocks.directAcquisition.mockReturnValue(true);
+    mocks.validChatPrice.mockReturnValue(true);
+    queueResults({ data: business(), error: null }, { data: null, error: null });
+    if (failure === "missing") mocks.getCheckoutContext.mockResolvedValue(null);
+    else mocks.getCheckoutContext.mockRejectedValue(new Error("unavailable"));
+    const response = await POST(request({ plan: "chat_only" }));
+    expect(response.status).toBe(503);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it("keeps same-family legacy SMS intent repair independent of Chat policy", async () => {
+    mocks.directAcquisition.mockReturnValue(true);
+    mocks.validChatPrice.mockReturnValue(true);
+    queueResults({ data: business(), error: null }, { data: null, error: null });
+    const response = await POST(request({ plan: "sms_only" }));
+    expect(response.status).toBe(200);
+    expect(mocks.getCheckoutContext).not.toHaveBeenCalled();
+    expect(mocks.rpc).toHaveBeenCalledWith("save_direct_onboarding_plan_intent", expect.objectContaining({
+      p_requested_plan: "sms_only", p_expected_plan: null,
+    }));
+  });
+
   it("applies the workspace gate before parsing input", async () => {
     mocks.requireWorkspaceRouteAccess.mockResolvedValue({
       ok: false,

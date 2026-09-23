@@ -256,7 +256,9 @@ export default function OnboardingPage() {
 
   return (
     <div>
-      <StepProgress currentStep={currentStepNumber} steps={state.steps} />
+      {!(step === 'plan_selection' && state.planSelection.position === 'start') && (
+        <StepProgress currentStep={currentStepNumber} steps={state.steps} />
+      )}
       <ProgressNote state={state} refreshing={refreshing || finalizingCheckout} step={step} />
 
       <div className="transition-opacity duration-200">
@@ -265,6 +267,12 @@ export default function OnboardingPage() {
             businessId={state.businessId}
             initialData={state.businessInfo}
             richerScanEnabled={Boolean(state.capabilities?.richerWebsiteScanEnabled)}
+            onBack={
+              state.planSelection.position === 'start' &&
+              state.planSelection.canChooseDirectPlan
+                ? () => setStep('plan_selection')
+                : undefined
+            }
             onNext={(data, scraped) => {
               // Only a fresh scan updates the captured result. BusinessInfoForm
               // remounts with null scrapedData on back-navigation, so guarding
@@ -348,7 +356,11 @@ export default function OnboardingPage() {
             chatOnlyAvailable={
               state.planSelection.chatOnlyDirectSalesAvailable
             }
-            onBack={() => setStep(previousStepOf(step, state.steps))}
+            onBack={
+              state.planSelection.position === 'start'
+                ? undefined
+                : () => setStep(previousStepOf(step, state.steps))
+            }
             onNext={async () => {
               const nextState = await refreshState({ keepStep: true });
               if (nextState) setStep(displayStepForState(nextState));
@@ -457,6 +469,7 @@ export default function OnboardingPage() {
               state.planSelection.canChooseDirectPlan &&
               state.billing.plan === null
             }
+            familyChangeRequiresSupport={state.planSelection.familyChangeRequiresSupport}
             pendingPhoneNumberFailureReason={state.pendingPhoneNumberFailureReason}
             onEditStep={(targetStep) => setStep(numberToStep(targetStep))}
             onEditPlan={() => setStep('plan_selection')}

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   attemptPaidLaunch: vi.fn(),
   getBusinessContentQuality: vi.fn(),
   getOnboardingStateForBusinessId: vi.fn(),
+  getOnboardingCheckoutContextForBusinessIdReadOnly: vi.fn(),
   createCheckoutSession: vi.fn(),
   finalizePaidCheckout: vi.fn(),
   getExistingTelnyxBrandLinkState: vi.fn(),
@@ -82,6 +83,8 @@ vi.mock("@/lib/onboarding/contentQuality.server", () => ({
 }));
 vi.mock("@/lib/onboarding/state", () => ({
   getOnboardingStateForBusinessId: mocks.getOnboardingStateForBusinessId,
+  getOnboardingCheckoutContextForBusinessIdReadOnly:
+    mocks.getOnboardingCheckoutContextForBusinessIdReadOnly,
 }));
 vi.mock("@/lib/stripe/checkout", () => ({
   createCheckoutSession: mocks.createCheckoutSession,
@@ -213,6 +216,10 @@ beforeEach(() => {
   mocks.attemptPaidLaunch.mockResolvedValue({ status: "submitted" });
   mocks.getBusinessContentQuality.mockResolvedValue({ ready: true });
   mocks.getOnboardingStateForBusinessId.mockResolvedValue({ step: "complete" });
+  mocks.getOnboardingCheckoutContextForBusinessIdReadOnly.mockResolvedValue({
+    state: { currentStep: "review_submit" },
+    freshInitialDirectAcquisition: false,
+  });
   mocks.createCheckoutSession.mockResolvedValue(
     "https://checkout.test/session",
   );
@@ -252,6 +259,123 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+});
+
+describe("first checkout requires completed onboarding", () => {
+  function configureFresh(
+    plan: "chat_only" | "sms_only" | "sms_and_chat" | "full" = "sms_and_chat",
+    currentStep = "review_submit",
+  ) {
+    vi.stubEnv("CHAT_ONLY_DIRECT_SALES_ENABLED", "1");
+    mocks.hasValidChatOnlyStripePrice.mockReturnValue(true);
+    mocks.isPlanAvailable.mockReturnValue(true);
+    queueResults(
+      { data: { ...BUSINESS, billing_exempt: false, onboarding_selected_plan: plan }, error: null },
+      { data: null, error: null },
+    );
+    const state = {
+      currentStep,
+      planSelection: { position: "start", effectivePlan: plan },
+    };
+    mocks.getOnboardingCheckoutContextForBusinessIdReadOnly.mockResolvedValue({
+      state,
+      freshInitialDirectAcquisition: true,
+    });
+    return state;
+  }
+
+  it.each([
+    "plan_selection", "business_info", "business_hours", "services_faqs",
+    "ai_settings", "legal_verification", "sms_use_case", "phone_number",
+  ])("blocks missing %s before any payable or provider work", async (step) => {
+    const state = configureFresh("sms_and_chat", step);
+    const response = await POST(request());
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "onboarding_incomplete", state });
+    expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
+    expect(mocks.stripePriceIdForPlan).not.toHaveBeenCalled();
+    expect(mocks.attemptPaidLaunch).not.toHaveBeenCalled();
+    expect(mocks.getExistingTelnyxBrandLinkState).not.toHaveBeenCalled();
+    expect(mocks.getOnboardingStateForBusinessId).not.toHaveBeenCalled();
+  });
+
+  it.each(["chat_only", "sms_only", "sms_and_chat", "full"] as const)(
+    "opens checkout only after %s setup is ready",
+    async (plan) => {
+      configureFresh(plan);
+      const response = await POST(request("onboarding", plan));
+      expect(response.status).toBe(200);
+      expect(mocks.createCheckoutSession).toHaveBeenCalledWith(
+        BUSINESS.id, plan, expect.any(String), plan === "chat_only" ? null : "price_setup",
+        expect.stringContaining("/onboarding?checkout=success"),
+        expect.stringContaining("/onboarding?checkout=canceled"), "onboarding", true,
+      );
+    },
+  );
+
+  it.each(["chat_only", "sms_and_chat"] as const)(
+    "does not let %s use billing mode to bypass initial onboarding",
+    async (plan) => {
+      const state = configureFresh(plan, "business_info");
+      const response = await POST(request("billing", plan));
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ code: "onboarding_checkout_required", state });
+      expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
+    },
+  );
+
+  it("treats an omitted mode as billing and rejects it for a first checkout", async () => {
+    configureFresh();
+    const response = await POST(new NextRequest("http://localhost/api/billing/checkout", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ plan: "sms_and_chat" }),
+    }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "onboarding_checkout_required" });
+    expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects a different plan even when saved setup is otherwise complete", async () => {
+    configureFresh("chat_only");
+    const response = await POST(request("onboarding", "sms_and_chat"));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "onboarding_plan_mismatch" });
+    expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when read-only setup cannot be resolved", async () => {
+    configureFresh();
+    mocks.getOnboardingCheckoutContextForBusinessIdReadOnly.mockResolvedValue(null);
+    const response = await POST(request());
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ code: "onboarding_state_unavailable" });
+    expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("preserves existing locked billing-mode checkout identity and recovery", async () => {
+    configureFresh();
+    mocks.getOnboardingCheckoutContextForBusinessIdReadOnly.mockResolvedValue({
+      freshInitialDirectAcquisition: false,
+      state: { currentStep: "business_info" },
+    });
+    const response = await POST(request("billing"));
+    expect(response.status).toBe(200);
+    expect(mocks.createCheckoutSession).toHaveBeenCalledWith(
+      BUSINESS.id, "sms_and_chat", "price_growth", "price_setup",
+      expect.stringContaining("/billing?success=true"),
+      expect.stringContaining("/billing?canceled=true"), "billing", false,
+    );
+  });
+
+  it("requires completed legacy SMS setup even when Chat Only sales are off", async () => {
+    configureFresh("sms_only", "business_hours");
+    vi.stubEnv("CHAT_ONLY_DIRECT_SALES_ENABLED", "0");
+    mocks.hasValidChatOnlyStripePrice.mockReturnValue(false);
+    const response = await POST(request("onboarding", "sms_only"));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "onboarding_incomplete" });
+    expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/billing/checkout onboarding precedence", () => {

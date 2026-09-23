@@ -65,4 +65,21 @@ describe("PlanSelectionOption", () => {
     expect(markup).toContain('type="radio"');
     expect(markup).not.toContain("Notify Me When It Launches");
   });
+
+  it("explains the later payment timing on the early choice screen", () => {
+    const markup = renderToStaticMarkup(
+      <PlanSelectionOption
+        inputName="plan"
+        planKey="sms_and_chat"
+        plan={SUBSCRIPTION_PLANS.sms_and_chat}
+        selected={false}
+        recommended
+        paymentTiming="at checkout"
+        onSelect={vi.fn()}
+      />,
+    );
+
+    expect(markup).toContain(`$${SUBSCRIPTION_PLANS.sms_and_chat.price + 25} at checkout`);
+    expect(markup).not.toContain("today");
+  });
 });

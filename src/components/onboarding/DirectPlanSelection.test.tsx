@@ -36,14 +36,14 @@ const PARTNER_BRAND: RequestBrand = {
 };
 
 function renderSelection(args: {
-  initialPlan: "chat_only" | "sms_and_chat" | null;
+  initialPlan: "chat_only" | "sms_only" | "sms_and_chat" | "full" | null;
   chatOnlyAvailable: boolean;
+  onBack?: () => void;
 }) {
   return renderToStaticMarkup(
     <BrandProvider requestBrand={PARTNER_BRAND}>
       <DirectPlanSelection
         {...args}
-        onBack={vi.fn()}
         onNext={vi.fn()}
       />
     </BrandProvider>,
@@ -69,13 +69,15 @@ describe("DirectPlanSelection", () => {
     expect(markup).toContain("Growth / SMS + Web Chat");
     expect(markup).toContain("Pro / Full Suite");
     expect(markup).not.toContain("SimplAssist");
-    expect(markup).toContain("$10 today");
+    expect(markup).toContain("$10 at checkout");
+    expect(markup).toContain("Choose your plan now. Payment comes after you finish setup.");
+    expect(markup).not.toContain("today");
     expect(markup).toContain("200 AI replies/month");
     expect(markup).toContain("No setup or SMS activation fee");
     expect(radio(markup, "chat_only")).toContain('checked=""');
   });
 
-  it("does not render Chat Only when the server availability flag is false", () => {
+  it("keeps an unavailable saved Chat Only choice from silently becoming a texting choice", () => {
     const markup = renderSelection({
       initialPlan: "chat_only",
       chatOnlyAvailable: false,
@@ -83,27 +85,56 @@ describe("DirectPlanSelection", () => {
 
     expect(radio(markup, "chat_only")).toBeUndefined();
     expect(markup).not.toContain("No setup or SMS activation fee");
-    expect(radio(markup, "sms_and_chat")).toContain('checked=""');
+    expect(markup).not.toContain('checked=""');
+    expect(markup).toContain("Your saved plan is temporarily unavailable.");
+    expect(markup).toMatch(/<button[^>]*disabled=""[^>]*>Continue setup<\/button>/);
   });
 
-  it("keeps Growth selected and recommended by default when Chat Only is enabled", () => {
+  it("requires deliberate selection while keeping Growth recommended", () => {
     const markup = renderSelection({
       initialPlan: null,
       chatOnlyAvailable: true,
     });
 
-    expect(radio(markup, "sms_and_chat")).toContain('checked=""');
-    expect(radio(markup, "chat_only")).not.toContain('checked=""');
+    expect(markup).not.toContain('checked=""');
+    expect(markup).toMatch(/<button[^>]*disabled=""[^>]*>Continue setup<\/button>/);
     expect(markup).toContain("Recommended");
+    expect(markup).not.toContain(">Back<");
+    expect(markup).not.toContain("one-time setup and SMS activation fee");
   });
 
-  it("resets a mounted Chat Only selection when availability is withdrawn", () => {
+  it.each(["chat_only", "sms_only", "sms_and_chat", "full"] as const)(
+    "restores the saved available %s selection on return",
+    (initialPlan) => {
+      const markup = renderSelection({ initialPlan, chatOnlyAvailable: true });
+      expect(radio(markup, initialPlan)).toContain('checked=""');
+      expect(markup).not.toMatch(/<button[^>]*disabled=""[^>]*>Continue setup<\/button>/);
+    },
+  );
+
+  it("keeps Back available for the legacy selector", () => {
+    expect(renderSelection({
+      initialPlan: "sms_only",
+      chatOnlyAvailable: false,
+      onBack: vi.fn(),
+    })).toContain(">Back<");
+  });
+
+  it("clears a mounted unavailable selection without choosing a different plan", () => {
     expect(
       reconcileDirectPlanSelection({
         currentPlan: "chat_only",
         initialPlan: "chat_only",
         selectablePlans: ["sms_only", "sms_and_chat", "full"],
       }),
-    ).toBe("sms_and_chat");
+    ).toBeNull();
+  });
+
+  it("preserves an explicit local selection when no saved plan exists", () => {
+    expect(reconcileDirectPlanSelection({
+      currentPlan: "sms_only",
+      initialPlan: null,
+      selectablePlans: ["chat_only", "sms_only", "sms_and_chat", "full"],
+    })).toBe("sms_only");
   });
 });

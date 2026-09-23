@@ -37,19 +37,19 @@ export const LEGACY_SMS_ONBOARDING_STEPS: OnboardingStep[] = [
 ];
 
 export const DIRECT_CHAT_ONBOARDING_STEPS: OnboardingStep[] = [
+  "plan_selection",
   "business_info",
   "business_hours",
   "services_faqs",
-  "plan_selection",
   "ai_settings",
   "review_submit",
 ];
 
 export const ONBOARDING_STEPS: OnboardingStep[] = [
+  "plan_selection",
   "business_info",
   "business_hours",
   "services_faqs",
-  "plan_selection",
   "ai_settings",
   "legal_verification",
   "sms_use_case",
@@ -175,7 +175,11 @@ export type OnboardingPlanSource =
   | "direct_intent"
   | "family_lock";
 
+export type OnboardingPlanSelectionPosition = "start" | "after_knowledge" | null;
+
 export interface OnboardingPlanSelectionSnapshot {
+  position: OnboardingPlanSelectionPosition;
+  familyChangeRequiresSupport: boolean;
   effectivePlan: SubscriptionPlan | null;
   source: OnboardingPlanSource | null;
   directIntent: SubscriptionPlan | null;
@@ -235,6 +239,7 @@ export interface OnboardingState {
 export function onboardingStepsForPlan(args: {
   includePlanSelection: boolean;
   effectivePlan: SubscriptionPlan | null;
+  planSelectionPosition?: OnboardingPlanSelectionPosition;
 }): OnboardingStep[] {
   if (!args.includePlanSelection) {
     return args.effectivePlan === "chat_only"
@@ -244,9 +249,20 @@ export function onboardingStepsForPlan(args: {
       : LEGACY_SMS_ONBOARDING_STEPS;
   }
 
-  return args.effectivePlan === "chat_only"
+  const steps = args.effectivePlan === "chat_only"
     ? DIRECT_CHAT_ONBOARDING_STEPS
     : ONBOARDING_STEPS;
+  if (args.planSelectionPosition === "start" && !args.effectivePlan) {
+    return ["plan_selection"];
+  }
+  if (args.planSelectionPosition === "after_knowledge") {
+    const legacyOrder: OnboardingStep[] = steps.filter(
+      (step) => step !== "plan_selection",
+    );
+    legacyOrder.splice(legacyOrder.indexOf("services_faqs") + 1, 0, "plan_selection");
+    return legacyOrder;
+  }
+  return steps;
 }
 
 export function onboardingStepNumber(

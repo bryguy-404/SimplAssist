@@ -25,6 +25,8 @@ interface PlanSelectionOptionProps {
    */
   availabilityOverride?: "available" | "coming_soon" | "hidden";
   setupFeeCents?: number;
+  paymentTiming?: "today" | "at checkout";
+  disabled?: boolean;
 }
 
 export function PlanSelectionOption({
@@ -36,6 +38,8 @@ export function PlanSelectionOption({
   onSelect,
   availabilityOverride,
   setupFeeCents = SETUP_FEE_CENTS,
+  paymentTiming = "today",
+  disabled = false,
 }: PlanSelectionOptionProps) {
   const visible = availabilityOverride
     ? availabilityOverride !== "hidden"
@@ -45,7 +49,7 @@ export function PlanSelectionOption({
   const available = availabilityOverride
     ? availabilityOverride === "available"
     : isPlanAvailable(planKey);
-  const today = plan.price + setupFeeCents / 100;
+  const firstPaymentTotal = plan.price + setupFeeCents / 100;
   const includedAllowance =
     plan.includedSmsParts > 0
       ? `${plan.includedSmsParts.toLocaleString()} SMS parts/month`
@@ -80,7 +84,7 @@ export function PlanSelectionOption({
 
         <span className="flex items-center gap-3">
           <span className="whitespace-nowrap font-medium text-stone-700 dark:text-[#d8d8d8]">
-            {available ? `$${today} today` : `$${plan.price}/mo`}
+            {available ? `$${firstPaymentTotal} ${paymentTiming}` : `$${plan.price}/mo`}
           </span>
           {available && (
             <span
@@ -139,6 +143,7 @@ export function PlanSelectionOption({
         name={inputName}
         value={planKey}
         checked={selected}
+        disabled={disabled}
         onChange={() => onSelect(planKey)}
         className="sr-only"
       />

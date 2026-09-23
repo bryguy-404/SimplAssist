@@ -37,6 +37,7 @@ import {
 } from "@/lib/messaging/registration/riskScreening";
 import { evaluateContentQuality } from "@/lib/contentQuality";
 import { isRicherWebsiteScanEnabledForBusiness } from "@/lib/website-scans/rollout.server";
+import { hasSmsProviderProvenance } from "./acquisitionPolicy";
 import {
   onboardingStepsForPlan,
   onboardingStepNumber,
@@ -45,6 +46,7 @@ import {
   type OnboardingBusinessInfo,
   type OnboardingFaq,
   type OnboardingHours,
+  type OnboardingPlanSelectionPosition,
   type OnboardingService,
   type OnboardingState,
 } from "./types";
@@ -140,6 +142,9 @@ type BusinessRow = {
   telnyx_brand_id: string | null;
   telnyx_campaign_id: string | null;
   telnyx_messaging_profile_id: string | null;
+  telnyx_voice_application_id: string | null;
+  active_telnyx_release_run_id: string | null;
+  telnyx_resource_state: string | null;
   brand_status: RegistrationStatus | null;
   brand_status_updated_at: string | null;
   brand_rejection_reason: string | null;
@@ -200,6 +205,11 @@ type PlanFamilyLockRow = {
   family: string;
   claimed_by: string;
 };
+
+export interface OnboardingCheckoutContext {
+  state: OnboardingState;
+  freshInitialDirectAcquisition: boolean;
+}
 
 export async function getOnboardingStateForOwner(
   ownerId: string
@@ -291,6 +301,9 @@ async function getOnboardingStateForOwnerInternal(
         "telnyx_brand_id",
         "telnyx_campaign_id",
         "telnyx_messaging_profile_id",
+        "telnyx_voice_application_id",
+        "active_telnyx_release_run_id",
+        "telnyx_resource_state",
         "brand_status",
         "brand_status_updated_at",
         "brand_rejection_reason",
@@ -312,6 +325,21 @@ async function getOnboardingStateForOwnerInternal(
 export async function getOnboardingStateForBusinessId(
   businessId: string
 ): Promise<OnboardingState | null> {
+  const context = await getOnboardingContextForBusinessId(businessId, true);
+  return context?.state ?? null;
+}
+
+/** Checkout validation must not synchronize progress or start provider work. */
+export async function getOnboardingCheckoutContextForBusinessIdReadOnly(
+  businessId: string,
+): Promise<OnboardingCheckoutContext | null> {
+  return getOnboardingContextForBusinessId(businessId, false);
+}
+
+async function getOnboardingContextForBusinessId(
+  businessId: string,
+  allowSideEffects: boolean,
+): Promise<OnboardingCheckoutContext | null> {
   const { data: business, error } = await supabaseAdmin
     .from("businesses")
     .select(
@@ -386,6 +414,9 @@ export async function getOnboardingStateForBusinessId(
         "telnyx_brand_id",
         "telnyx_campaign_id",
         "telnyx_messaging_profile_id",
+        "telnyx_voice_application_id",
+        "active_telnyx_release_run_id",
+        "telnyx_resource_state",
         "brand_status",
         "brand_status_updated_at",
         "brand_rejection_reason",
@@ -401,13 +432,20 @@ export async function getOnboardingStateForBusinessId(
     return null;
   }
 
-  return getOnboardingStateForBusiness(business);
+  return getOnboardingContextForBusiness(business, allowSideEffects);
 }
 
 async function getOnboardingStateForBusiness(
   business: BusinessRow,
   allowSideEffects = true
 ): Promise<OnboardingState> {
+  return (await getOnboardingContextForBusiness(business, allowSideEffects)).state;
+}
+
+async function getOnboardingContextForBusiness(
+  business: BusinessRow,
+  allowSideEffects: boolean,
+): Promise<OnboardingCheckoutContext> {
   const assignedPartnerNamePromise = resolveAssignedPartnerName(
     business.partner_id
   );
@@ -418,7 +456,7 @@ async function getOnboardingStateForBusiness(
     { data: faqs },
     { data: aiSettings },
     { data: widgetConfig },
-    { data: phoneNumber },
+    phoneNumberResult,
     subscriptionResult,
     familyLockResult,
     handledByName,
@@ -484,6 +522,12 @@ async function getOnboardingStateForBusiness(
     );
   }
   const subscription = subscriptionResult.data;
+  if (phoneNumberResult.error) {
+    throw new Error(
+      `[onboarding:state] Failed to read phone-number ownership for ${business.id}: ${phoneNumberResult.error.message}`,
+    );
+  }
+  const phoneNumber = phoneNumberResult.data;
   if (familyLockResult.error) {
     throw new Error(
       `[onboarding:state] Failed to read plan-family lock for ${business.id}: ${familyLockResult.error.message}`,
@@ -604,6 +648,26 @@ async function getOnboardingStateForBusiness(
     directAcquisitionAvailable &&
     !subscription &&
     !hasDurableChatFamilyLock;
+  const smsProviderProvenance =
+    smsReadiness.smsReady ||
+    hasSmsProviderProvenance({
+      business,
+      hasActivePhoneNumber: Boolean(
+        phoneNumber?.phone_number || smsReadiness.phoneNumber,
+      ),
+    });
+  const freshInitialDirectAcquisition =
+    directAcquisitionBusinessEligible &&
+    !subscription &&
+    !familyLock &&
+    !smsProviderProvenance &&
+    !business.onboarding_completed_at;
+  const planSelectionPosition: OnboardingPlanSelectionPosition =
+    !canChooseDirectPlan
+      ? null
+      : freshInitialDirectAcquisition
+        ? "start"
+        : "after_knowledge";
   const chatOnlySubscriptionStatus =
     subscription?.plan === "chat_only" ? subscription.status : null;
   const chatOnlyCheckoutAvailable =
@@ -633,6 +697,7 @@ async function getOnboardingStateForBusiness(
   const steps = onboardingStepsForPlan({
     includePlanSelection,
     effectivePlan,
+    planSelectionPosition,
   });
   const derivedStep = deriveOnboardingStep({
     business,
@@ -647,6 +712,7 @@ async function getOnboardingStateForBusiness(
       riskReview.status === "passed" || riskReview.status === "admin_approved",
     effectivePlan,
     requiresDirectPlanSelection: canChooseDirectPlan,
+    planSelectionPosition,
     chatOnlyAuthorityActive,
   });
   const coreOnboardingComplete = hasCoreOnboardingFacts({
@@ -679,7 +745,7 @@ async function getOnboardingStateForBusiness(
     });
   }
 
-  return {
+  const state: OnboardingState = {
     businessId: business.id,
     capabilities: {
       richerWebsiteScanEnabled:
@@ -717,12 +783,18 @@ async function getOnboardingStateForBusiness(
       currentPeriodEnd: subscription?.current_period_end ?? null,
     },
     planSelection: {
+      position: planSelectionPosition,
+      familyChangeRequiresSupport:
+        directBillingFlow && Boolean(familyLock || smsProviderProvenance),
       effectivePlan,
       source: planSource,
       directIntent,
       canChooseDirectPlan,
       chatOnlyDirectSalesAvailable:
-        canChooseDirectPlan && directAcquisitionAvailable,
+        canChooseDirectPlan &&
+        directAcquisitionAvailable &&
+        familyLock?.family !== "sms" &&
+        !smsProviderProvenance,
       chatOnlyCheckoutAvailable,
       chatOnlyCheckoutPaused,
     },
@@ -755,6 +827,7 @@ async function getOnboardingStateForBusiness(
       riskReview,
     },
   };
+  return { state, freshInitialDirectAcquisition };
 }
 
 function normalizeBusinessInfo(business: BusinessRow): OnboardingBusinessInfo {
@@ -924,6 +997,7 @@ export function deriveOnboardingStep(args: {
   riskCleared: boolean;
   effectivePlan?: SubscriptionPlan | null;
   requiresDirectPlanSelection?: boolean;
+  planSelectionPosition?: OnboardingPlanSelectionPosition;
   chatOnlyAuthorityActive?: boolean;
 }): OnboardingStep {
   const {
@@ -938,8 +1012,17 @@ export function deriveOnboardingStep(args: {
     riskCleared,
     effectivePlan = null,
     requiresDirectPlanSelection = false,
+    planSelectionPosition = "after_knowledge",
     chatOnlyAuthorityActive = false,
   } = args;
+
+  if (
+    planSelectionPosition === "start" &&
+    requiresDirectPlanSelection &&
+    !effectivePlan
+  ) {
+    return "plan_selection";
+  }
 
   if (business.primary_goal === null) {
     if (!hasBusinessInfo(business)) return "business_info";

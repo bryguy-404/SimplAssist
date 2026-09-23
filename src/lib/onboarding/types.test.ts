@@ -8,6 +8,39 @@ import {
 } from "./types";
 
 describe("plan-aware onboarding progress", () => {
+  it("shows only the plan choice before a new direct customer chooses a branch", () => {
+    expect(onboardingStepsForPlan({
+      includePlanSelection: true,
+      effectivePlan: null,
+      planSelectionPosition: "start",
+    })).toEqual(["plan_selection"]);
+  });
+
+  it("puts plan choice first for either selected direct branch", () => {
+    for (const effectivePlan of ["chat_only", "sms_only"] as const) {
+      const steps = onboardingStepsForPlan({
+        includePlanSelection: true,
+        effectivePlan,
+        planSelectionPosition: "start",
+      });
+      expect(steps.slice(0, 5)).toEqual([
+        "plan_selection", "business_info", "business_hours", "services_faqs", "ai_settings",
+      ]);
+    }
+  });
+
+  it("retains the late SMS selector for locked legacy recovery", () => {
+    const steps = onboardingStepsForPlan({
+      includePlanSelection: true,
+      effectivePlan: null,
+      planSelectionPosition: "after_knowledge",
+    });
+    expect(steps.slice(0, 5)).toEqual([
+      "business_info", "business_hours", "services_faqs", "plan_selection", "ai_settings",
+    ]);
+    expect(steps.at(-1)).toBe("carrier_review");
+  });
+
   it("keeps existing paid direct and partner SMS progress at nine steps", () => {
     const paidDirect = onboardingStepsForPlan({
       includePlanSelection: false,

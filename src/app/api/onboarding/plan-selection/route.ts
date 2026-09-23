@@ -4,6 +4,7 @@ import { z } from "zod";
 import { isChatOnlyDirectAcquisitionEnabledForBusiness } from "@/lib/billing/chatOnlyRollout.server";
 import { isPlanAvailable } from "@/lib/billing/planAvailability";
 import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
+import { getOnboardingCheckoutContextForBusinessIdReadOnly } from "@/lib/onboarding/state";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { hasValidChatOnlyStripePrice } from "@/lib/stripe/config";
 import type {
@@ -145,6 +146,37 @@ export async function POST(request: NextRequest) {
       { error: "That plan is not available for selection" },
       { status: 403 },
     );
+  }
+
+  if (plan === "chat_only") {
+    // Mirror the server-rendered options, including actual SMS provider
+    // history. The atomic writer still protects against a concurrent family
+    // claim; this read must never synchronize progress or provision resources.
+    let context;
+    try {
+      context = await getOnboardingCheckoutContextForBusinessIdReadOnly(businessId);
+    } catch {
+      context = null;
+    }
+    if (!context) {
+      return NextResponse.json(
+        { error: "Could not verify plan selection right now" },
+        { status: 503 },
+      );
+    }
+    if (!context.state.planSelection.chatOnlyDirectSalesAvailable) {
+      return NextResponse.json(
+        {
+          error: context.state.planSelection.familyChangeRequiresSupport
+            ? "Switching between Chat Only and texting requires support for this account."
+            : "That plan is not available for selection",
+          ...(context.state.planSelection.familyChangeRequiresSupport
+            ? { code: "plan_family_transition_not_supported" }
+            : {}),
+        },
+        { status: context.state.planSelection.familyChangeRequiresSupport ? 409 : 403 },
+      );
+    }
   }
 
   const { data: updated, error: updateError } = await supabaseAdmin.rpc(

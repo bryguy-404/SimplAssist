@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
+  update: vi.fn(),
   getSmsReadinessForBusiness: vi.fn(),
   getSmsReadinessForBusinessReadOnly: vi.fn(),
   directAcquisition: vi.fn(),
@@ -32,6 +33,7 @@ vi.mock("@/lib/stripe/config", () => ({
 }));
 
 import {
+  getOnboardingCheckoutContextForBusinessIdReadOnly,
   getOnboardingStateForBusinessId,
   getOnboardingStateForOwnerReadOnly,
 } from "./state";
@@ -43,7 +45,10 @@ function makeQuery(table: string, data: unknown, error: unknown) {
       mocks.selectedColumns.set(table, columns);
       return query;
     }),
-    update: vi.fn(() => query),
+    update: vi.fn((values) => {
+      mocks.update(values);
+      return query;
+    }),
     eq: vi.fn(() => query),
     order: vi.fn(() => query),
     limit: vi.fn(() => query),
@@ -57,6 +62,7 @@ function makeQuery(table: string, data: unknown, error: unknown) {
 describe("onboarding knowledge provenance resume loading", () => {
   beforeEach(() => {
     mocks.from.mockReset();
+    mocks.update.mockReset();
     mocks.getSmsReadinessForBusiness.mockReset();
     mocks.getSmsReadinessForBusinessReadOnly.mockReset();
     mocks.directAcquisition.mockReset();
@@ -224,6 +230,223 @@ describe("onboarding knowledge provenance resume loading", () => {
       handledByName: null,
     });
     expect(mocks.from).not.toHaveBeenCalledWith("partners");
+  });
+
+  it("returns a fresh checkout context without synchronizing progress or provider state", async () => {
+    mocks.directAcquisition.mockReturnValue(true);
+    mocks.validChatPrice.mockReturnValue(true);
+
+    const context = await getOnboardingCheckoutContextForBusinessIdReadOnly("business-1");
+
+    expect(context).toMatchObject({
+      freshInitialDirectAcquisition: true,
+      state: {
+        currentStep: "plan_selection",
+        steps: ["plan_selection"],
+        planSelection: {
+          position: "start",
+          familyChangeRequiresSupport: false,
+          canChooseDirectPlan: true,
+          chatOnlyDirectSalesAvailable: true,
+        },
+      },
+    });
+    expect(mocks.from.mock.calls.filter(([table]) => table === "businesses")).toHaveLength(1);
+    expect(mocks.getSmsReadinessForBusinessReadOnly).toHaveBeenCalledOnce();
+    expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it("classifies initial direct checkout independently of the acquisition rollout", async () => {
+    configureCoreReadyBusiness();
+    const context = await getOnboardingCheckoutContextForBusinessIdReadOnly("business-1");
+    expect(context?.freshInitialDirectAcquisition).toBe(true);
+    expect(context?.state.planSelection.position).toBeNull();
+  });
+
+  it.each([
+    { missing: "business info", step: "business_info", business: { name: "My Business" } },
+    { missing: "hours", step: "business_hours", table: "business_hours", rows: [] },
+    { missing: "knowledge", step: "services_faqs", table: "services", rows: [] },
+    { missing: "AI settings", step: "ai_settings", table: "ai_settings", rows: null },
+    { missing: "primary goal", step: "ai_settings", business: { primary_goal: null } },
+  ])("read-only checkout context identifies missing $missing from saved facts", async ({ step, business, table, rows }) => {
+    configureCoreReadyBusiness({ onboarding_selected_plan: "chat_only", ...business });
+    if (table) mocks.rowsByTable[table] = rows;
+    mocks.directAcquisition.mockReturnValue(true);
+    mocks.validChatPrice.mockReturnValue(true);
+
+    const context = await getOnboardingCheckoutContextForBusinessIdReadOnly("business-1");
+    expect(context?.freshInitialDirectAcquisition).toBe(true);
+    expect(context?.state.currentStep).toBe(step);
+    expect(context?.state.dashboardReady).toBe(false);
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+    expect(mocks.getSmsReadinessForBusinessReadOnly).not.toHaveBeenCalled();
+  });
+
+  it("read-only checkout context requires SMS-specific setup after shared setup", async () => {
+    configureCoreReadyBusiness({ onboarding_selected_plan: "sms_only", primary_goal: "book" });
+    mocks.directAcquisition.mockReturnValue(true);
+    mocks.validChatPrice.mockReturnValue(true);
+    const legal = await getOnboardingCheckoutContextForBusinessIdReadOnly("business-1");
+    expect(legal?.state.currentStep).toBe("legal_verification");
+
+    configureCoreReadyBusiness({
+      onboarding_selected_plan: "sms_only",
+      has_ein: true,
+      legal_business_name: "Ready Business LLC",
+      business_entity_type: "llc",
+      business_registration_state: "IN",
+      ein: "12-3456789",
+      authorized_rep_name: "Test Owner",
+      authorized_rep_title: "Owner",
+      authorized_rep_email: "owner@example.test",
+      authorized_rep_phone: "+13175550124",
+    });
+    const compliance = await getOnboardingCheckoutContextForBusinessIdReadOnly("business-1");
+    expect(compliance?.state.currentStep).toBe("sms_use_case");
+    expect(compliance?.freshInitialDirectAcquisition).toBe(true);
+
+    configureCoreReadyBusiness({
+      a2p_risk_review_status: "passed",
+      a2p_risk_review_input_hash: "risk-hash",
+      compliance_info_completed_at: "2026-09-23T00:00:00Z",
+      use_case_description: "Customer care",
+      estimated_monthly_volume: "under_1k",
+      opt_in_description: "Website form",
+      sample_messages: ["One", "Two", "Three"],
+    });
+    const phone = await getOnboardingCheckoutContextForBusinessIdReadOnly("business-1");
+    expect(phone?.state.currentStep).toBe("phone_number");
+
+    configureCoreReadyBusiness({ pending_phone_number: "+13175550124" });
+    const ready = await getOnboardingCheckoutContextForBusinessIdReadOnly("business-1");
+    expect(ready?.state.currentStep).toBe("review_submit");
+    expect(ready?.freshInitialDirectAcquisition).toBe(true);
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it("keeps acquisition rollback separate from a support-required family lock", async () => {
+    configureCoreReadyBusiness({ onboarding_selected_plan: "chat_only" });
+    const unlocked = await getOnboardingCheckoutContextForBusinessIdReadOnly("business-1");
+    expect(unlocked?.state.planSelection).toMatchObject({
+      position: null,
+      chatOnlyCheckoutPaused: true,
+      familyChangeRequiresSupport: false,
+    });
+    expect(unlocked?.freshInitialDirectAcquisition).toBe(true);
+
+    mocks.rowsByTable.business_plan_family_locks = { family: "chat_only", claimed_by: "direct_checkout" };
+    const locked = await getOnboardingCheckoutContextForBusinessIdReadOnly("business-1");
+    expect(locked?.freshInitialDirectAcquisition).toBe(false);
+    expect(locked?.state.planSelection.familyChangeRequiresSupport).toBe(true);
+    expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+    expect(mocks.getSmsReadinessForBusinessReadOnly).not.toHaveBeenCalled();
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it("excludes subscription authority from first acquisition", async () => {
+    configureCoreReadyBusiness();
+    mocks.rowsByTable.subscriptions = { plan: "sms_only", status: "active" };
+    const context = await getOnboardingCheckoutContextForBusinessIdReadOnly("business-1");
+    expect(context?.freshInitialDirectAcquisition).toBe(false);
+    expect(context?.state.planSelection.position).toBeNull();
+  });
+
+  it("returns no checkout context for an unreadable or deleted business", async () => {
+    mocks.errorsByTable.businesses = { message: "business unavailable" };
+    expect(await getOnboardingCheckoutContextForBusinessIdReadOnly("business-1")).toBeNull();
+    mocks.errorsByTable = {};
+    configureCoreReadyBusiness({ deleted_at: "2026-09-23T00:00:00Z" });
+    expect(await getOnboardingCheckoutContextForBusinessIdReadOnly("business-1")).toBeNull();
+  });
+
+  it("preserves a purchased SMS family's late selector when no intent has been saved", async () => {
+    configureCoreReadyBusiness({ onboarding_selected_plan: null });
+    mocks.directAcquisition.mockReturnValue(true);
+    mocks.validChatPrice.mockReturnValue(true);
+    mocks.rowsByTable.business_plan_family_locks = { family: "sms", claimed_by: "direct_checkout" };
+
+    const context = await getOnboardingCheckoutContextForBusinessIdReadOnly("business-1");
+    expect(context).toMatchObject({
+      freshInitialDirectAcquisition: false,
+      state: {
+        currentStep: "plan_selection",
+        planSelection: {
+          position: "after_knowledge",
+          familyChangeRequiresSupport: true,
+          canChooseDirectPlan: true,
+          chatOnlyDirectSalesAvailable: false,
+        },
+      },
+    });
+    expect(context?.state.steps.slice(0, 5)).toEqual([
+      "business_info", "business_hours", "services_faqs", "plan_selection", "ai_settings",
+    ]);
+
+    configureCoreReadyBusiness({ onboarding_selected_plan: "sms_only" });
+    const saved = await getOnboardingCheckoutContextForBusinessIdReadOnly("business-1");
+    expect(saved?.state.planSelection).toMatchObject({
+      effectivePlan: "sms_only",
+      position: "after_knowledge",
+      canChooseDirectPlan: true,
+    });
+    expect(saved?.state.currentStep).toBe("legal_verification");
+  });
+
+  it.each([
+    { telnyx_brand_id: "brand-1" },
+    { telnyx_campaign_id: "campaign-1" },
+    { telnyx_messaging_profile_id: "profile-1" },
+    { telnyx_voice_application_id: "voice-1" },
+    { telnyx_resource_state: "parked" },
+    { onboarding_registration_status: "submitting" },
+  ])("keeps provider-owned accounts out of initial acquisition: %j", async (overrides) => {
+    configureCoreReadyBusiness(overrides);
+    mocks.directAcquisition.mockReturnValue(true);
+    mocks.validChatPrice.mockReturnValue(true);
+    const context = await getOnboardingCheckoutContextForBusinessIdReadOnly("business-1");
+    expect(context?.freshInitialDirectAcquisition).toBe(false);
+    expect(context?.state.planSelection).toMatchObject({
+      position: "after_knowledge",
+      familyChangeRequiresSupport: true,
+      chatOnlyDirectSalesAvailable: false,
+    });
+  });
+
+  it("distinguishes an unpurchased number choice from provider-owned phone numbers", async () => {
+    configureCoreReadyBusiness({ pending_phone_number: "+13175550124" });
+    mocks.directAcquisition.mockReturnValue(true);
+    mocks.validChatPrice.mockReturnValue(true);
+    expect((await getOnboardingCheckoutContextForBusinessIdReadOnly("business-1"))?.freshInitialDirectAcquisition).toBe(true);
+
+    mocks.rowsByTable.phone_numbers = { phone_number: "+13175550124" };
+    const owned = await getOnboardingCheckoutContextForBusinessIdReadOnly("business-1");
+    expect(owned?.freshInitialDirectAcquisition).toBe(false);
+    expect(owned?.state.planSelection.chatOnlyDirectSalesAvailable).toBe(false);
+  });
+
+  it.each([
+    { onboarding_completed_at: "2026-09-23T00:00:00Z" },
+    { billing_pilot: true },
+    { billing_comped: true },
+    { billing_exempt: true },
+    { operations_suspended_at: "2026-09-23T00:00:00Z" },
+    { partner_id: "partner-1" },
+    { billing_mode: "invoiced" },
+  ])("does not classify protected or established context as fresh: %j", async (overrides) => {
+    configureCoreReadyBusiness(overrides);
+    const context = await getOnboardingCheckoutContextForBusinessIdReadOnly("business-1");
+    expect(context?.freshInitialDirectAcquisition).toBe(false);
+  });
+
+  it("rejects unreadable phone ownership before declaring fresh acquisition", async () => {
+    mocks.errorsByTable.phone_numbers = { message: "ownership unavailable" };
+    await expect(getOnboardingCheckoutContextForBusinessIdReadOnly("business-1"))
+      .rejects.toThrow("phone-number ownership");
+    expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+    expect(mocks.getSmsReadinessForBusinessReadOnly).not.toHaveBeenCalled();
   });
 
   it("selects and returns goal values in the business-id state projection", async () => {

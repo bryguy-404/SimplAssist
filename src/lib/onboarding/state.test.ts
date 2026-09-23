@@ -392,6 +392,46 @@ describe("deriveOnboardingStep explicit goal gate", () => {
 });
 
 describe("deriveOnboardingStep Chat Only branch", () => {
+  it.each([null, "book"] as const)(
+    "requires an initial plan before any common setup with goal %s",
+    (primaryGoal) => {
+      const args = baseArgs();
+      args.business.primary_goal = primaryGoal;
+      args.business.name = null;
+      args.hours = [];
+      args.services = [];
+      args.aiSettings = null;
+      args.requiresDirectPlanSelection = true;
+      args.planSelectionPosition = "start";
+
+      expect(deriveOnboardingStep(args)).toBe("plan_selection");
+    },
+  );
+
+  it("resumes saved content after changing from Chat to SMS", () => {
+    const args = baseArgs();
+    args.requiresDirectPlanSelection = true;
+    args.planSelectionPosition = "start";
+    args.effectivePlan = "sms_only";
+    args.business.has_ein = null;
+
+    expect(deriveOnboardingStep(args)).toBe("legal_verification");
+
+    args.effectivePlan = "chat_only";
+    expect(deriveOnboardingStep(args)).toBe("review_submit");
+  });
+
+  it("keeps common setup ahead of a legacy late plan choice", () => {
+    const args = baseArgs();
+    args.requiresDirectPlanSelection = true;
+    args.planSelectionPosition = "after_knowledge";
+    args.business.name = null;
+    expect(deriveOnboardingStep(args)).toBe("business_info");
+
+    args.business.name = "Ready Business";
+    expect(deriveOnboardingStep(args)).toBe("plan_selection");
+  });
+
   it("asks a new direct customer to choose a plan before AI settings", () => {
     const args = baseArgs();
     args.business.primary_goal = null;

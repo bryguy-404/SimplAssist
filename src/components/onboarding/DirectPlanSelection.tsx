@@ -4,7 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useBrand } from "@/components/branding/BrandProvider";
 import { PlanSelectionOption } from "@/components/onboarding/PlanSelectionOption";
 import { PulsingDot } from "@/components/ui/pulsing-dot";
-import { CUSTOMER_VISIBLE_PLAN_ORDER } from "@/lib/billing/planAvailability";
+import {
+  CUSTOMER_VISIBLE_PLAN_ORDER,
+  isPlanAvailable,
+} from "@/lib/billing/planAvailability";
 import { getPlanPresentation } from "@/lib/billing/planPresentation";
 import { primaryCtaInlineClass, secondaryCtaClass } from "@/lib/glass";
 import { SETUP_FEE_CENTS } from "@/lib/stripe/config";
@@ -12,29 +15,29 @@ import { statusDanger, statusNeutral } from "@/lib/theme-v2/theme";
 import { cn } from "@/lib/utils";
 import type { SubscriptionPlan } from "@/types/database";
 
-const DEFAULT_PLAN: SubscriptionPlan = "sms_and_chat";
+const RECOMMENDED_PLAN: SubscriptionPlan = "sms_and_chat";
 
 export function reconcileDirectPlanSelection(args: {
-  currentPlan: SubscriptionPlan;
+  currentPlan: SubscriptionPlan | null;
   initialPlan: SubscriptionPlan | null;
   selectablePlans: readonly SubscriptionPlan[];
-}): SubscriptionPlan {
+}): SubscriptionPlan | null {
   if (
     args.initialPlan &&
     args.selectablePlans.includes(args.initialPlan)
   ) {
     return args.initialPlan;
   }
-  if (args.selectablePlans.includes(args.currentPlan)) {
+  if (args.currentPlan && args.selectablePlans.includes(args.currentPlan)) {
     return args.currentPlan;
   }
-  return DEFAULT_PLAN;
+  return null;
 }
 
 type DirectPlanSelectionProps = {
   initialPlan: SubscriptionPlan | null;
   chatOnlyAvailable: boolean;
-  onBack: () => void;
+  onBack?: () => void;
   onNext: (plan: SubscriptionPlan) => void | Promise<void>;
 };
 
@@ -45,19 +48,23 @@ export default function DirectPlanSelection({
   onNext,
 }: DirectPlanSelectionProps) {
   const { name: brandName } = useBrand();
-  const selectablePlans = useMemo<readonly SubscriptionPlan[]>(
+  const visiblePlans = useMemo<readonly SubscriptionPlan[]>(
     () =>
       chatOnlyAvailable
         ? (["chat_only", ...CUSTOMER_VISIBLE_PLAN_ORDER] as const)
         : CUSTOMER_VISIBLE_PLAN_ORDER,
     [chatOnlyAvailable],
   );
+  const selectablePlans = useMemo(
+    () => visiblePlans.filter((plan) => plan === "chat_only" || isPlanAvailable(plan)),
+    [visiblePlans],
+  );
   const safeInitialPlan =
     initialPlan && selectablePlans.includes(initialPlan)
       ? initialPlan
-      : DEFAULT_PLAN;
+      : null;
   const [selectedPlan, setSelectedPlan] =
-    useState<SubscriptionPlan>(safeInitialPlan);
+    useState<SubscriptionPlan | null>(safeInitialPlan);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -72,6 +79,7 @@ export default function DirectPlanSelection({
   }, [initialPlan, selectablePlans]);
 
   async function saveSelection() {
+    if (saving || !selectedPlan || !selectablePlans.includes(selectedPlan)) return;
     setSaving(true);
     setError(null);
 
@@ -99,6 +107,9 @@ export default function DirectPlanSelection({
   }
 
   const chatOnlySelected = selectedPlan === "chat_only";
+  const savedPlanUnavailable = Boolean(
+    initialPlan && !selectablePlans.includes(initialPlan),
+  );
 
   return (
     <div className="space-y-6">
@@ -107,68 +118,84 @@ export default function DirectPlanSelection({
           Choose how customers reach your AI
         </h2>
         <p className="mt-1 text-sm text-stone-500 dark:text-[#bdbdbf]">
+          Choose your plan now. Payment comes after you finish setup.
+        </p>
+        <p className="mt-2 text-sm text-stone-500 dark:text-[#bdbdbf]">
           Your choice determines whether setup includes business texting and
           carrier registration or just the website chat widget.
         </p>
       </div>
 
+      {savedPlanUnavailable && (
+        <p role="status" className={cn("rounded-[16px] p-3 text-sm", statusNeutral)}>
+          Your saved plan is temporarily unavailable. It remains saved until you
+          choose another plan. You can also return later to continue.
+        </p>
+      )}
+
       <fieldset className="space-y-3">
         <legend className="sr-only">Choose your {brandName} plan</legend>
-        {selectablePlans.map((planKey) => (
+        {visiblePlans.map((planKey) => (
           <PlanSelectionOption
             key={planKey}
             inputName="onboarding-plan"
             planKey={planKey}
             plan={getPlanPresentation(planKey, brandName)}
             selected={selectedPlan === planKey}
-            recommended={planKey === DEFAULT_PLAN}
+            recommended={planKey === RECOMMENDED_PLAN}
             onSelect={setSelectedPlan}
             availabilityOverride={
               planKey === "chat_only" ? "available" : undefined
             }
             setupFeeCents={planKey === "chat_only" ? 0 : SETUP_FEE_CENTS}
+            paymentTiming="at checkout"
+            disabled={saving}
           />
         ))}
       </fieldset>
 
-      <div className={cn("rounded-[16px] p-3 text-xs", statusNeutral)}>
-        {chatOnlySelected ? (
-          <>
-            <p className="font-medium text-stone-800 dark:text-[#f5f5f5]">
-              No setup or SMS activation fee
-            </p>
-            <p className="mt-1 leading-relaxed">
-              Chat Only uses your website widget, conversation inbox, and
-              Google Calendar. It does not include a phone number or texting.
-            </p>
-          </>
-        ) : (
-          <>
-            <p className="font-medium text-stone-800 dark:text-[#f5f5f5]">
-              ${SETUP_FEE_CENTS / 100} one-time setup and SMS activation fee
-            </p>
-            <p className="mt-1 leading-relaxed">
-              Texting plans include carrier registration, phone-number
-              activation, and the compliance setup needed for reliable SMS.
-            </p>
-          </>
-        )}
-      </div>
+      {selectedPlan && (
+        <div className={cn("rounded-[16px] p-3 text-xs", statusNeutral)}>
+          {chatOnlySelected ? (
+            <>
+              <p className="font-medium text-stone-800 dark:text-[#f5f5f5]">
+                No setup or SMS activation fee
+              </p>
+              <p className="mt-1 leading-relaxed">
+                Chat Only uses your website widget, conversation inbox, and
+                Google Calendar. It does not include a phone number or texting.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="font-medium text-stone-800 dark:text-[#f5f5f5]">
+                ${SETUP_FEE_CENTS / 100} one-time setup and SMS activation fee
+              </p>
+              <p className="mt-1 leading-relaxed">
+                Texting plans include carrier registration, phone-number
+                activation, and the compliance setup needed for reliable SMS.
+              </p>
+            </>
+          )}
+        </div>
+      )}
 
       {error && (
-        <div className={cn("rounded-lg px-4 py-3 text-sm", statusDanger)}>
+        <div role="alert" className={cn("rounded-lg px-4 py-3 text-sm", statusDanger)}>
           {error}
         </div>
       )}
 
-      <div className="flex justify-between pt-4">
-        <button type="button" onClick={onBack} className={secondaryCtaClass}>
-          Back
-        </button>
+      <div className={cn("flex pt-4", onBack ? "justify-between" : "justify-end")}>
+        {onBack && (
+          <button type="button" onClick={onBack} disabled={saving} className={secondaryCtaClass}>
+            Back
+          </button>
+        )}
         <button
           type="button"
           onClick={saveSelection}
-          disabled={saving}
+          disabled={saving || !selectedPlan || !selectablePlans.includes(selectedPlan)}
           className={primaryCtaInlineClass}
         >
           {saving ? (
@@ -176,7 +203,7 @@ export default function DirectPlanSelection({
               <PulsingDot inline /> Saving...
             </>
           ) : (
-            "Continue"
+            "Continue setup"
           )}
         </button>
       </div>

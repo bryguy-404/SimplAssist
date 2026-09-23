@@ -116,6 +116,7 @@ interface ReviewAndLaunchProps {
   chatOnly?: boolean;
   chatOnlyCheckoutPaused?: boolean;
   canEditPlan?: boolean;
+  familyChangeRequiresSupport?: boolean;
   pendingPhoneNumberFailureReason: string | null;
   onEditStep: (step: number) => void;
   onEditPlan?: () => void;
@@ -189,6 +190,7 @@ export default function ReviewAndLaunch({
   chatOnly = false,
   chatOnlyCheckoutPaused = false,
   canEditPlan = false,
+  familyChangeRequiresSupport = false,
   pendingPhoneNumberFailureReason,
   onEditStep,
   onEditPlan,
@@ -522,6 +524,14 @@ export default function ReviewAndLaunch({
             </fieldset>
             <SetupFeeExplainer />
           </div>
+        )}
+        {familyChangeRequiresSupport && (
+          <p className="mt-3 text-xs text-stone-500 dark:text-[#bdbdbf]">
+            Switching between Chat Only and texting requires support for this account.{' '}
+            <a href={supportHref("billing")} className="underline underline-offset-2">
+              Contact support
+            </a>
+          </p>
         )}
       </Section>
       )}

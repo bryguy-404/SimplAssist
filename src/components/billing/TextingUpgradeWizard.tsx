@@ -12,6 +12,7 @@ import type { SmsPlan } from "@/lib/stripe/smsBilling";
 import { TEXTING_UPGRADE_STEPS, type TextingUpgradeQuote, type TextingUpgradeState, type TextingUpgradeStep } from "@/lib/billing/textingUpgrade";
 import { primaryCtaInlineClass, secondaryCtaClass } from "@/lib/glass";
 import { card, statusWarning } from "@/lib/theme-v2/theme";
+import { supportHref } from "@/lib/support/constants";
 
 const ENDPOINT = "/api/billing/texting-upgrade";
 const labels: Record<TextingUpgradeStep, string> = { plan: "Choose plan", business: "Business details", verification: "Business verification", use_case: "Texting details", phone: "Phone number", review: "Review and pay", status: "Texting status" };
@@ -155,7 +156,7 @@ export default function TextingUpgradeWizard({ initialState }: { initialState?: 
           <ReviewRow label="Phone number" value={state.activePhoneNumber ?? state.pendingPhoneNumber ?? "Not selected"} onEdit={state.actions.canSave ? () => navigate("phone") : undefined} />
           {state.quote ? <TextingUpgradePrice quote={state.quote} /> : <p>The exact amount is calculated after your saved details are checked. Your current subscription has not changed.</p>}
           {state.selectedPlan === "sms_only" && <StarterAcknowledgement checked={starterAcknowledged} onChange={setStarterAcknowledged} />}
-          <p className="text-sm">Payment starts your upgraded subscription and carrier registration. Texting remains unavailable until approval; your existing Chat Only service continues during review. Carrier approval is not guaranteed. Carrier corrections and refund requests go through support under the existing setup-fee policy. The setup fee is non-refundable after registration is submitted. You can still cancel your subscription from Billing.</p>
+          <p className="text-sm">Payment starts your upgraded subscription and carrier registration. Texting remains unavailable until approval; your existing Chat Only service continues during review. Carrier approval is not guaranteed. Carrier corrections and refund requests go through support under the existing setup-fee policy. The setup fee is non-refundable after registration is submitted. To request subscription cancellation, <Link className="underline" href={supportHref("billing")}>contact billing support</Link>.</p>
           <div className="flex flex-wrap gap-3">
             <button className={secondaryCtaClass} disabled={busy} onClick={() => navigate("phone")}>Back</button>
             {state.actions.canQuote && <button className={state.quote ? secondaryCtaClass : primaryCtaInlineClass} disabled={busy} onClick={() => perform(() => requestState("/quote", {}), false)}>{state.quote ? "Refresh price" : "Review exact price"}</button>}
@@ -169,7 +170,7 @@ export default function TextingUpgradeWizard({ initialState }: { initialState?: 
           <div className="flex flex-wrap gap-3">
             {state.actions.canRefresh && <button className={primaryCtaInlineClass} disabled={busy} onClick={() => perform(() => requestState("/refresh", {}))}>Refresh status</button>}
             {state.actions.canReplacePhone && <button className={secondaryCtaClass} disabled={busy} onClick={() => navigate("phone")}>Choose another number</button>}
-            <Link className={secondaryCtaClass} href="/support?category=number_registration">Contact support</Link>
+            <Link className={secondaryCtaClass} href={supportHref("number_registration")}>Contact support</Link>
           </div>
         </div>}
       </section>}

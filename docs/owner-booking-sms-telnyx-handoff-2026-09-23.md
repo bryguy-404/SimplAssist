@@ -2,6 +2,31 @@
 
 ## Resume here
 
+**September 23, 2026, after production deployment: the revised campaign was saved successfully.** The historical unsaved draft below is superseded by this update. Production release `c955d4c` is deployed; owner SMS enrollment and sending remain disabled. In the normal Telnyx editor for CYLIGTZ, the description, message flow, keywords, responses, three samples, policy URLs, sample embedded link, and Embedded Link=Yes were saved and then verified by reopening the editor. The full description and workflow persisted. The Save button was disabled on reopening, with no unsaved changes.
+
+The campaign still displays **Active**, and +15742133931 remains **Assigned**. The More menu offers only Edit campaign and Deactivate campaign; no new-review/resubmit action or new approval confirmation was shown. Do not infer approval of the revised program or a $15 charge from this Save. Confirm the provider's review requirements before setting `OWNER_BOOKING_ALERTS_PROVIDER_REVIEWED=true`.
+
+**Follow-up read-only API verification, September 23:** `GET /v2/10dlc/campaign/4b30019d-f3cb-4e4f-b473-9a05bffeccb2` returned `status=ACTIVE`, `campaignStatus=MNO_PROVISIONED`, `submissionStatus=CREATED`, `isTMobileRegistered=true`, `isTMobileSuspended=false`, `failureReasons=null`, and the complete saved revised description/message flow with `embeddedLink=true`. `GET /v2/10dlc/phone_number_campaigns/+15742133931` returned CYLIGTZ and `assignmentStatus=ASSIGNED`, no failure. This is stronger evidence than the portal badge: no pending review/rejection is reported and the campaign remains carrier-provisioned. It still does not establish that the substantive consent-method revision was freshly reviewed or exempt from re-review. Official Telnyx event documentation distinguishes CAMPAIGN_UPDATE from CAMPAIGN_RESUBMISSION/review events; no published definitive rule about this approved-campaign edit scenario was found. Do not claim re-review definitely is or is not required.
+
+The dedicated number's actual profile is **SimplAssist Production**, ID `40019df3-9a51-4822-ac75-48b62f40a630`, enabled, no number pool. It still points to the OLD inbound webhook `https://www.simplassist.com/api/messaging/webhook`, not the owner-alert endpoint. Runtime autoresponses are still the original defaults: START promises resubscription, STOP generic unsubscribe, HELP generic SimplAssist support. They were read only and must be configured for the owner-alert semantics before a pilot. Campaign declarations did not change these runtime settings. No activation, test SMS, or support message occurred during this research.
+
+Primary reference: https://developers.telnyx.com/docs/messaging/10dlc/event-notifications/index (MNO_PROVISIONED means provisioned with all MNOs; update and review events are separate).
+
+Saved registration reflects the deployed form at `https://simplassist.com/settings#booking-alerts`, public explanation at `https://simplassist.com/booking-alerts`, optional unchecked consent, exact disclosure, inbound `ALERTS <one-time token>` from the entered US mobile, 15-minute expiry, business-specific verification, STOP across all businesses for the recipient, START/UNSTOP unblock without reenrollment, and HELP/INFO support. It explicitly says enrollment and sending are disabled pending approval of the revised campaign.
+
+- Opt-in keyword declaration: `ALERTS`; response matches the application's successful enrollment confirmation. Bare ALERTS does not enroll.
+- Opt-out declarations: `STOP,STOPALL,UNSUBSCRIBE,CANCEL,END,QUIT`. Telnyx rejected the first Save because `STOP ALL` contained a space; removing that metadata entry allowed Save. The application can still recognize STOP ALL.
+- Help declarations: `HELP,INFO`; support `bryan@simplassist.com`.
+- Samples: two new appointment notices for Solar Example (Oct 15, 2026, 10:00 AM EDT and Oct 16, 2026, 2:30 PM EDT), business/time/secure dashboard navigation URL, STOP/HELP; third sample is the exact enrollment confirmation.
+- Example navigation tokens are 43 `A` or `B` characters under `/booking-alerts/open/`, clearly illustrative and not active tokens.
+- Privacy: `https://simplassist.com/privacy#owner-booking-alerts`; terms: `https://simplassist.com/terms#owner-booking-alerts`.
+- Embedded Link=Yes; Embedded Phone Number/Number Pooling/Age-Gated/Direct Lending=No.
+- Campaign provisioning webhooks remain blank. These are not inbound SMS webhooks.
+
+No other campaign, phone assignment, messaging profile runtime settings, application activation flags, or recipient enrollment was changed. **Do not configure ALERTS as a messaging-profile START autoresponder**: it must reach application token verification. Dedicated profile webhook and keyword runtime configuration, worker deployment, reconciliation, approved pilot, and staged activation remain separate next steps in `owner-booking-alerts-operations.md`. Authenticated form reviewer screenshots may be requested; the public page describes the actual deployed flow but the form remains disabled pending review.
+
+## Historical pre-implementation handoff (archived)
+
 Bryan wants to implement owner booking alerts after planning the full feature in Codex, then return to Telnyx. On September 23, 2026, he chose to cancel the unsaved Telnyx edits until the feature's consent setup is ready. **The assistant did not click Save, submit for review, create a campaign, reassign a number, send a text, or change application code.** Browser cancellation is being handled by Bryan.
 
 This note preserves the actual unsaved field values entered and verified in the browser. Bryan does not need to read or re-enter this material himself. Use it as a handoff for the implementation and later provider work.

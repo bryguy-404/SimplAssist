@@ -13,8 +13,8 @@ function failure(error: unknown) {
   const messages: Record<string, string> = {
     invalid: 'Check the mobile number and consent checkbox.',
     conflict: 'These settings changed. Refresh and try again.',
-    forbidden: 'Booking alerts are unavailable for this account.',
-    unavailable: 'Booking alerts are temporarily unavailable. Please try again later.',
+    forbidden: 'Business alerts are unavailable for this account.',
+    unavailable: 'Business alerts are temporarily unavailable. Please try again later.',
     phone_not_mobile: 'Enter a US mobile number that can receive texts.',
     phone_reserved: 'Use your own mobile number, not a SimplAssist assistant number.',
     rate_limited: 'Please wait before requesting another verification text.',

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bookingAlertMessage, normalizeOwnerAlertPhone, OWNER_BOOKING_ALERT_CONSENT_VERSION, ownerBookingAlertMutationSchema } from './contracts';
+import { bookingAlertMessage, signupLinkAlertMessage, normalizeOwnerAlertPhone, OWNER_BOOKING_ALERT_CONSENT_VERSION, ownerBookingAlertMutationSchema } from './contracts';
 
 describe('owner booking alert enrollment and privacy contract', () => {
   it('requires explicit current consent and a revision; never silently adopts old consent', () => {
@@ -20,5 +20,11 @@ describe('owner booking alert enrollment and privacy contract', () => {
     expect(bookingAlertMessage({ ...common, startsAt: '2026-12-01T15:00:00Z' })).toContain('Dec 1, 2026, 10:00 AM EST');
     expect(bookingAlertMessage({ ...common, startsAt: '2026-12-01T15:00:00Z' })).toContain('Solar Works has a new appointment');
     expect(() => bookingAlertMessage({ ...common, startsAt: '2026-12-01', dashboardUrl: 'https://attacker.example/dashboard' })).toThrow();
+  });
+  it('describes a sign-up link sent to a caller without claiming registration or exposing caller details', () => {
+    const dashboardUrl = `https://simplassist.com/booking-alerts/open/${'a'.repeat(43)}`;
+    expect(signupLinkAlertMessage({ businessName: 'Solar\nWorks\u202e', dashboardUrl })).toBe(`SimplAssist: Solar Works sent a sign-up link to a caller. View details: ${dashboardUrl} Reply STOP to opt out; HELP for help.`);
+    expect(() => signupLinkAlertMessage({ businessName: 'Solar Works', dashboardUrl: 'https://attacker.example/dashboard' })).toThrow();
+    expect(() => signupLinkAlertMessage({ businessName: 'Solar Works', dashboardUrl: `${dashboardUrl}?next=https://attacker.example` })).toThrow();
   });
 });

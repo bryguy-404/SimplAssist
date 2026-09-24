@@ -3,7 +3,7 @@ const mocks = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn(), send: vi.fn(), lo
 vi.mock('server-only', () => ({}));
 vi.mock('@/lib/supabase/admin', () => ({ supabaseAdmin: { rpc: mocks.rpc, from: mocks.from } }));
 vi.mock('@/lib/messaging/client', () => ({ telnyx: { messages: { send: mocks.send }, numberLookup: { retrieve: mocks.lookup } } }));
-vi.mock('@/lib/billing/entitlements', () => ({ resolveBusinessEntitlements: mocks.entitlement, canUseFeature: (e: { active: boolean; plan: string }, feature: string) => e.active && feature === 'direct_booking' && e.plan !== 'sms_only', EntitlementResolutionError: class extends Error {} }));
+vi.mock('@/lib/billing/entitlements', () => ({ resolveBusinessEntitlements: mocks.entitlement, canUseFeature: (e: { active: boolean; plan: string }, feature: string) => e.active && feature === 'ai_customization' && e.plan !== 'sms_only', EntitlementResolutionError: class extends Error {} }));
 vi.mock('./webhook.server', () => ({ reconcileOwnerBookingAlertWebhooks: vi.fn() }));
 import { classifyOwnerAlertSendError, getOwnerBookingAlertSettings, mutateOwnerBookingAlertSettings, runOwnerBookingAlerts } from './services.server';
 import { getOwnerAlertConfig, ownerAlertReady } from './config.server';
@@ -77,6 +77,25 @@ describe('owner alert settings before activation', () => {
     mocks.from.mockImplementation((table: string) => table === 'owner_booking_alert_control'
       ? builder(null, { code: 'PGRST205' }) : base(table));
     await expect(getOwnerBookingAlertSettings(business)).rejects.toMatchObject({ code: 'unavailable' });
+  });
+  it('requires fresh consent when a booking-only enrollment belongs to a signup account', async () => {
+    enable(); const base = mocks.from.getMockImplementation()!;
+    mocks.from.mockImplementation((table: string) => table === 'businesses'
+      ? builder({ owner_id: owner, primary_goal: 'signup', deleted_at: null, operations_suspended_at: null })
+      : table === 'owner_booking_alert_settings'
+        ? builder({ owner_id: owner, revision: 3, enabled: true, recipient: row.recipient, verified_at: '2026-09-23T18:00:00Z', consent_version: '2026-09-23-v1' }) : base(table));
+    await expect(getOwnerBookingAlertSettings(business)).resolves.toMatchObject({ status: 'not_enabled', enabled: false, available: true, revision: 3 });
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+  it('reopens signup enrollment when a pending token contains the old booking-only consent', async () => {
+    enable(); const base = mocks.from.getMockImplementation()!;
+    mocks.from.mockImplementation((table: string) => table === 'businesses'
+      ? builder({ owner_id: owner, primary_goal: 'signup', deleted_at: null, operations_suspended_at: null })
+      : table === 'owner_booking_alert_settings'
+        ? builder({ owner_id: owner, revision: 4, enabled: false, recipient: null, pending_recipient: row.recipient, pending_verification_id: 'legacy' })
+        : table === 'owner_booking_alert_verifications'
+          ? builder({ consent_version: '2026-09-23-v1', consumed_at: null, expires_at: new Date(Date.now() + 600_000).toISOString() }) : base(table));
+    await expect(getOwnerBookingAlertSettings(business)).resolves.toMatchObject({ status: 'not_enabled', enabled: false, pendingRecipient: null, revision: 4 });
   });
 });
 describe('owner alert gates and dispatch', () => {
@@ -157,6 +176,39 @@ describe('owner alert gates and dispatch', () => {
     expect(mocks.rpc).toHaveBeenCalledWith('set_owner_booking_alert_suppression', expect.objectContaining({ p_recipient: row.recipient, p_suppressed: true }));
   });
 });
+describe('owner signup-link alert dispatch', () => {
+  const signupRow = { ...row, kind: 'signup_link', booking_id: null, voice_action_id: 'voice-signup' };
+  const source = { kind: 'signup', status: 'succeeded', sms_provider_message_id: 'caller-text', sms_accepted_at: new Date().toISOString(), result: { providerMessageId: 'caller-text', deliveryStatus: 'accepted' } };
+  function configureSignup(action: unknown = source) {
+    enable(); mocks.entitlement.mockResolvedValue({ active: true, plan: 'full' });
+    const from = mocks.from.getMockImplementation()!;
+    mocks.from.mockImplementation((table: string) => table === 'voice_actions' ? builder(action) : from(table));
+    const rpc = mocks.rpc.getMockImplementation()!;
+    mocks.rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => name === 'claim_owner_booking_alerts'
+      ? { data: [signupRow], error: null }
+      : name === 'begin_owner_booking_alert_send' ? { data: { ...signupRow, status: 'submitting', content: args.p_content }, error: null } : rpc(name, args));
+  }
+  it('uses the recorded caller send and platform sender without requiring a calendar', async () => {
+    configureSignup();
+    await expect(runOwnerBookingAlerts()).resolves.toMatchObject({ processed: 1, accepted: 1 });
+    expect(mocks.from).not.toHaveBeenCalledWith('calendar_bookings');
+    expect(mocks.send).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ from: control.sender, to: row.recipient, messaging_profile_id: control.messaging_profile_id,
+      text: expect.stringMatching(/^SimplAssist: Solar Works sent a sign-up link to a caller\. View details: https:\/\/simplassist\.com\/booking-alerts\/open\/[A-Za-z0-9_-]{43} Reply STOP/) }), { maxRetries: 0, timeout: 5000 });
+    expect(mocks.rpc).toHaveBeenCalledWith('begin_owner_booking_alert_send', expect.objectContaining({ p_link_token_digest: expect.stringMatching(/^[a-f0-9]{64}$/) }));
+  });
+  it.each([null, { ...source, status: 'uncertain' }, { ...source, sms_provider_message_id: null }, { ...source, sms_accepted_at: null },
+    { ...source, result: { providerMessageId: 'other' } }, ...['delivery_failed', 'sending_failed', 'expired', 'cancelled', 'failed', 'rejected'].map(deliveryStatus => ({ ...source, result: { ...source.result, deliveryStatus } }))])('does not notify from missing, mismatched or failed source evidence (%j)', async action => {
+    configureSignup(action); await runOwnerBookingAlerts();
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.rpc.mock.calls.some(([name]) => name === 'begin_owner_booking_alert_send')).toBe(false);
+  });
+  it('rechecks the final SQL gate after composing the signup text', async () => {
+    configureSignup(); const base = mocks.rpc.getMockImplementation()!;
+    mocks.rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => name === 'begin_owner_booking_alert_send'
+      ? { data: { ...signupRow, status: 'cancelled' }, error: null } : base(name, args));
+    await runOwnerBookingAlerts(); expect(mocks.send).not.toHaveBeenCalled();
+  });
+});
 describe('owner alert mobile enrollment', () => {
   const command = { action: 'enroll', phone: row.recipient, consent: true, consentVersion: OWNER_BOOKING_ALERT_CONSENT_VERSION, expectedRevision: 0 };
   it('requires rate budget before paid lookup, preventing unbounded lookup abuse', async () => {
@@ -172,5 +224,16 @@ describe('owner alert mobile enrollment', () => {
       await expect(mutateOwnerBookingAlertSettings(business, owner, command)).rejects.toMatchObject({ code: 'phone_not_mobile' });
     }
     expect(mocks.rpc.mock.calls.some(([name]) => name === 'configure_owner_booking_alert')).toBe(false);
+  });
+  it('enrolls an eligible signup owner using the same explicit consent and inbound verification', async () => {
+    enable(); mocks.entitlement.mockResolvedValue({ active: true, plan: 'full' });
+    mocks.lookup.mockResolvedValue({ data: { phone_number: row.recipient, country_code: 'US', carrier: { type: 'mobile' } } });
+    const base = mocks.from.getMockImplementation()!;
+    mocks.from.mockImplementation((table: string) => table === 'businesses' ? builder({ owner_id: owner, primary_goal: 'signup', deleted_at: null, operations_suspended_at: null }) : base(table));
+    const result = await mutateOwnerBookingAlertSettings(business, owner, command);
+    expect(result.verification?.message).toMatch(/^ALERTS [A-Za-z0-9_-]{24}$/);
+    expect(mocks.rpc).toHaveBeenCalledWith('configure_owner_booking_alert', expect.objectContaining({ p_consent_version: '2026-09-24-v2', p_disclosure: expect.stringContaining('sign-up links sent to callers') }));
+    expect(mocks.from).not.toHaveBeenCalledWith('calendar_bookings');
+    expect(mocks.send).not.toHaveBeenCalled();
   });
 });

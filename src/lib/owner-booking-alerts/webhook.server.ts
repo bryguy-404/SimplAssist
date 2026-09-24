@@ -45,7 +45,7 @@ async function processStoredEvent(eventId: string, event: StoredEvent) {
       const v = verification.data;
       if (v && !v.consumed_at && Date.parse(v.expires_at) > Date.now() && v.recipient === event.recipient && ownerAlertReady(config, control.data, v.business_id)) {
         const entitlement = await resolveBusinessEntitlements(v.business_id);
-        if (canUseFeature(entitlement, 'direct_booking')) {
+        if (canUseFeature(entitlement, 'ai_customization')) {
           const consumed = await db.rpc('consume_owner_booking_alert_verification', { p_challenge_digest: event.challengeDigest, p_recipient: event.recipient, p_sender: event.sender, p_profile_id: event.profileId, p_event_id: eventId });
           if (consumed.error) throw new OwnerBookingAlertError('unavailable');
         }

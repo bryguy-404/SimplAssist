@@ -36,37 +36,60 @@ describe('owner booking alert enrollment', () => {
     expect(html).toContain('https://simplassist.com/privacy#owner-booking-alerts');
     expect(html).toContain('https://simplassist.com/terms#owner-booking-alerts');
     expect(html).toContain('same mobile that receives forwarded calls');
+    expect(html).toContain('about confirmed bookings and sign-up links sent to callers');
+    expect(html).toContain('it does not confirm delivery or registration');
+    expect(html).toContain(OWNER_BOOKING_ALERT_DISCLOSURE);
+  });
+
+  it('allows an eligible sign-up account to enroll without claiming that a calendar is needed', () => {
+    const html = renderToStaticMarkup(<OwnerBookingAlertsContent settings={fixture()} phone="5745550123" consent />);
+    expect(html).toContain('Business alerts');
+    expect(html.match(/<button[^>]*type="submit"[^>]*>/)?.[0]).not.toContain('disabled=""');
+    expect(html).not.toContain('active calendar booking before alerts can resume');
+    expect(html).not.toContain('a connected calendar, and direct booking enabled are needed');
+    expect(html).toContain('sends a sign-up link to a caller');
+  });
+
+  it('explains the two account setups when alerts are paused', () => {
+    const html = renderToStaticMarkup(<OwnerBookingAlertsContent settings={fixture({
+      enabled: true, recipient: '+15745550123', eligible: false, status: 'paused',
+    })} />);
+    expect(html).toContain('Business texts are paused');
+    expect(html).toContain('For sign-up alerts, use Full Suite with the sign-up goal and a sign-up link');
+    expect(html).toContain('For booking alerts, choose the booking goal');
+    expect(html).toContain('Turn off business texts');
+    expect(html).not.toContain('Business texts are on');
   });
 
   it('renders the real consent form but does not permit enrollment before platform readiness', () => {
     const html = renderToStaticMarkup(<OwnerBookingAlertsContent settings={fixture({ available: false, eligible: false, status: 'unavailable' })}
       phone="5745550123" consent />);
-    expect(html).toContain('Booking texts are not available yet');
+    expect(html).toContain('Business texts are not available yet');
     expect(html).toContain('Your mobile number');
     expect(html.match(/<button[^>]*type="submit"[^>]*>/)?.[0]).toContain('disabled=""');
-    expect(html).not.toContain('Booking texts are on');
+    expect(html).not.toContain('Business texts are on');
     expect(html).not.toContain('An active plan with calendar booking');
   });
 
   it('shows one load error and keeps enrollment disabled when settings cannot load', () => {
-    const message = 'Booking alerts are temporarily unavailable. Please try again.';
+    const message = 'Business alerts are temporarily unavailable. Please try again.';
     const html = renderToStaticMarkup(<OwnerBookingAlertsContent settings={null}
       feedback={{ kind: 'error', text: message }} phone="5745550123" consent />);
     expect(html.match(/role="alert"/g)).toHaveLength(1);
     expect(html.split(message)).toHaveLength(2);
-    expect(html).not.toContain('Booking alert settings could not be loaded');
+    expect(html).not.toContain('Business alert settings could not be loaded');
     expect(html.match(/<input[^>]*type="tel"[^>]*>/)?.[0]).toContain('disabled=""');
     expect(html.match(/<input[^>]*type="checkbox"[^>]*>/)?.[0]).toContain('disabled=""');
     expect(html.match(/<button[^>]*type="submit"[^>]*>/)?.[0]).toContain('disabled=""');
   });
 
   it('retains known status and actionable feedback after a refresh or mutation fails', () => {
-    const message = 'Booking alert settings changed. Refresh and review them before trying again.';
+    const message = 'Business alert settings changed. Refresh and review them before trying again.';
     const html = renderToStaticMarkup(<OwnerBookingAlertsContent settings={fixture({
       enabled: true, status: 'active', recipient: '+15745550123',
     })} feedback={{ kind: 'error', text: message }} />);
-    expect(html).toContain('Booking texts are on for new appointments');
-    expect(html).toContain('Turn off booking texts');
+    expect(html).toContain('Business texts are on for confirmed bookings');
+    expect(html).toContain('Turn off business texts');
     expect(html).toContain(message);
     expect(html.match(/role="alert"/g)).toHaveLength(1);
     expect(html.match(/role="status"/g)).toHaveLength(1);
@@ -75,7 +98,7 @@ describe('owner booking alert enrollment', () => {
   it('does not expose a verification send link when a gate closes on pending enrollment', () => {
     const html = renderToStaticMarkup(<OwnerBookingAlertsContent settings={fixture({ available: false,
       status: 'pending_verification', pendingRecipient: '+15745550123' })} verification={verification} />);
-    expect(html).toContain('Booking texts are not available yet');
+    expect(html).toContain('Business texts are not available yet');
     expect(html).not.toContain('sms:');
     expect(html).not.toContain(verification.message);
   });
@@ -88,10 +111,10 @@ describe('owner booking alert enrollment', () => {
     expect(html).toContain('+15745550111');
     expect(html).toContain('Verify +15745550222');
     expect(html).toContain('existing number stays saved until the replacement is verified');
-    expect(html).not.toContain('Booking texts are on for new');
+    expect(html).not.toContain('Business texts are on for confirmed');
     expect(html).toContain('Open my texting app');
     expect(html).toContain('does not send it for you');
-    expect(html).toContain('Turn off booking texts');
+    expect(html).toContain('Turn off business texts');
   });
 
   it('supports refreshing a pending verification after a reload without revealing a token', () => {
@@ -119,7 +142,7 @@ describe('owner booking alert enrollment', () => {
       status: 'stopped', recipient: '+15745550123' })} />);
     expect(html).toContain('Send START');
     expect(html).toContain('verify your number again');
-    expect(html).toContain('pause all SimplAssist booking texts');
+    expect(html).toContain('pause all SimplAssist business texts');
     expect(html).toContain('affects this business only');
   });
 
@@ -127,7 +150,7 @@ describe('owner booking alert enrollment', () => {
     const html = renderToStaticMarkup(<OwnerBookingAlertsContent settings={fixture({
       status: 'pending_verification', pendingRecipient: '+15745550123' })} verification={verification} pollingStopped />);
     expect(html).toContain('Automatic checking has paused');
-    expect(html).not.toContain('Booking texts are on');
+    expect(html).not.toContain('Business texts are on');
     const now = Date.parse('2026-09-23T21:00:00Z');
     expect(canPollVerification(verification.expiresAt, 0, now)).toBe(true);
     expect(canPollVerification(verification.expiresAt, BOOKING_ALERT_POLL_LIMIT, now)).toBe(false);
@@ -194,8 +217,9 @@ describe('booking alert dashboard invitation', () => {
   it('identifies the SimplAssist program and links directly to the setting', () => {
     const html = renderToStaticMarkup(<BookingAlertNudgeContent />);
     expect(html).toContain('SimplAssist can text your mobile');
+    expect(html).toContain('confirms a booking or sends a sign-up link to a caller');
     expect(html).toContain('href="/settings#booking-alerts"');
-    expect(html).toContain('aria-label="Dismiss booking alert setup"');
+    expect(html).toContain('aria-label="Dismiss business alert setup"');
     expect(html).not.toContain('call forwarding');
   });
 });

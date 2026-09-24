@@ -5,7 +5,7 @@ import { telnyx } from '@/lib/messaging/client';
 import { canUseFeature, resolveBusinessEntitlements, EntitlementResolutionError } from '@/lib/billing/entitlements';
 import { getOwnerAlertConfig, ownerAlertReady, type OwnerAlertControl } from './config.server';
 import {
-  bookingAlertMessage, normalizeOwnerAlertPhone, OWNER_ALERT_ENROLLMENT_MESSAGE,
+  bookingAlertMessage, signupLinkAlertMessage, normalizeOwnerAlertPhone, OWNER_ALERT_ENROLLMENT_MESSAGE,
   OWNER_BOOKING_ALERT_CONSENT_VERSION, OWNER_BOOKING_ALERT_DISCLOSURE,
   ownerAlertSmsUrl, ownerAlertVerificationMessage, ownerBookingAlertMutationSchema,
   type OwnerBookingAlertSettings,
@@ -16,14 +16,14 @@ export class OwnerBookingAlertError extends Error {
 }
 export const ownerAlertDigest = (value: string) => createHash('sha256').update(value).digest('hex');
 export interface AlertOutboxRow {
-  id: string; business_id: string; owner_id: string; booking_id: string | null; kind: 'booking' | 'enrollment'; generation: string;
+  id: string; business_id: string; owner_id: string; booking_id: string | null; voice_action_id: string | null; kind: 'booking' | 'signup_link' | 'enrollment'; generation: string;
   recipient: string; sender: string; messaging_profile_id: string; status: string; content: string | null;
   link_token_digest: string | null;
   claim_token: string; attempt_id: string | null; provider_message_id: string | null; expires_at: string;
 }
 interface SettingsRow {
   revision: number; enabled: boolean; recipient: string | null; pending_recipient: string | null;
-  verified_at: string | null; nudge_dismissed_at: string | null; owner_id: string;
+  verified_at: string | null; consent_version: string | null; nudge_dismissed_at: string | null; owner_id: string;
   pending_verification_id: string | null;
 }
 function checked<T>(result: { data: T; error: { code?: string } | null }): T {
@@ -40,14 +40,14 @@ async function eligible(businessId: string, ownerId: string): Promise<boolean> {
     if (error instanceof EntitlementResolutionError && error.code === 'subscription_missing') return false;
     throw new OwnerBookingAlertError('unavailable');
   }
-  if (!canUseFeature(entitlement, 'direct_booking')) return false;
+  if (!canUseFeature(entitlement, 'ai_customization')) return false;
   return checked(await db.rpc('owner_booking_alert_business_eligible', { p_business_id: businessId, p_owner_id: ownerId })) === true;
 }
 export async function getOwnerBookingAlertSettings(businessId: string): Promise<OwnerBookingAlertSettings> {
   const config = getOwnerAlertConfig();
   const [settingResult, businessResult, gateResult] = await Promise.all([
-    db.from('owner_booking_alert_settings').select('revision,enabled,recipient,pending_recipient,pending_verification_id,verified_at,nudge_dismissed_at,owner_id').eq('business_id', businessId).maybeSingle(),
-    db.from('businesses').select('owner_id,deleted_at,operations_suspended_at').eq('id', businessId).maybeSingle(),
+    db.from('owner_booking_alert_settings').select('revision,enabled,recipient,pending_recipient,pending_verification_id,verified_at,consent_version,nudge_dismissed_at,owner_id').eq('business_id', businessId).maybeSingle(),
+    db.from('businesses').select('owner_id,deleted_at,operations_suspended_at,primary_goal').eq('id', businessId).maybeSingle(),
     db.from('owner_booking_alert_control').select('enabled,sender,messaging_profile_id,pilot_business_ids').eq('singleton', true).maybeSingle(),
   ]);
   const business = checked(businessResult);
@@ -72,10 +72,13 @@ export async function getOwnerBookingAlertSettings(businessId: string): Promise<
   const isEligible = !business.operations_suspended_at && await eligible(businessId, business.owner_id);
   const available = ownerAlertReady(config, gate, businessId);
   const current = setting?.owner_id === business.owner_id ? setting : null;
+  // Booking-only consent never silently expands when an account switches goals.
+  const enabled = current?.enabled === true && (business.primary_goal !== 'signup' || current.consent_version === OWNER_BOOKING_ALERT_CONSENT_VERSION);
   let pendingRecipient = current?.pending_recipient ?? null;
   if (pendingRecipient && current?.pending_verification_id) {
-    const pending = checked(await db.from('owner_booking_alert_verifications').select('expires_at,consumed_at').eq('id', current.pending_verification_id).maybeSingle());
-    if (!pending || pending.consumed_at || Date.parse(pending.expires_at) <= Date.now()) pendingRecipient = null;
+    const pending = checked(await db.from('owner_booking_alert_verifications').select('expires_at,consumed_at,consent_version').eq('id', current.pending_verification_id).maybeSingle());
+    if (!pending || pending.consumed_at || Date.parse(pending.expires_at) <= Date.now()
+      || (business.primary_goal === 'signup' && pending.consent_version !== OWNER_BOOKING_ALERT_CONSENT_VERSION)) pendingRecipient = null;
   }
   let suppressed = false;
   let pendingRecipientSuppressed = false;
@@ -91,9 +94,9 @@ export async function getOwnerBookingAlertSettings(businessId: string): Promise<
     }
   }
   return {
-    revision: setting?.revision ?? 0, enabled: current?.enabled ?? false, recipient: current?.recipient ?? null,
+    revision: setting?.revision ?? 0, enabled, recipient: current?.recipient ?? null,
     pendingRecipient, pendingRecipientSuppressed, verifiedAt: current?.verified_at ?? null,
-    status: suppressed ? 'stopped' : pendingRecipient ? 'pending_verification' : !available ? 'unavailable' : !isEligible ? 'paused' : current?.enabled ? 'active' : 'not_enabled',
+    status: suppressed ? 'stopped' : pendingRecipient ? 'pending_verification' : !available ? 'unavailable' : !isEligible ? 'paused' : enabled ? 'active' : 'not_enabled',
     available, eligible: isEligible, sender: config.sender,
     consentVersion: OWNER_BOOKING_ALERT_CONSENT_VERSION, disclosure: OWNER_BOOKING_ALERT_DISCLOSURE,
     nudgeDismissedAt: current?.nudge_dismissed_at ?? null,
@@ -182,12 +185,20 @@ export async function runOwnerBookingAlerts(): Promise<{ processed: number; acce
       let linkDigest: string | null = row.link_token_digest;
       if (!content) {
         if (row.kind === 'enrollment') content = OWNER_ALERT_ENROLLMENT_MESSAGE;
-        else {
+        else if (row.kind === 'booking') {
           const booking = checked(await db.from('calendar_bookings').select('starts_at,status').eq('id', row.booking_id!).eq('business_id', row.business_id).maybeSingle());
           if (!booking || booking.status !== 'confirmed') continue;
           const linkToken = randomBytes(32).toString('base64url');
           linkDigest = ownerAlertDigest(linkToken);
           content = bookingAlertMessage({ businessName: business.name, startsAt: booking.starts_at, timezone: business.timezone, dashboardUrl: `https://simplassist.com/booking-alerts/open/${linkToken}` });
+        } else if (row.kind === 'signup_link') {
+          const action = checked(await db.from('voice_actions').select('kind,status,sms_provider_message_id,sms_accepted_at,result').eq('id', row.voice_action_id!).eq('business_id', row.business_id).maybeSingle());
+          if (!action || action.kind !== 'signup' || action.status !== 'succeeded' || !action.sms_accepted_at || !action.sms_provider_message_id || action.result?.providerMessageId !== action.sms_provider_message_id || ['delivery_failed', 'sending_failed', 'expired', 'cancelled', 'failed', 'rejected'].includes(action.result?.deliveryStatus)) continue;
+          const linkToken = randomBytes(32).toString('base64url');
+          linkDigest = ownerAlertDigest(linkToken);
+          content = signupLinkAlertMessage({ businessName: business.name, dashboardUrl: `https://simplassist.com/booking-alerts/open/${linkToken}` });
+        } else {
+          continue;
         }
       }
       // Pace a batch to the shared database limit. Without this, a fast first

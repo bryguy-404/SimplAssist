@@ -20,11 +20,11 @@ type Verification = NonNullable<OwnerBookingAlertSettings['verification']>;
 type Feedback = { kind: 'error' | 'success'; text: string } | null;
 
 export const BOOKING_ALERT_STATUS_COPY: Record<OwnerBookingAlertSettings['status'], string> = {
-  unavailable: 'Booking texts are not available yet. You can review the signup details below; alerts will remain off until setup is ready.',
-  not_enabled: 'Booking texts are off. Add your mobile number and complete verification to turn them on.',
+  unavailable: 'Business texts are not available yet. You can review the enrollment details below; alerts will remain off until setup is ready.',
+  not_enabled: 'Business texts are off. Add your mobile number and complete verification to turn them on.',
   pending_verification: 'One more step: send the verification text from your mobile to confirm this number.',
-  active: 'Booking texts are on for new appointments confirmed by SimplAssist.',
-  paused: 'Booking texts are paused. Your account needs active calendar booking before alerts can resume.',
+  active: 'Business texts are on for confirmed bookings and sign-up links sent to callers.',
+  paused: 'Business texts are paused. Check your plan and your booking or sign-up setup to resume alerts.',
   stopped: 'You opted out by text. Send START to the SimplAssist number below, then verify your number again to enable alerts for this business.',
 };
 
@@ -50,10 +50,10 @@ export function OwnerBookingAlertsContent({
     className={`scroll-mt-6 p-6 ${card}`}>
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <h2 id={`${formId}-heading`} className={`text-lg font-semibold ${ink}`}>Booking alerts</h2>
+        <h2 id={`${formId}-heading`} className={`text-lg font-semibold ${ink}`}>Business alerts</h2>
         <p className={`mt-1 max-w-2xl text-sm ${bodyFaint}`}>
-          Get a text from SimplAssist when it confirms a new appointment in your connected calendar.
-          This is available with eligible Chat Only accounts too.
+          Get a text when SimplAssist confirms an appointment or sends a sign-up link to a caller.
+          Booking alerts are available with eligible Chat Only accounts too.
         </p>
       </div>
       <button type="button" disabled={busy || loading} onClick={onRefresh} className={`${btnSecondaryInline} disabled:opacity-50`}>
@@ -62,12 +62,13 @@ export function OwnerBookingAlertsContent({
     </div>
 
     <p role={loadError ? 'alert' : 'status'} className={`mt-4 rounded-xl p-3 text-sm ${loadError ? statusDanger : ready ? statusSuccess : statusWarning}`}>
-      {loadError ?? (loading && !settings ? 'Checking booking alert availability…' : settings
+      {loadError ?? (loading && !settings ? 'Checking business alert availability…' : settings
         ? BOOKING_ALERT_STATUS_COPY[status!]
-        : 'Booking alert settings could not be loaded. Refresh to try again.')}
+        : 'Business alert settings could not be loaded. Refresh to try again.')}
     </p>
-    {settings?.available && !settings.eligible && settings.status !== 'paused' ? <p className={`mt-3 text-sm ${bodyFaint}`}>
-      An active plan with calendar booking, a connected calendar, and direct booking enabled are needed to receive alerts.
+    {settings?.available && !settings.eligible ? <p className={`mt-3 text-sm ${bodyFaint}`}>
+      An active plan is needed. For sign-up alerts, use Full Suite with the sign-up goal and a sign-up link.
+      For booking alerts, choose the booking goal and enable direct booking with a connected calendar.
     </p> : null}
     {settings?.recipient ? <p className={`mt-4 text-sm ${ink}`}>
       {ready ? 'Texts go to ' : 'Saved alert number: '}<span className="font-semibold">{settings.recipient}</span>.
@@ -118,7 +119,7 @@ export function OwnerBookingAlertsContent({
         <input type="checkbox" checked={consent} disabled={busy || loading || !canEnroll}
           onChange={(event) => onConsent?.(event.target.checked)}
           className="mt-1 h-4 w-4 shrink-0 accent-[var(--brand-primary)]" />
-        <span>I agree to receive automated booking-alert texts from SimplAssist at this mobile number.</span>
+        <span>I agree to receive automated texts from SimplAssist about confirmed bookings and sign-up links sent to callers at this mobile number.</span>
       </label>
       <BookingAlertDisclosure disclosure={settings?.disclosure ?? OWNER_BOOKING_ALERT_DISCLOSURE} />
       <button type="submit" disabled={busy || loading || !canEnroll || !consent || !phone.trim()}
@@ -130,16 +131,17 @@ export function OwnerBookingAlertsContent({
 
     {settings?.recipient && !editing && !settings.pendingRecipient ? <button type="button" disabled={busy || !canEnroll}
       onClick={onEdit} className={`mt-4 ${btnSecondaryInline} disabled:opacity-50`}>
-      {settings.enabled ? 'Change alert number' : 'Set up booking texts'}
+      {settings.enabled ? 'Change alert number' : 'Set up business texts'}
     </button> : null}
     {settings && (settings.enabled || settings.pendingRecipient) ? <button type="button" disabled={busy}
       onClick={onDisable} className={`mt-4 ${btnSecondaryInline} disabled:opacity-50`}>
-      {settings.enabled ? 'Turn off booking texts' : 'Cancel verification'}
+      {settings.enabled ? 'Turn off business texts' : 'Cancel verification'}
     </button> : null}
     {feedback && !loadError ? <p role={feedback.kind === 'error' ? 'alert' : 'status'} className={`mt-4 rounded-xl p-3 text-sm ${feedback.kind === 'error' ? statusDanger : statusSuccess}`}>{feedback.text}</p> : null}
     <p className={`mt-5 text-sm ${bodyFaint}`}>
-      Reply STOP to pause all SimplAssist booking texts to this mobile. Turning off alerts here affects this business only.
-      Unconfirmed requests and appointments made outside SimplAssist do not trigger these alerts.
+      Reply STOP to pause all SimplAssist business texts to this mobile. Turning off alerts here affects this business only.
+      A sign-up-link alert means a text was sent to a caller; it does not confirm delivery or registration.
+      Unconfirmed booking requests and appointments made outside SimplAssist do not trigger alerts.
     </p>
   </section>;
 }
@@ -174,7 +176,7 @@ export default function OwnerBookingAlerts() {
     void loadBookingAlerts(controller.signal).then((next) => {
       if (!controller.signal.aborted) accept(next);
     }).catch(() => {
-      if (!controller.signal.aborted) setFeedback({ kind: 'error', text: 'Could not load booking alerts. Please refresh.' });
+      if (!controller.signal.aborted) setFeedback({ kind: 'error', text: 'Could not load business alerts. Please refresh.' });
     }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [accept]);
@@ -200,7 +202,7 @@ export default function OwnerBookingAlerts() {
         if (!next.pendingRecipient) {
           setEditing(false);
           setConsent(false);
-          if (next.status === 'active') setFeedback({ kind: 'success', text: 'Your mobile is verified. Booking texts are now on.' });
+          if (next.status === 'active') setFeedback({ kind: 'success', text: 'Your mobile is verified. Business texts are now on.' });
           return;
         }
         timer = setTimeout(() => void poll(), BOOKING_ALERT_POLL_INTERVAL_MS);
@@ -220,7 +222,7 @@ export default function OwnerBookingAlerts() {
     try {
       const next = await loadBookingAlerts();
       if (generation === mutationGeneration.current) accept(next);
-    } catch (error) { setFeedback({ kind: 'error', text: error instanceof Error ? error.message : 'Could not refresh booking alerts.' }); }
+    } catch (error) { setFeedback({ kind: 'error', text: error instanceof Error ? error.message : 'Could not refresh business alerts.' }); }
     finally { setLoading(false); }
   };
   const mutate = async (update: BookingAlertUpdate) => {
@@ -235,9 +237,9 @@ export default function OwnerBookingAlerts() {
       setEditing(false);
       setConsent(false);
       setPollingStopped(false);
-      if (update.action === 'disable') setFeedback({ kind: 'success', text: 'Booking texts are off for this business.' });
+      if (update.action === 'disable') setFeedback({ kind: 'success', text: 'Business texts are off for this business.' });
     } catch (error) {
-      setFeedback({ kind: 'error', text: error instanceof Error ? error.message : 'Could not update booking alerts.' });
+      setFeedback({ kind: 'error', text: error instanceof Error ? error.message : 'Could not update business alerts.' });
     } finally { mutationBusy.current = false; setBusy(false); }
   };
   const enroll = () => {

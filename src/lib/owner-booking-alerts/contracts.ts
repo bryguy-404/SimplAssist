@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
-export const OWNER_BOOKING_ALERT_CONSENT_VERSION = '2026-09-23-v1';
-export const OWNER_BOOKING_ALERT_DISCLOSURE = 'I agree to receive automated SimplAssist booking-alert texts at the mobile number I provide for this business. Message frequency varies. Message and data rates may apply. Reply STOP to stop alerts or HELP for help. Consent is optional and is not a condition of purchase. If this number receives SimplAssist booking alerts for multiple businesses, STOP stops all of those alerts.';
+export const OWNER_BOOKING_ALERT_CONSENT_VERSION = '2026-09-24-v2';
+export const OWNER_BOOKING_ALERT_DISCLOSURE = 'I agree to receive automated SimplAssist business-alert texts about confirmed bookings and sign-up links sent to callers at the mobile number I provide for this business. A sign-up-link alert does not confirm completed registration. Message frequency varies. Message and data rates may apply. Reply STOP to stop alerts or HELP for help. Consent is optional and is not a condition of purchase. If this number receives SimplAssist business alerts for multiple businesses, STOP stops all of those alerts.';
 export const OWNER_BOOKING_ALERT_PRIVACY_URL = 'https://simplassist.com/privacy';
 export const OWNER_BOOKING_ALERT_TERMS_URL = 'https://simplassist.com/terms';
 export const OWNER_BOOKING_ALERT_PROGRAM_URL = 'https://simplassist.com/booking-alerts';
@@ -35,15 +35,25 @@ export function normalizeOwnerAlertPhone(value: string): string | null {
 export function ownerAlertVerificationMessage(token: string): string { return `ALERTS ${token}`; }
 export function ownerAlertSmsUrl(sender: string, message: string): string { return `sms:${sender}?body=${encodeURIComponent(message)}`; }
 
+function alertMessageContext(businessName: string, dashboardUrl: string): string {
+  const parsed = new URL(dashboardUrl);
+  if (parsed.origin !== 'https://simplassist.com' || !/^\/booking-alerts\/open\/[A-Za-z0-9_-]{43}$/.test(parsed.pathname) || parsed.search || parsed.hash) throw new Error('invalid_alert_link');
+  return businessName.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Your business';
+}
+
 /** Never include customer information, line breaks from user input, or unbounded business names. */
 export function bookingAlertMessage(input: { businessName: string; startsAt: string; timezone: string; dashboardUrl: string }): string {
   const date = new Date(input.startsAt);
   if (!Number.isFinite(date.getTime())) throw new Error('invalid_booking_time');
-  const parsed = new URL(input.dashboardUrl);
-  if (parsed.origin !== 'https://simplassist.com' || !/^\/booking-alerts\/open\/[A-Za-z0-9_-]{43}$/.test(parsed.pathname) || parsed.search || parsed.hash) throw new Error('invalid_alert_link');
-  const name = input.businessName.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Your business';
+  const name = alertMessageContext(input.businessName, input.dashboardUrl);
   const time = new Intl.DateTimeFormat('en-US', { timeZone: input.timezone, month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).format(date);
   return `SimplAssist: ${name} has a new appointment booked for ${time}. View details: ${input.dashboardUrl} Reply STOP to opt out; HELP for help.`;
 }
 
-export const OWNER_ALERT_ENROLLMENT_MESSAGE = 'SimplAssist booking alerts are enabled for this business. Message frequency varies. Msg & data rates may apply. Reply STOP to stop alerts or HELP for help.';
+/** Records a provider-accepted caller text, never a completed registration or delivery guarantee. */
+export function signupLinkAlertMessage(input: { businessName: string; dashboardUrl: string }): string {
+  const name = alertMessageContext(input.businessName, input.dashboardUrl);
+  return `SimplAssist: ${name} sent a sign-up link to a caller. View details: ${input.dashboardUrl} Reply STOP to opt out; HELP for help.`;
+}
+
+export const OWNER_ALERT_ENROLLMENT_MESSAGE = 'SimplAssist business alerts are enabled for this business. Message frequency varies. Msg & data rates may apply. Reply STOP to stop alerts or HELP for help.';

@@ -23,7 +23,7 @@ async function request(
     response = await fetcher('/api/settings/booking-alerts', { ...init, cache: 'no-store' });
   } catch (error) {
     if (init.signal?.aborted) throw error;
-    throw new BookingAlertRequestError('Could not reach booking alerts. Please try again.', 0);
+    throw new BookingAlertRequestError('Could not reach business alerts. Please try again.', 0);
   }
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
@@ -33,20 +33,20 @@ async function request(
       : code === 'phone_reserved'
         ? 'Use your own mobile number, not a SimplAssist assistant number.'
       : response.status === 409
-      ? 'Booking alert settings changed. Refresh and review them before trying again.'
+      ? 'Business alert settings changed. Refresh and review them before trying again.'
       : response.status === 429
         ? 'Please wait a few minutes before requesting another verification text.'
         : response.status === 400
           ? 'Check your mobile number and consent, then try again.'
           : response.status === 403
-            ? 'Booking alerts are not available with your current access.'
-            : 'Booking alerts are temporarily unavailable. Please try again.';
+            ? 'Business alerts are not available with your current access.'
+            : 'Business alerts are temporarily unavailable. Please try again.';
     throw new BookingAlertRequestError(message, response.status);
   }
   const parsed = ownerBookingAlertSettingsSchema.safeParse(
     body && typeof body === 'object' && 'alerts' in body ? body.alerts : null,
   );
-  if (!parsed.success || parsed.data.consentVersion !== OWNER_BOOKING_ALERT_CONSENT_VERSION) throw new BookingAlertRequestError('Booking alert settings could not be verified. Please refresh.', 0);
+  if (!parsed.success || parsed.data.consentVersion !== OWNER_BOOKING_ALERT_CONSENT_VERSION) throw new BookingAlertRequestError('Business alert settings could not be verified. Please refresh.', 0);
   return parsed.data;
 }
 

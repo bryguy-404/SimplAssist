@@ -11,7 +11,7 @@ export default function BookingAlertDisclosure({ disclosure = OWNER_BOOKING_ALER
       {' · '}
       <a href="https://simplassist.com/terms#owner-booking-alerts" className={inlineLink} target="_blank" rel="noopener noreferrer">SMS Terms</a>
       {' · '}
-      <a href="https://simplassist.com/booking-alerts" className={inlineLink} target="_blank" rel="noopener noreferrer">About booking alerts</a>
+      <a href="https://simplassist.com/booking-alerts" className={inlineLink} target="_blank" rel="noopener noreferrer">About business alerts</a>
     </p>
     <p>For help, email <a href={`mailto:${SUPPORT_EMAIL}`} className={inlineLink}>{SUPPORT_EMAIL}</a>.</p>
   </div>;

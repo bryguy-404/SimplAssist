@@ -10,20 +10,20 @@ import { loadBookingAlerts, shouldShowBookingAlertNudge, updateBookingAlerts } f
 export function BookingAlertNudgeContent({ busy = false, error = null, onDismiss }: {
   busy?: boolean; error?: string | null; onDismiss?: () => void;
 }) {
-  return <section aria-label="Set up booking alerts" className={`relative p-6 ${card}`}>
+  return <section aria-label="Set up business alerts" className={`relative p-6 ${card}`}>
     <div className="flex gap-4 pr-8">
       <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--brand-accent-soft)] text-[var(--brand-accent)] dark:bg-white/[0.06] dark:text-[var(--brand-accent-dark)]">
         <BellRing className="h-5 w-5" aria-hidden="true" />
       </div>
       <div>
-        <h2 className={`font-semibold ${ink}`}>Want a text when an appointment is booked?</h2>
-        <p className={`mt-1 text-sm ${bodyFaint}`}>SimplAssist can text your mobile after it confirms a booking in your connected calendar.</p>
+        <h2 className={`font-semibold ${ink}`}>Want updates sent to your phone?</h2>
+        <p className={`mt-1 text-sm ${bodyFaint}`}>SimplAssist can text your mobile when it confirms a booking or sends a sign-up link to a caller.</p>
         <Link href="/settings#booking-alerts" className={`mt-3 inline-flex items-center gap-2 text-sm ${inlineLink}`}>
-          Set up booking alerts <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          Set up business alerts <ArrowRight className="h-4 w-4" aria-hidden="true" />
         </Link>
       </div>
     </div>
-    <button type="button" disabled={busy} aria-label="Dismiss booking alert setup" onClick={onDismiss}
+    <button type="button" disabled={busy} aria-label="Dismiss business alert setup" onClick={onDismiss}
       className="absolute right-4 top-4 rounded-lg p-2 text-stone-400 hover:text-stone-700 focus-visible:outline focus-visible:outline-2 dark:hover:text-white disabled:opacity-50">
       <X className="h-4 w-4" aria-hidden="true" />
     </button>

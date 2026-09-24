@@ -63,7 +63,7 @@ vi.mock("@/components/dashboard/DashboardOverview", () => ({
   default: mocks.dashboardOverview,
 }));
 vi.mock('@/components/owner-booking-alerts/BookingAlertNudge', () => ({
-  default: () => <section aria-label="Set up booking alerts">Owner booking alert nudge</section>,
+  default: () => <section aria-label="Set up business alerts">Owner business alert nudge</section>,
 }));
 vi.mock("@/components/entitlements/FeatureStatusBanners", () => ({
   FeatureStatusBanners: mocks.featureStatusBanners,
@@ -469,26 +469,36 @@ describe("DashboardPage recent conversation previews", () => {
   });
 });
 
-describe("DashboardPage Chat Only projection", () => {
+describe("DashboardPage business alert invitation", () => {
   it('offers owner alert setup for direct bookings without a customer SMS plan', async () => {
     configureResolvedDashboardWithSavedGuardrails({ primaryGoal: 'book', calendarConnected: true,
       bookingEnabled: true, bookingMode: 'schedule_direct' });
     mocks.getDashboardPageEntitlements.mockResolvedValue({ status: 'resolved', entitlements: { ...ENTITLEMENTS, plan: 'chat_only' } });
     mocks.planRequiresSmsProvisioning.mockReturnValue(false);
     const html = renderToStaticMarkup(await DashboardPage());
-    expect(html).toContain('Owner booking alert nudge');
+    expect(html).toContain('Owner business alert nudge');
     expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
   });
 
+  it('offers alert setup to a Full Suite sign-up account without calendar or booking setup', async () => {
+    configureResolvedDashboardWithSavedGuardrails({ primaryGoal: 'signup',
+      calendarConnected: false, bookingEnabled: false, canUseCalendar: false });
+    mocks.getDashboardPageEntitlements.mockResolvedValue({ status: 'resolved', entitlements: { ...ENTITLEMENTS, plan: 'full' } });
+    const html = renderToStaticMarkup(await DashboardPage());
+    expect(html).toContain('Owner business alert nudge');
+    expect(html).not.toContain('Google Calendar not connected');
+  });
+
   it.each([
-    { primaryGoal: 'signup' as const, calendarConnected: true, bookingEnabled: true, bookingMode: 'schedule_direct' as const },
     { primaryGoal: 'book' as const, calendarConnected: false, bookingEnabled: true, bookingMode: 'schedule_direct' as const },
     { primaryGoal: 'book' as const, calendarConnected: true, bookingEnabled: true, bookingMode: 'collect_info' as const },
   ])('keeps owner setup invitation hidden without direct calendar booking: %j', async (setup) => {
     configureResolvedDashboardWithSavedGuardrails(setup);
-    expect(renderToStaticMarkup(await DashboardPage())).not.toContain('Owner booking alert nudge');
+    expect(renderToStaticMarkup(await DashboardPage())).not.toContain('Owner business alert nudge');
   });
+});
 
+describe("DashboardPage Chat Only projection", () => {
   it("does not read phone or side-effectful SMS readiness and marks the overview no-SMS", async () => {
     configureResolvedDashboardWithSavedGuardrails({ primaryGoal: "book" });
     mocks.getDashboardPageEntitlements.mockResolvedValue({

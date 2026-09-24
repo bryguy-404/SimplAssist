@@ -187,7 +187,8 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      {!signupMode && canUseCalendar && calendarToken && aiSettings?.booking_enabled && aiSettings.booking_mode === 'schedule_direct' ? <BookingAlertNudge key={business.id} /> : null}
+      {/* The invitation checks alert eligibility, enrollment, and dismissal for either goal. */}
+      {signupMode || (canUseCalendar && calendarToken && aiSettings?.booking_enabled && aiSettings.booking_mode === 'schedule_direct') ? <BookingAlertNudge key={business.id} /> : null}
 
       <DashboardOverview
         stats={{

@@ -64,14 +64,19 @@ they do not automatically create a direct Stripe subscription.
 
 ## Release sequence
 
-1. Apply migrations 095–102 in a disposable environment and run the guarded
+1. Apply migrations 095–104 in a disposable environment and run the guarded
    database suite, unit tests, type checking, and customer/review browser flows.
 2. Configure the verified review email sender, signed webhook, link secret and
    dedicated Railway worker described in [review-request-operations.md](./review-request-operations.md).
 3. Expose the Customers screen to selected businesses with
    `CUSTOMERS_WORKSPACE_BUSINESS_IDS` (comma-separated UUIDs), or use
-   `CUSTOMERS_WORKSPACE_ENABLED=1` for the general release. Align email and SMS
-   environment pilot lists with the service-only database control row.
+   `CUSTOMERS_WORKSPACE_ENABLED=1` for the general release. For all new accounts,
+   set `REVIEWS_EMAIL_PILOT_BUSINESS_IDS=*` and database
+   `review_email_control.all_businesses_enabled=true`. Preserve accounts that
+   are intentionally outside this rollout with matching
+   `CUSTOMER_REVIEWS_EXCLUDED_BUSINESS_IDS` and database
+   `excluded_business_ids`. Exclusions override wildcard and explicit pilot
+   access. Neither admission control enables sending by itself.
 4. Complete an owner-only pilot with outbound sending initially off. Verify
    setup, imports, permissions, preview, scheduling, stopping, quota handling,
    callbacks, and unsubscribe before enabling email sending for the pilot.
@@ -80,6 +85,12 @@ they do not automatically create a direct Stripe subscription.
    Set `REVIEWS_SMS_PROVISIONING_ENABLED=1` only when paid provider work should
    run. Enable SMS sending only after the sender, consent flow and payment are
    verified. Keep shared/platform/owner-alert senders protected.
+   Verify the actual profile's STOP/START/HELP responders and that the approved
+   campaign declares embedded links. Review-owned provisioning configures these
+   responders; existing profiles are inspected without rewriting their responses.
+   An existing customer-care campaign needs a newly approved appropriate campaign,
+   not just an administrator override. Preserve its working number while the
+   replacement application is pending.
 6. Test the $49 activation, $20 add-on, partial-period quote, renewal, failed
    payment, cancellation and pre-submission refund in Stripe test mode. Validate
    representative AI and voice costs with the owner before publicly releasing
@@ -93,6 +104,12 @@ they do not automatically create a direct Stripe subscription.
 The release worker operates independently of the message sending kill switch.
 Disabling outbound messages must not leave paid resources rented indefinitely.
 Uncertain destructive results require reconciliation before another attempt.
+
+The guarded `scripts/review-stripe-release-e2e.mjs` harness exercises real Stripe
+test-mode billing contracts with fresh disposable resources and a read-only
+local database schema preflight. It does not certify hosted Checkout completion,
+application webhook/entitlement synchronization, or carrier delivery. Never pass
+production credentials or a remote database to it.
 
 ## Deliberately limited first release
 

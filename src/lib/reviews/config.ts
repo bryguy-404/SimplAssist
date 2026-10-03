@@ -1,11 +1,21 @@
-/** Server-side rollout; an empty pilot list never enables a tenant. */
-export function isEmailReviewsEnabledForBusiness(businessId: string): boolean {
-  const pilots = (process.env.REVIEWS_EMAIL_PILOT_BUSINESS_IDS ?? "")
-    .split(",")
-    .map((v) => v.trim());
+import {
+  customerReviewsBusinessExcluded,
+  customerReviewsPilotIncludes,
+} from "@/lib/billing/customerReviewsRollout";
+
+/** An explicit all-account rollout still honors existing-account exclusions. */
+export function isEmailReviewsEnabledForBusiness(
+  businessId: string,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): boolean {
   return (
-    process.env.REVIEWS_EMAIL_ENABLED === "1" &&
-    (pilots.includes(businessId) || pilots.includes("*"))
+    environment.REVIEWS_EMAIL_ENABLED === "1" &&
+    !customerReviewsBusinessExcluded(businessId, environment) &&
+    customerReviewsPilotIncludes(
+      businessId,
+      environment.REVIEWS_EMAIL_PILOT_BUSINESS_IDS,
+      true,
+    )
   );
 }
 export function isReviewEmailSendingEnabled(): boolean {

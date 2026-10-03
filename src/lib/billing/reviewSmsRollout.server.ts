@@ -1,12 +1,21 @@
 import "server-only";
+import {
+  customerReviewsBusinessExcluded,
+  customerReviewsPilotIncludes,
+} from "./customerReviewsRollout";
 
 /** A review-SMS pilot does not grant any base-plan messaging capability. */
-export function isReviewSmsEnabled(businessId: string): boolean {
-  const pilots = (process.env.REVIEWS_SMS_PILOT_BUSINESS_IDS ?? "")
-    .split(",")
-    .map((v) => v.trim());
+export function isReviewSmsEnabled(
+  businessId: string,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): boolean {
   return (
-    process.env.REVIEWS_SMS_ENABLED === "1" &&
-    (pilots.includes(businessId) || pilots.includes("*"))
+    !customerReviewsBusinessExcluded(businessId, environment) &&
+    environment.REVIEWS_SMS_ENABLED === "1" &&
+    customerReviewsPilotIncludes(
+      businessId,
+      environment.REVIEWS_SMS_PILOT_BUSINESS_IDS,
+      true,
+    )
   );
 }

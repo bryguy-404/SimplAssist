@@ -235,7 +235,10 @@ export async function processTenantSmsInbound(args: {
   });
   if (r.error || !r.data)
     throw new Error("SMS inbound suppression state unavailable");
-  return r.data as { reviewHeld: boolean; keyword: "stop" | "start" | null };
+  return r.data as {
+    reviewHeld: boolean;
+    keyword: "stop" | "start" | "help" | null;
+  };
 }
 export interface TenantSmsReceipt {
   id?: string;

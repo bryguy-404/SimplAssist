@@ -259,6 +259,8 @@ export async function POST(request: NextRequest) {
       conversationId: conversation.id,
     });
     if (inboundState.reviewHeld || inboundState.keyword) {
+      // Telnyx's configured profile handles STOP/START/HELP confirmations.
+      // These controls must never enter AI processing or create a second reply.
       await completeMessagingWebhookEvent(eventKey, ownedClaimToken);
       return new NextResponse("OK", { status: 200 });
     }

@@ -1603,7 +1603,7 @@ describe("POST /api/messaging/webhook", () => {
 });
 
 describe("shared review reply suppression boundary", () => {
-  it.each(["stop", "start"] as const)(
+  it.each(["stop", "start", "help"] as const)(
     "persists inbound %s without generating an automated response",
     async (keyword) => {
       mocks.processTenantSmsInbound.mockResolvedValue({
@@ -1619,6 +1619,8 @@ describe("shared review reply suppression boundary", () => {
         }),
       );
       expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+      expect(mocks.recordKnowledgeGap).not.toHaveBeenCalled();
+      expect(mocks.finalizeGoalLinkEvent).not.toHaveBeenCalled();
       expect(mocks.send).not.toHaveBeenCalled();
     },
   );

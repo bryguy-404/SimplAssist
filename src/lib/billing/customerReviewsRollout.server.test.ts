@@ -39,4 +39,25 @@ describe("customer workspace rollout", () => {
       }),
     ).toBe(false);
   });
+  it.each(["1", "0"])(
+    "keeps an existing excluded account out of both broad and pilot access (global=%s)",
+    (enabled) => {
+      const environment = {
+        CUSTOMERS_WORKSPACE_ENABLED: enabled,
+        CUSTOMERS_WORKSPACE_BUSINESS_IDS: businessId,
+        CUSTOMER_REVIEWS_EXCLUDED_BUSINESS_IDS: ` ${businessId.toUpperCase()} `,
+      };
+      expect(customerWorkspaceEnabled(businessId, environment)).toBe(false);
+      expect(customerWorkspaceEnabled(otherId, environment)).toBe(enabled === "1");
+    },
+  );
+  it("blocks rollout when the existing-account exclusion list is malformed", () => {
+    expect(
+      customerWorkspaceEnabled(businessId, {
+        CUSTOMERS_WORKSPACE_ENABLED: "1",
+        CUSTOMERS_WORKSPACE_BUSINESS_IDS: businessId,
+        CUSTOMER_REVIEWS_EXCLUDED_BUSINESS_IDS: `${otherId},typo`,
+      }),
+    ).toBe(false);
+  });
 });

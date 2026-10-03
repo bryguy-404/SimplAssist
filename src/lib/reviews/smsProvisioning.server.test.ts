@@ -8,6 +8,11 @@ const mocks = vi.hoisted(() => ({
   profile: vi.fn(),
   voice: vi.fn(),
   phone: vi.fn(),
+  inspectKeywords: vi.fn(),
+  ensureKeywords: vi.fn(),
+  keywordProgram: vi.fn(),
+  providerProfile: vi.fn(),
+  profileOwnership: true,
   business: {} as Record<string, unknown>,
 }));
 vi.mock("server-only", () => ({}));
@@ -16,7 +21,7 @@ vi.mock("@/lib/supabase/admin", () => ({
     rpc: mocks.rpc,
     from: (table: string) => {
       const chain: Record<string, unknown> = {};
-      for (const method of ["select", "update", "eq", "is"])
+      for (const method of ["select", "update", "eq", "is", "gte", "limit"])
         chain[method] = () => chain;
       chain.maybeSingle = chain.single = async () => ({
         data:
@@ -24,7 +29,9 @@ vi.mock("@/lib/supabase/admin", () => ({
             ? mocks.business
             : table === "phone_numbers"
               ? { id: "phone-id", phone_number: "+15745550111" }
-              : null,
+              : table === "telnyx_registration_events" && mocks.profileOwnership
+                ? { id: "profile-created-event" }
+                : null,
         error: null,
       });
       return chain;
@@ -34,8 +41,15 @@ vi.mock("@/lib/supabase/admin", () => ({
 vi.mock("@/lib/stripe/reviewSms.server", () => ({
   readReviewSmsAccount: mocks.account,
 }));
+vi.mock("./smsKeywords.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./smsKeywords.server")>()),
+  inspectReviewSmsKeywords: mocks.inspectKeywords,
+  ensureReviewSmsKeywords: mocks.ensureKeywords,
+  keywordProgramFromCampaign: mocks.keywordProgram,
+}));
 vi.mock("@/lib/messaging/client", () => ({
   telnyx: {
+    messagingProfiles: { retrieve: mocks.providerProfile },
     messaging10dlc: {
       brand: { retrieve: mocks.brand },
       campaign: { retrieve: mocks.campaign },
@@ -89,8 +103,19 @@ beforeEach(() => {
   vi.stubEnv("REVIEWS_SMS_PILOT_BUSINESS_IDS", businessId);
   vi.stubEnv("REVIEWS_SMS_PROVISIONING_ENABLED", "1");
   vi.stubEnv("TELNYX_PROTECTED_MESSAGING_PROFILE_ID", "protected-profile");
+  mocks.profileOwnership = true;
+  mocks.inspectKeywords.mockResolvedValue({ ready: true, issues: [] });
+  mocks.ensureKeywords.mockResolvedValue(undefined);
+  mocks.providerProfile.mockResolvedValue({
+    data: {
+      id: "tenant-profile",
+      name: `Example LLC (${businessId})`,
+      created_at: "2026-01-02T00:00:00Z",
+    },
+  });
   mocks.business = {
     id: businessId,
+    name: "Example LLC",
     owner_id: "owner",
     telnyx_brand_id: "brand",
     telnyx_campaign_id: "campaign",
@@ -123,6 +148,7 @@ beforeEach(() => {
   mocks.campaign.mockResolvedValue({
     brandId: "brand",
     usecase: "MARKETING",
+    embeddedLink: true,
     campaignStatus: "MNO_PROVISIONED",
   });
   mocks.rpc.mockResolvedValue({ data: true, error: null });
@@ -183,6 +209,7 @@ describe("review SMS provider authority", () => {
       brandId: "brand",
       usecase: "MIXED",
       subUsecases: ["CUSTOMER_CARE", "MARKETING"],
+      embeddedLink: true,
       campaignStatus: "MNO_PROVISIONED",
     });
     await approveExistingReviewSmsUsecase(
@@ -233,6 +260,131 @@ describe("review SMS provider authority", () => {
         p_forbidden_profiles: ["protected-profile"],
       }),
     );
+  });
+  it("does not approve existing campaign until runtime keywords are verified", async () => {
+    mocks.inspectKeywords.mockResolvedValue({
+      ready: false,
+      issues: ["missing_info"],
+    });
+    await expect(
+      approveExistingReviewSmsUsecase(
+        businessId,
+        adminId,
+        "Carrier approved this exact review program",
+      ),
+    ).rejects.toMatchObject({ code: "review_sms_keywords_not_ready" });
+    expect(mocks.ensureKeywords).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+  it.each([false, undefined])(
+    "does not approve a campaign without declared embedded links: %s",
+    async (embeddedLink) => {
+      mocks.campaign.mockResolvedValue({
+        brandId: "brand",
+        usecase: "MARKETING",
+        campaignStatus: "MNO_PROVISIONED",
+        embeddedLink,
+      });
+      await expect(
+        approveExistingReviewSmsUsecase(
+          businessId,
+          adminId,
+          "Carrier approved this exact review program",
+        ),
+      ).rejects.toMatchObject({ code: "review_sms_carrier_approval_required" });
+      expect(mocks.inspectKeywords).not.toHaveBeenCalled();
+      expect(mocks.rpc).not.toHaveBeenCalled();
+    },
+  );
+  it("cannot mark a review-owned sender ready without approved embedded links", async () => {
+    mocks.account.mockResolvedValue({
+      id: "account",
+      campaign_id: "campaign",
+      provider_submitted_at: "2026-01-01T00:00:00Z",
+      state: "carrier_pending",
+    });
+    mocks.campaign.mockResolvedValue({
+      brandId: "brand",
+      usecase: "MARKETING",
+      referenceId: "reviews:account",
+      campaignStatus: "MNO_PROVISIONED",
+      embeddedLink: false,
+    });
+    await expect(
+      refreshReviewSmsProviderReadiness(businessId),
+    ).rejects.toMatchObject({ code: "review_sms_campaign_mismatch" });
+    expect(mocks.inspectKeywords).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+  it.each([false, true])(
+    "never rewrites a profile without both exclusive resources and a creation event (exclusive=%s)",
+    async (exclusive) => {
+      mocks.profileOwnership = false;
+      mocks.account.mockResolvedValue({
+        id: "account",
+        business_id: businessId,
+        owner_id: "owner",
+        state: "carrier_pending",
+        billing_source: "direct",
+        exclusive_resources: exclusive,
+        created_at: "2026-01-01T00:00:00Z",
+        draft: {
+          phoneNumber: "+15745550111",
+          consentDescription: "Customer permission",
+          consentEvidenceUrl: "https://example.test/consent",
+        },
+      });
+      mocks.rpc.mockImplementation(async (name: string) => ({
+        data: name === "review_sms_claim_provisioning" ? "claim" : true,
+        error: null,
+      }));
+      mocks.brand.mockResolvedValue({
+        identityStatus: "VERIFIED",
+        status: "OK",
+      });
+      await expect(
+        continueReviewSmsProvisioning(businessId),
+      ).rejects.toMatchObject({
+        code: "review_sms_keyword_profile_not_owned",
+      });
+      expect(mocks.ensureKeywords).not.toHaveBeenCalled();
+      expect(mocks.phone).not.toHaveBeenCalled();
+    },
+  );
+  it("does not treat recovery of an older provider profile as review ownership", async () => {
+    mocks.account.mockResolvedValue({
+      id: "account",
+      business_id: businessId,
+      owner_id: "owner",
+      state: "carrier_pending",
+      billing_source: "direct",
+      exclusive_resources: true,
+      created_at: "2026-01-01T00:00:00Z",
+      draft: {
+        phoneNumber: "+15745550111",
+        consentDescription: "Customer permission",
+        consentEvidenceUrl: "https://example.test/consent",
+      },
+    });
+    mocks.rpc.mockImplementation(async (name: string) => ({
+      data: name === "review_sms_claim_provisioning" ? "claim" : true,
+      error: null,
+    }));
+    mocks.brand.mockResolvedValue({ identityStatus: "VERIFIED", status: "OK" });
+    mocks.providerProfile.mockResolvedValue({
+      data: {
+        id: "tenant-profile",
+        name: `Example LLC (${businessId})`,
+        created_at: "2025-01-01T00:00:00Z",
+      },
+    });
+    await expect(
+      continueReviewSmsProvisioning(businessId),
+    ).rejects.toMatchObject({
+      code: "review_sms_keyword_profile_not_owned",
+    });
+    expect(mocks.ensureKeywords).not.toHaveBeenCalled();
+    expect(mocks.phone).not.toHaveBeenCalled();
   });
   it("waits for verified brand identity before number purchase or campaign work", async () => {
     mocks.account.mockResolvedValue({

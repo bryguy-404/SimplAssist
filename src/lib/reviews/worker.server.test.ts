@@ -70,6 +70,16 @@ describe("durable review dispatch", () => {
       expect.anything(),
     );
   });
+  it("does not send a claimed job for an excluded account during general rollout", async () => {
+    vi.stubEnv("REVIEWS_EMAIL_PILOT_BUSINESS_IDS", "*");
+    vi.stubEnv("CUSTOMER_REVIEWS_EXCLUDED_BUSINESS_IDS", job.business_id);
+    await runReviewEmailWorker();
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalledWith(
+      "review_begin_email",
+      expect.anything(),
+    );
+  });
   it("never calls provider when final admission refuses", async () => {
     mocks.rpc.mockImplementation(async (name: string) =>
       name === "review_claim_emails" ? [job] : null,

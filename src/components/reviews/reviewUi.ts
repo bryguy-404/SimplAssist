@@ -58,6 +58,26 @@ const REASONS: Record<string, string> = {
     "Your registered business identity cannot be changed here. Contact support to update it.",
   review_sms_existing_campaign_needs_approval:
     "Your existing texting registration needs approval for review requests. Contact support.",
+  review_sms_keyword_copy_invalid:
+    "Check your business name and support email before continuing texting setup.",
+  review_sms_campaign_keywords_missing:
+    "Your carrier registration is missing confirmation messages. Contact support to complete them.",
+  review_sms_campaign_keywords_unsupported:
+    "Your carrier registration uses keywords that need a support review before review texting can start.",
+  review_sms_keyword_profile_not_owned:
+    "Your existing texting profile needs a support review. Its automatic responses have not been changed.",
+  review_sms_keywords_not_ready:
+    "Your STOP, START, or HELP responses still need to be verified. Contact support to finish texting setup.",
+  review_sms_keywords_conflict:
+    "Your texting profile has conflicting keyword responses. Contact support to resolve them.",
+  review_sms_keywords_reconciliation_required:
+    "A keyword setup result needs a support check before continuing. Do not start another application.",
+  review_sms_keywords_list_incomplete:
+    "We could not verify all carrier keyword responses. Contact support before continuing texting setup.",
+  review_sms_keywords_response_invalid:
+    "The carrier returned keyword settings we could not verify. Contact support to finish setup.",
+  review_sms_keywords_intent_unavailable:
+    "We could not safely record the keyword setup step. Contact support before trying again.",
   review_sms_risk_review_required:
     "Your business registration needs a support review before submission.",
   review_sms_refund_unavailable:

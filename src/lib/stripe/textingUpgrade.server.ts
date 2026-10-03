@@ -134,7 +134,7 @@ export function verifyTextingUpgradeInvoice(invoice: Stripe.Invoice, lines: Stri
       !op.confirmed_at || invoice.created < seconds(op.confirmed_at) - 60 || invoice.amount_due !== op.quote.amountDueCents)
     throw new TextingUpgradeError("texting_upgrade_invoice_mismatch");
   const fees = lines.filter(l => l.pricing?.price_details?.price === op.setup_fee_price_id);
-  if (fees.length !== 1 || fees[0].quantity !== 1 || fees[0].amount !== SETUP_FEE_CENTS ||
+  if (fees.length !== 1 || fees[0].quantity !== 1 || fees[0].amount !== Number(op.quote.setupFeeCents ?? 2500) ||
       fees[0].metadata.sms_billing_operation_id !== op.id || fees[0].metadata.chat_texting_upgrade_id !== u.id)
     throw new TextingUpgradeError("texting_upgrade_setup_fee_unverified");
   const target = lines.find(l => l.pricing?.price_details?.price === op.target_price_id && l.parent?.subscription_item_details?.proration &&

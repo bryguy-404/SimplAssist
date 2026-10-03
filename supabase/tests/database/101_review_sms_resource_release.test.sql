@@ -1,0 +1,41 @@
+BEGIN;
+CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
+SET LOCAL search_path=public,extensions;
+SELECT no_plan();
+INSERT INTO auth.users(id,email) VALUES('00000000-0000-4000-a101-000000000001','release-owner@example.test');
+INSERT INTO businesses(id,owner_id,name,business_type,slug,billing_mode,telnyx_campaign_id,telnyx_messaging_profile_id,telnyx_voice_application_id) VALUES('10000000-0000-4000-a101-000000000001','00000000-0000-4000-a101-000000000001','Release Fixture','general','review-release-101','stripe','campaign101','10000000-0000-4000-a101-000000000010','101000000001');
+INSERT INTO subscriptions(business_id,stripe_customer_id,stripe_subscription_id,plan,status) VALUES('10000000-0000-4000-a101-000000000001','cus_release101','sub_release101','chat_only','active');
+INSERT INTO phone_numbers(id,business_id,phone_number,telnyx_phone_number_id,is_active) VALUES('20000000-0000-4000-a101-000000000001','10000000-0000-4000-a101-000000000001','+15745550101','20000000-0000-4000-a101-000000000010',true);
+INSERT INTO review_sms_accounts(id,business_id,owner_id,state,billing_source,source_subscription_id,source_customer_id,exclusive_resources,campaign_id,messaging_profile_id,phone_number_id) VALUES('30000000-0000-4000-a101-000000000001','10000000-0000-4000-a101-000000000001','00000000-0000-4000-a101-000000000001','ready_unpaid','direct','sub_release101','cus_release101',true,'campaign101','10000000-0000-4000-a101-000000000010','20000000-0000-4000-a101-000000000001');
+SELECT ok(NOT review_sms_prepare_release('10000000-0000-4000-a101-000000000001'),'NULL readiness deadline cannot authorize release');
+UPDATE review_sms_accounts SET ready_expires_at=now()-interval '1 second' WHERE id='30000000-0000-4000-a101-000000000001';
+SELECT ok(review_sms_prepare_release('10000000-0000-4000-a101-000000000001'),'expired unpaid dedicated account prepares ordered cleanup');
+SELECT is((SELECT count(*)::integer FROM review_sms_release_actions WHERE account_id='30000000-0000-4000-a101-000000000001'),3,'cleanup contains only number unassignment, number release and campaign deactivation');
+CREATE TEMP TABLE release_claim AS SELECT * FROM review_sms_claim_release();
+-- Build the same reviewed protection manifest the main release boundary requires.
+INSERT INTO businesses(id,name,business_type,slug) VALUES('aa30a10e-13c1-4c9b-b9d5-6804cf01e6cb','Protected fixture','general','protected-release-101') ON CONFLICT(id) DO NOTHING;
+INSERT INTO telnyx_release_protections(protection_key,scope,business_id,reason_code,reviewed_by) VALUES('bryan_develops_retain_all','business_all','aa30a10e-13c1-4c9b-b9d5-6804cf01e6cb','fixture','test101') ON CONFLICT(protection_key) DO NOTHING;
+INSERT INTO telnyx_release_protections(protection_key,scope,resource_type,provider_id,reason_code,reviewed_by) VALUES
+ ('simplassist_shared_messaging_profile','resource','messaging_profile','03400000-0000-4000-a000-0000000000aa','fixture','test101'),
+ ('simplassist_shared_voice_application','resource','voice_application','340000000001','fixture','test101') ON CONFLICT(protection_key) DO UPDATE SET provider_id=excluded.provider_id;
+UPDATE telnyx_resource_release_config SET mode='single_business',single_business_id='10000000-0000-4000-a101-000000000001',expected_shared_messaging_profile_id='03400000-0000-4000-a000-0000000000aa',expected_shared_voice_application_id='340000000001',protection_manifest_fingerprint=telnyx_release_manifest_fingerprint('03400000-0000-4000-a000-0000000000aa','340000000001'),protection_manifest_verified_at=now(),protection_manifest_verified_by='test101',dry_run_completed_at=now(),dry_run_completed_by='test101',updated_by='test101' WHERE id=1;
+CREATE FUNCTION pg_temp.release_auth(p_context text DEFAULT 'review_sms_release',p_claim uuid DEFAULT NULL) RETURNS jsonb LANGUAGE sql AS $$ SELECT authorize_review_sms_remote_mutation('10000000-0000-4000-a101-000000000001',p_context,'unassign_phone_number_campaign','20000000-0000-4000-a101-000000000010',(SELECT id FROM release_claim),p_claim,'03400000-0000-4000-a000-0000000000aa','340000000001') $$;
+SELECT ok((pg_temp.release_auth('review_sms_release',(SELECT claim_token FROM release_claim))->>'authorized')::boolean,'complete dedicated-resource evidence authorizes first cleanup action');
+SELECT throws_ok($$SELECT pg_temp.release_auth(NULL,(SELECT claim_token FROM release_claim))$$,'42501','review_sms_release_not_authorized','NULL context cannot bypass authorization');
+SELECT throws_ok($$SELECT pg_temp.release_auth('review_sms_release',NULL)$$,'42501','review_sms_release_not_authorized','NULL claim cannot bypass authorization');
+UPDATE review_sms_accounts SET release_at=NULL WHERE id='30000000-0000-4000-a101-000000000001';
+SELECT throws_ok($$SELECT pg_temp.release_auth('review_sms_release',(SELECT claim_token FROM release_claim))$$,'42501','review_sms_release_not_authorized','NULL due time cannot authorize remote deletion');
+UPDATE review_sms_accounts SET release_at=now() WHERE id='30000000-0000-4000-a101-000000000001';
+UPDATE owner_booking_alert_control SET sender='+15745550101';
+SELECT throws_ok($$SELECT pg_temp.release_auth('review_sms_release',(SELECT claim_token FROM release_claim))$$,'42501','review_sms_release_not_authorized','owner-alert resource is protected at final mutation boundary');
+UPDATE owner_booking_alert_control SET sender=NULL;
+SELECT ok(NOT review_sms_finish_release((SELECT id FROM release_claim),(SELECT claim_token FROM release_claim),true,NULL),'skipped or unstarted provider mutation cannot be marked complete');
+UPDATE review_sms_release_actions SET state='submitting',lease_until=now()-interval '1 second' WHERE id=(SELECT id FROM release_claim);
+SELECT is((SELECT count(*)::integer FROM review_sms_claim_release()),0,'ambiguous first action prevents subsequent cleanup');
+SELECT is((SELECT state FROM review_sms_release_actions WHERE id=(SELECT id FROM release_claim)),'unknown','crashed mutation is quarantined without blind retry');
+UPDATE subscriptions SET plan='full' WHERE business_id='10000000-0000-4000-a101-000000000001';
+SELECT ok(NOT review_sms_prepare_release('10000000-0000-4000-a101-000000000001'),'later base SMS service preserves shared resources');
+SELECT ok((SELECT is_active FROM phone_numbers WHERE id='20000000-0000-4000-a101-000000000001'),'preserving resources leaves the phone active');
+UPDATE review_sms_release_actions SET state='pending',lease_until=NULL WHERE id=(SELECT id FROM release_claim);
+SELECT is((SELECT count(*)::integer FROM review_sms_claim_release()),0,'stale cleanup actions cannot claim resources after account ownership is preserved');
+SELECT * FROM finish();ROLLBACK;

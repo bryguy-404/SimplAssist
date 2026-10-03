@@ -1108,21 +1108,18 @@ SELECT is(
     FROM public.contacts
     WHERE id = '20000000-0000-4000-a039-000000000004'
   ),
-  'hot',
-  'the trusted identity trigger promotes an owner-updated contact'
+  'normal',
+  'owner identity edits do not manufacture a captured hot lead (customer workspace)'
 );
 
 -- 48
 SELECT ok(
   (
-    SELECT count(*) = 1
-       AND bool_and(reason = 'email_captured')
-       AND bool_and(conversation_id IS NULL)
-       AND bool_and(source_message_id IS NULL)
+    SELECT count(*) = 0
     FROM public.lead_events
     WHERE contact_id = '20000000-0000-4000-a039-000000000004'
   ),
-  'identity-trigger promotion emits one source-neutral HOT audit'
+  'owner identity edits produce no generated-lead audit (automatic capture still does)'
 );
 
 -- ---------------------------------------------------------------------------

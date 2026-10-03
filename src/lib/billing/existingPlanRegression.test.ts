@@ -24,7 +24,7 @@ const EXISTING_PLAN_BASELINE = {
     price: 25,
     includedSmsParts: 500,
     salesStatus: "available",
-    capabilities: ["missed_call_sms", "manual_sms", "contacts_inbox"],
+    capabilities: ["missed_call_sms", "manual_sms", "contacts_inbox", "review_requests"],
   },
   sms_and_chat: {
     name: "Growth / SMS + Web Chat",
@@ -41,6 +41,7 @@ const EXISTING_PLAN_BASELINE = {
       "ai_customization",
       "calendar",
       "direct_booking",
+      "review_requests",
     ],
   },
   full: {
@@ -59,6 +60,7 @@ const EXISTING_PLAN_BASELINE = {
       "calendar",
       "direct_booking",
       "advanced_guardrails",
+      "review_requests",
       "ai_voice_answering",
     ],
   },

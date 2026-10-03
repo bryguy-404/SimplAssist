@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig({
   // Next keeps JSX for its own compiler. Vitest needs JSX lowered before
@@ -13,5 +13,6 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    exclude: [...configDefaults.exclude, "**/.worktrees/**"],
   },
 });

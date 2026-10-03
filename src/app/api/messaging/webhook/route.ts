@@ -1,5 +1,16 @@
-import { isBookingConfirmationEnabled } from '@/lib/booking/draft';
-import { claimBookingSummarySend, recordBookingSummaryAcceptance, markBookingSummaryUncertain, finalizeBookingSummarySend } from '@/lib/booking/summarySend.server';
+import {
+  sendTenantSms,
+  processTenantSmsInbound,
+  reconcileTenantSmsReceipt,
+  type TenantSmsReceipt,
+} from "@/lib/messaging/tenantSmsSend.server";
+import { isBookingConfirmationEnabled } from "@/lib/booking/draft";
+import {
+  claimBookingSummarySend,
+  recordBookingSummaryAcceptance,
+  markBookingSummaryUncertain,
+  finalizeBookingSummarySend,
+} from "@/lib/booking/summarySend.server";
 import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { telnyx } from "@/lib/messaging/client";
@@ -37,11 +48,7 @@ import {
   canUseFeature,
   resolveBusinessEntitlements,
 } from "@/lib/billing/entitlements";
-import type {
-  Contact,
-  Conversation,
-  SmsBlockReason,
-} from "@/types/database";
+import type { Contact, Conversation, SmsBlockReason } from "@/types/database";
 import {
   preflightOutboundSms,
   recordInboundMessagingUsage,
@@ -59,6 +66,7 @@ interface TelnyxMessagePayload {
   to?: Array<{ phone_number?: string }>;
   text?: string;
   media?: unknown[];
+  messaging_profile_id?: string;
 }
 
 interface PersistedInboundContext {
@@ -102,8 +110,20 @@ export async function POST(request: NextRequest) {
   const providerEventId = eventData?.id;
 
   console.log(
-    `[messaging:webhook] event_type=${eventType} event_id=${providerEventId}`
+    `[messaging:webhook] event_type=${eventType} event_id=${providerEventId}`,
   );
+
+  if (eventType === "message.sent" || eventType === "message.finalized") {
+    try {
+      await reconcileTenantSmsReceipt(
+        eventData?.payload as TenantSmsReceipt,
+        request.nextUrl.searchParams.get("smsReservation"),
+      );
+      return new NextResponse("OK", { status: 200 });
+    } catch {
+      return new NextResponse("Retry", { status: 500 });
+    }
+  }
 
   if (eventType !== "message.received") {
     console.log(`[messaging:webhook] Ignoring non-inbound event: ${eventType}`);
@@ -116,7 +136,7 @@ export async function POST(request: NextRequest) {
     const claim = await claimMessagingWebhookEvent(eventKey);
     if (claim.outcome === "completed") {
       console.log(
-        `[messaging:webhook] Idempotency: event ${eventKey} already completed, skipping`
+        `[messaging:webhook] Idempotency: event ${eventKey} already completed, skipping`,
       );
       return new NextResponse("OK", { status: 200 });
     }
@@ -125,7 +145,7 @@ export async function POST(request: NextRequest) {
       // that holder fails, this delivery's retry can acquire the released (or
       // stale) claim instead of silently losing the lead.
       console.warn(
-        `[messaging:webhook] Event ${eventKey} is still in progress; requesting retry`
+        `[messaging:webhook] Event ${eventKey} is still in progress; requesting retry`,
       );
       return new NextResponse("Retry", { status: 500 });
     }
@@ -133,14 +153,14 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error(
       `[messaging:webhook] Failed to claim event ${eventKey}:`,
-      error
+      error,
     );
     return new NextResponse("Retry", { status: 500 });
   }
 
   if (!claimToken) {
     console.error(
-      `[messaging:webhook] Claim RPC did not provide an owner token for ${eventKey}`
+      `[messaging:webhook] Claim RPC did not provide an owner token for ${eventKey}`,
     );
     return new NextResponse("Retry", { status: 500 });
   }
@@ -161,14 +181,14 @@ export async function POST(request: NextRequest) {
 
     if (!from || !to) {
       console.warn(
-        `[messaging:webhook] Missing from or to: from=${from} to=${to}`
+        `[messaging:webhook] Missing from or to: from=${from} to=${to}`,
       );
       await completeMessagingWebhookEvent(eventKey, ownedClaimToken);
       return new NextResponse("OK", { status: 200 });
     }
 
     console.log(
-      `[messaging:webhook] message.received from=${from} to=${to} text.length=${text.length} media.count=${mediaCount}`
+      `[messaging:webhook] message.received from=${from} to=${to} text.length=${text.length} media.count=${mediaCount}`,
     );
 
     const { data: phoneNumberRow, error: lookupError } = await supabaseAdmin
@@ -180,7 +200,7 @@ export async function POST(request: NextRequest) {
 
     if (lookupError) {
       throw new Error(
-        `[messaging:webhook] Phone lookup failed for ${to}: ${lookupError.message}`
+        `[messaging:webhook] Phone lookup failed for ${to}: ${lookupError.message}`,
       );
     }
     if (!phoneNumberRow) {
@@ -194,17 +214,12 @@ export async function POST(request: NextRequest) {
     const entitlements = await resolveBusinessEntitlements(businessId);
     const canUseAi = canUseFeature(entitlements, "ai_sms_conversations");
 
-    const contact = await findOrCreateContact(
-      businessId,
-      from,
-      null,
-      "sms"
-    );
+    const contact = await findOrCreateContact(businessId, from, null, "sms");
     const conversation = await getOrCreateConversation(
       businessId,
       contact.id,
       "sms",
-      { defaultAiHandling: canUseAi }
+      { defaultAiHandling: canUseAi },
     );
 
     // These writes are independently idempotent by the same deterministic
@@ -223,20 +238,39 @@ export async function POST(request: NextRequest) {
       businessId,
       text,
       "sms",
-      eventKey
+      eventKey,
     );
+
+    const inboundProfile = await supabaseAdmin
+      .from("businesses")
+      .select("telnyx_messaging_profile_id")
+      .eq("id", businessId)
+      .single();
+    if (
+      inboundProfile.error ||
+      !inboundProfile.data?.telnyx_messaging_profile_id
+    )
+      throw new Error("Inbound SMS profile unavailable");
+    const inboundState = await processTenantSmsInbound({
+      businessId,
+      messagingProfileId: inboundProfile.data.telnyx_messaging_profile_id,
+      phone: from,
+      text,
+      conversationId: conversation.id,
+    });
+    if (inboundState.reviewHeld || inboundState.keyword) {
+      await completeMessagingWebhookEvent(eventKey, ownedClaimToken);
+      return new NextResponse("OK", { status: 200 });
+    }
 
     const automatedReplyPurpose: Extract<
       OutboundSmsPurpose,
       "ai_reply" | "mms_fallback"
-    > =
-      mediaCount > 0 && text.trim().length < 5
-        ? "mms_fallback"
-        : "ai_reply";
+    > = mediaCount > 0 && text.trim().length < 5 ? "mms_fallback" : "ai_reply";
     if (
       !(await canSendOutboundSmsOperationally(
         { businessId, conversation },
-        automatedReplyPurpose
+        automatedReplyPurpose,
       ))
     ) {
       // The inbound usage + transcript are durable, and a known pause cannot
@@ -248,7 +282,7 @@ export async function POST(request: NextRequest) {
 
     if (!canUseAi) {
       console.log(
-        `[messaging:webhook] Inbound message saved; AI SMS is not entitled for business ${businessId}`
+        `[messaging:webhook] Inbound message saved; AI SMS is not entitled for business ${businessId}`,
       );
       await completeMessagingWebhookEvent(eventKey, ownedClaimToken);
       return new NextResponse("OK", { status: 200 });
@@ -256,7 +290,7 @@ export async function POST(request: NextRequest) {
 
     if (!isAiHandlingActive(conversation)) {
       console.log(
-        `[messaging:webhook] Inbound message saved in Human mode for conversation ${conversation.id}`
+        `[messaging:webhook] Inbound message saved in Human mode for conversation ${conversation.id}`,
       );
       await completeMessagingWebhookEvent(eventKey, ownedClaimToken);
       return new NextResponse("OK", { status: 200 });
@@ -286,7 +320,7 @@ export async function POST(request: NextRequest) {
     if (mediaCount > 0 && text.trim().length < 5) {
       dispatchInBackground(
         sendFallbackReply(context),
-        "MMS fallback processing"
+        "MMS fallback processing",
       );
     } else {
       dispatchInBackground(processAndReply(context), "AI reply processing");
@@ -296,14 +330,14 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error(
       `[messaging:webhook] Retryable processing failure for ${eventKey}:`,
-      error
+      error,
     );
     try {
       await releaseMessagingWebhookClaim(eventKey, ownedClaimToken);
     } catch (releaseError) {
       console.error(
         `[messaging:webhook] Failed to release event ${eventKey}:`,
-        releaseError
+        releaseError,
       );
     }
     return new NextResponse("Retry", { status: 500 });
@@ -311,7 +345,7 @@ export async function POST(request: NextRequest) {
 }
 
 async function sendFallbackReply(
-  context: PersistedInboundContext
+  context: PersistedInboundContext,
 ): Promise<void> {
   if (!(await canStillSendAutomatedReply(context, "mms_fallback"))) return;
 
@@ -324,7 +358,7 @@ async function sendFallbackReply(
 
   if (!sendContext.smsReady) {
     console.warn(
-      `[messaging:webhook] MMS fallback blocked: reason=${sendContext.blockReason} campaign_status=${sendContext.campaignStatus} assignment_status=${sendContext.assignmentStatus} for business ${context.businessId}`
+      `[messaging:webhook] MMS fallback blocked: reason=${sendContext.blockReason} campaign_status=${sendContext.campaignStatus} assignment_status=${sendContext.assignmentStatus} for business ${context.businessId}`,
     );
     await insertPausedSystemMessageIfNeeded({
       conversationId: context.conversation.id,
@@ -343,7 +377,7 @@ async function sendFallbackReply(
   });
   if (!usage.allowed) {
     console.warn(
-      `[messaging:webhook] MMS fallback blocked by usage gate: reason=${usage.reason} for business ${context.businessId}`
+      `[messaging:webhook] MMS fallback blocked by usage gate: reason=${usage.reason} for business ${context.businessId}`,
     );
     await insertPausedSystemMessageIfNeeded({
       conversationId: context.conversation.id,
@@ -357,26 +391,30 @@ async function sendFallbackReply(
 
   if (!sendContext.messagingProfileId) {
     throw new Error(
-      `[messaging:webhook] Missing messaging profile for ${context.to}`
+      `[messaging:webhook] Missing messaging profile for ${context.to}`,
     );
   }
 
   // Human takeover or a downgrade may have happened while preflight ran.
   if (!(await canStillSendAutomatedReply(context, "mms_fallback"))) return;
 
-  const result = await telnyx.messages.send({
+  const result = await sendTenantSms({
+    businessId: context.businessId,
     from: context.to,
     to: context.from,
     text: fallbackReply,
-    messaging_profile_id: sendContext.messagingProfileId,
-    type: "SMS",
+    messagingProfileId: sendContext.messagingProfileId,
+    purpose: "mms_fallback",
+    idempotencyKey: `mms-fallback:${context.sourceMessageId}`,
+    conversationId: context.conversation.id,
   });
+  if (result.replayed) return;
   await addMessage(
     context.conversation.id,
     context.businessId,
     "assistant",
     fallbackReply,
-    "sms"
+    "sms",
   );
   await recordOutboundSmsUsage({
     businessId: context.businessId,
@@ -391,14 +429,14 @@ async function sendFallbackReply(
 }
 
 async function processAndReply(
-  context: PersistedInboundContext
+  context: PersistedInboundContext,
 ): Promise<void> {
   const sendContext = await getOutboundSendContext(context.to);
   assertSendContextBusiness(sendContext.businessId, context.businessId);
 
   if (!sendContext.smsReady) {
     console.warn(
-      `[messaging:webhook] AI reply blocked: reason=${sendContext.blockReason} campaign_status=${sendContext.campaignStatus} assignment_status=${sendContext.assignmentStatus} for business ${context.businessId}`
+      `[messaging:webhook] AI reply blocked: reason=${sendContext.blockReason} campaign_status=${sendContext.campaignStatus} assignment_status=${sendContext.assignmentStatus} for business ${context.businessId}`,
     );
     await insertPausedSystemMessageIfNeeded({
       conversationId: context.conversation.id,
@@ -412,39 +450,50 @@ async function processAndReply(
 
   if (!sendContext.messagingProfileId) {
     throw new Error(
-      `[messaging:webhook] Missing messaging profile for ${context.to}`
+      `[messaging:webhook] Missing messaging profile for ${context.to}`,
     );
   }
 
   console.log(
-    `[messaging:webhook] Generating AI reply (appendOptOut=${context.appendAiOptOut})`
+    `[messaging:webhook] Generating AI reply (appendOptOut=${context.appendAiOptOut})`,
   );
   let aiResult;
   try {
     const liveReview = isBookingConfirmationEnabled()
-      ? await supabaseAdmin.rpc('has_live_booking_review', { p_business_id: context.businessId, p_caller: context.from })
+      ? await supabaseAdmin.rpc("has_live_booking_review", {
+          p_business_id: context.businessId,
+          p_caller: context.from,
+        })
       : { data: false, error: null };
-    if (liveReview.error) throw new Error('booking_review_lookup_failed');
-    aiResult = liveReview.data ? { text: 'Please tell the assistant on your call what needs correcting, so we can review the latest details together.', actions: [], knowledgeGapDetected: false, sourceMessageId: context.sourceMessageId, bookingReview: undefined } : await processIncomingMessageDetailed(
-      context.businessId,
-      context.from,
-      null,
-      context.text,
-      "sms",
-      null,
-      {
-        persistCustomer: false,
-        persistAssistant: false,
-        sourceMessageId: context.sourceMessageId,
-        contact: context.contact,
-        conversation: context.conversation,
-      }
-    );
+    if (liveReview.error) throw new Error("booking_review_lookup_failed");
+    aiResult = liveReview.data
+      ? {
+          text: "Please tell the assistant on your call what needs correcting, so we can review the latest details together.",
+          actions: [],
+          knowledgeGapDetected: false,
+          sourceMessageId: context.sourceMessageId,
+          bookingReview: undefined,
+        }
+      : await processIncomingMessageDetailed(
+          context.businessId,
+          context.from,
+          null,
+          context.text,
+          "sms",
+          null,
+          {
+            persistCustomer: false,
+            persistAssistant: false,
+            sourceMessageId: context.sourceMessageId,
+            contact: context.contact,
+            conversation: context.conversation,
+          },
+        );
   } catch (error) {
     if (!isOperationalAiProcessingBlock(error)) throw error;
 
     console.warn(
-      `[messaging:webhook] AI reply suppressed by AI engine operational control: reason=${error.reason} for business ${context.businessId}`
+      `[messaging:webhook] AI reply suppressed by AI engine operational control: reason=${error.reason} for business ${context.businessId}`,
     );
     await insertPausedSystemMessageIfNeeded({
       conversationId: context.conversation.id,
@@ -463,7 +512,7 @@ async function processAndReply(
     .maybeSingle<{ sms_response_delay_seconds: number }>();
   if (settingsError) {
     throw new Error(
-      `[messaging:webhook] AI delay lookup failed: ${settingsError.message}`
+      `[messaging:webhook] AI delay lookup failed: ${settingsError.message}`,
     );
   }
 
@@ -488,7 +537,7 @@ async function processAndReply(
   });
   if (!usage.allowed) {
     console.warn(
-      `[messaging:webhook] AI reply blocked by usage gate: reason=${usage.reason} for business ${context.businessId}`
+      `[messaging:webhook] AI reply blocked by usage gate: reason=${usage.reason} for business ${context.businessId}`,
     );
     await insertPausedSystemMessageIfNeeded({
       conversationId: context.conversation.id,
@@ -504,26 +553,45 @@ async function processAndReply(
 
   // A booking read-back has a durable claim before the provider boundary.
   // Unknown acceptance is never retried as another send.
-  const summaryClaim = aiResult.bookingReview ? await claimBookingSummarySend({
-    businessId: context.businessId, draftId: aiResult.bookingReview.draftId,
-    revision: aiResult.bookingReview.revision, sender: context.to,
-    destination: context.from, content: finalReply,
-  }) : null;
+  const summaryClaim = aiResult.bookingReview
+    ? await claimBookingSummarySend({
+        businessId: context.businessId,
+        draftId: aiResult.bookingReview.draftId,
+        revision: aiResult.bookingReview.revision,
+        sender: context.to,
+        destination: context.from,
+        content: finalReply,
+      })
+    : null;
   if (summaryClaim && !summaryClaim.send) {
-    if (summaryClaim.record.status === 'accepted') await finalizeBookingSummarySend(summaryClaim.record);
+    if (summaryClaim.record.status === "accepted")
+      await finalizeBookingSummarySend(summaryClaim.record);
     return;
   }
   let result;
   let summaryMessage: { id: string } | null = null;
   try {
-    const sendPayload = {
-      from: context.to, to: context.from, text: finalReply,
-      messaging_profile_id: sendContext.messagingProfileId, type: "SMS" as const,
-    };
-    result = summaryClaim ? await telnyx.messages.send(sendPayload, { maxRetries: 0, timeout: 10000 }) : await telnyx.messages.send(sendPayload);
+    result = await sendTenantSms({
+      businessId: context.businessId,
+      from: context.to,
+      to: context.from,
+      text: finalReply,
+      messagingProfileId: sendContext.messagingProfileId!,
+      purpose: "ai_reply",
+      conversationId: context.conversation.id,
+      idempotencyKey: summaryClaim
+        ? `booking-summary:${summaryClaim.record.draft_id}:${summaryClaim.record.revision}`
+        : `ai-reply:${context.sourceMessageId}`,
+    });
+    if (result.replayed && !summaryClaim) return;
     if (summaryClaim) {
-      if (!result.data?.id) throw new Error('booking_summary_acceptance_unknown');
-      const accepted = await recordBookingSummaryAcceptance(summaryClaim.record, result.data.id, new Date().toISOString());
+      if (!result.data?.id)
+        throw new Error("booking_summary_acceptance_unknown");
+      const accepted = await recordBookingSummaryAcceptance(
+        summaryClaim.record,
+        result.data.id,
+        new Date().toISOString(),
+      );
       summaryMessage = await finalizeBookingSummarySend(accepted);
     }
   } catch (error) {
@@ -539,7 +607,7 @@ async function processAndReply(
       occurredAt,
       sourceKey: buildAiConversationSourceKey(
         context.conversation.id,
-        occurredAt
+        occurredAt,
       ),
       origin: null,
     });
@@ -549,13 +617,15 @@ async function processAndReply(
       metricKey: "ai_conversation_engaged",
     });
   }
-  const assistantMessage = summaryMessage ?? await addMessage(
-    context.conversation.id,
-    context.businessId,
-    "assistant",
-    finalReply,
-    "sms"
-  );
+  const assistantMessage =
+    summaryMessage ??
+    (await addMessage(
+      context.conversation.id,
+      context.businessId,
+      "assistant",
+      finalReply,
+      "sms",
+    ));
   for (const action of aiResult.actions ?? []) {
     try {
       await finalizeGoalLinkEvent({
@@ -573,20 +643,21 @@ async function processAndReply(
           sourceMessageId: action.sourceMessageId,
           assistantMessageId: assistantMessage.id,
         },
-        error
+        error,
       );
     }
   }
-  if (!summaryClaim) await recordOutboundSmsUsage({
-    businessId: context.businessId,
-    text: finalReply,
-    source: "ai_reply",
-    providerMessageId: result.data?.id ?? null,
-    idempotencyKey: result.data?.id
-      ? `outbound:ai_reply:${result.data.id}`
-      : undefined,
-    metadata: { from: context.to, to: context.from },
-  });
+  if (!summaryClaim)
+    await recordOutboundSmsUsage({
+      businessId: context.businessId,
+      text: finalReply,
+      source: "ai_reply",
+      providerMessageId: result.data?.id ?? null,
+      idempotencyKey: result.data?.id
+        ? `outbound:ai_reply:${result.data.id}`
+        : undefined,
+      metadata: { from: context.to, to: context.from },
+    });
   if (aiResult.knowledgeGapDetected && aiResult.sourceMessageId) {
     const sourceMessageId = aiResult.sourceMessageId;
     try {
@@ -599,7 +670,7 @@ async function processAndReply(
       console.error(
         "[messaging:webhook] Knowledge gap capture failed:",
         { businessId: context.businessId, sourceMessageId },
-        error
+        error,
       );
     }
   }
@@ -617,18 +688,15 @@ async function shouldAppendAiOptOut(conversationId: string): Promise<boolean> {
 
   if (error) {
     throw new Error(
-      `[messaging:webhook] Failed to determine prior SMS replies for conversation ${conversationId}: ${error.message}`
+      `[messaging:webhook] Failed to determine prior SMS replies for conversation ${conversationId}: ${error.message}`,
     );
   }
   return !data;
 }
 
 async function canStillSendAutomatedReply(
-  context: Pick<
-    PersistedInboundContext,
-    "businessId" | "conversation"
-  >,
-  purpose: Extract<OutboundSmsPurpose, "ai_reply" | "mms_fallback">
+  context: Pick<PersistedInboundContext, "businessId" | "conversation">,
+  purpose: Extract<OutboundSmsPurpose, "ai_reply" | "mms_fallback">,
 ): Promise<boolean> {
   const [entitlements, conversation] = await Promise.all([
     resolveBusinessEntitlements(context.businessId),
@@ -649,7 +717,7 @@ async function canStillSendAutomatedReply(
 }
 
 function isOperationalAiProcessingBlock(
-  error: unknown
+  error: unknown,
 ): error is AIProcessingBlockedError & {
   reason: Extract<
     PausedReason,
@@ -666,16 +734,16 @@ function isOperationalAiProcessingBlock(
 
 async function canSendOutboundSmsOperationally(
   context: Pick<PersistedInboundContext, "businessId" | "conversation">,
-  purpose: Extract<OutboundSmsPurpose, "ai_reply" | "mms_fallback">
+  purpose: Extract<OutboundSmsPurpose, "ai_reply" | "mms_fallback">,
 ): Promise<boolean> {
   const access = await resolveOutboundSmsOperationalAccess(
     context.businessId,
-    purpose
+    purpose,
   );
   if (access.allowed) return true;
 
   console.warn(
-    `[messaging:webhook] ${purpose} blocked by operational controls: reason=${access.reason} for business ${context.businessId}`
+    `[messaging:webhook] ${purpose} blocked by operational controls: reason=${access.reason} for business ${context.businessId}`,
   );
   await insertPausedSystemMessageIfNeeded({
     conversationId: context.conversation.id,
@@ -701,26 +769,24 @@ function dispatchInBackground(promise: Promise<void>, label: string): void {
 
 function assertSendContextBusiness(
   resolvedBusinessId: string,
-  expectedBusinessId: string
+  expectedBusinessId: string,
 ): void {
   if (resolvedBusinessId !== expectedBusinessId) {
     throw new Error(
-      `[messaging:webhook] Outbound number resolved to business ${resolvedBusinessId}, expected ${expectedBusinessId}.`
+      `[messaging:webhook] Outbound number resolved to business ${resolvedBusinessId}, expected ${expectedBusinessId}.`,
     );
   }
 }
 
 function toPausedReason(
-  reason: SmsBlockReason | null
+  reason: SmsBlockReason | null,
 ): "campaign_not_approved" | "assignment_pending" | "assignment_failed" {
   if (reason === "assignment_failed") return "assignment_failed";
   if (reason === "assignment_pending") return "assignment_pending";
   return "campaign_not_approved";
 }
 
-function usageToPausedReason(
-  reason: UsageBlockReason
-): PausedReason {
+function usageToPausedReason(reason: UsageBlockReason): PausedReason {
   if (isOutboundSmsOperationalBlockReason(reason)) return reason;
   if (reason === "usage_limit_reached") return "usage_limit_reached";
   if (reason === "telnyx_submission_disabled") {

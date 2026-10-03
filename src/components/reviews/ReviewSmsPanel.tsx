@@ -1,0 +1,776 @@
+"use client";
+
+import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
+import { CheckCircle2, MessageSquare, RefreshCw } from "lucide-react";
+import type {
+  ReviewSmsOverview,
+  ReviewSmsQuote,
+  ReviewSmsState,
+} from "@/lib/billing/reviewSms";
+import { US_STATES } from "@/lib/usStates";
+import PhoneNumberSelector from "@/components/phone/PhoneNumberSelector";
+import CustomerDialog from "@/components/customers/CustomerDialog";
+import { requestError } from "@/components/customers/customerUi";
+import {
+  body,
+  btnPrimaryInline,
+  btnSecondaryCompact,
+  btnSecondaryInline,
+  card,
+  fieldLabel,
+  ink,
+  inputField,
+  statusDanger,
+  statusSuccess,
+  statusWarning,
+  tile,
+} from "@/lib/theme-v2/theme";
+import { reviewReason, reviewRequest, reviewTime } from "./reviewUi";
+
+const ENDPOINT = "/api/reviews/sms";
+const STATES: Record<ReviewSmsState, string> = {
+  draft: "Setup saved",
+  activation_pending: "Activation payment pending",
+  carrier_pending: "Carrier approval in progress",
+  ready_unpaid: "Approved — finish activation",
+  active: "Text review requests active",
+  cancel_pending: "Cancellation scheduled",
+  support_required: "Approval needs attention",
+  release_pending: "Closing review texting",
+  released: "Review texting closed",
+};
+const LEGAL_FIELDS = [
+  ["legalBusinessName", "Legal business name", "text"],
+  ["address", "Business street address", "text"],
+  ["city", "City", "text"],
+  ["zip", "ZIP code", "text"],
+  ["authorizedRepName", "Authorized representative name", "text"],
+  ["authorizedRepEmail", "Representative email", "email"],
+  ["authorizedRepPhone", "Representative phone (+1…)", "tel"],
+] as const;
+const amount = (cents: number) =>
+  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
+    cents / 100,
+  );
+
+export function smsPriceSummary(overview: ReviewSmsOverview): string {
+  if (overview.eligibleSource === "included")
+    return "Included with your texting plan after review-request approval";
+  if (overview.eligibleSource === "grant")
+    return "Texting access is managed by your account provider";
+  return `${amount(overview.price.monthlyCents)}/month added to your current plan after approval and activation`;
+}
+
+function SmsSetupForm({
+  overview,
+  onSaved,
+}: {
+  overview: ReviewSmsOverview;
+  onSaved: () => Promise<void>;
+}) {
+  const id = useId();
+  const initialPhone =
+    typeof overview.account?.draft.phoneNumber === "string"
+      ? overview.account.draft.phoneNumber
+      : String(overview.setup?.fields.phoneNumber || "");
+  const [phone, setPhone] = useState(initialPhone);
+  const [consented, setConsented] = useState(Boolean(initialPhone));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const fields = overview.setup?.fields || {};
+  const included = overview.eligibleSource === "included";
+  const identityLocked = fields.identityLocked === true;
+  const onConsentChange = useCallback(
+    (value: boolean) => setConsented(value),
+    [],
+  );
+  const phoneRequest: typeof fetch = async (input, init) => {
+    if (!init?.method || init.method === "GET") {
+      const url = new URL(String(input), window.location.origin);
+      return fetch(
+        `${ENDPOINT}/numbers?areaCode=${encodeURIComponent(url.searchParams.get("areaCode") || "")}`,
+        { cache: "no-store" },
+      );
+    }
+    const value = JSON.parse(String(init.body || "{}")) as {
+      phoneNumber?: string;
+    };
+    if (!value.phoneNumber)
+      return Response.json(
+        { error: "Choose a phone number." },
+        { status: 400 },
+      );
+    setPhone(value.phoneNumber);
+    return Response.json({
+      number: { phone_number: value.phoneNumber, pending: true },
+    });
+  };
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+    const form = new FormData(event.currentTarget);
+    const draft: Record<string, string> = {
+      phoneNumber: phone,
+      consentDescription: String(form.get("consentDescription") || "").trim(),
+      consentEvidenceUrl: String(form.get("consentEvidenceUrl") || "").trim(),
+    };
+    for (const key of [
+      ...LEGAL_FIELDS.map(([name]) => name),
+      "entityType",
+      "ein",
+      "state",
+    ]) {
+      const value = String(form.get(key) || "").trim();
+      if (value) draft[key] = value;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await reviewRequest(ENDPOINT, {
+        method: "POST",
+        body: JSON.stringify({ action: "draft", draft }),
+      });
+      await onSaved();
+    } catch (cause) {
+      setError(requestError(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <form onSubmit={save} className="mt-6 space-y-5">
+      <fieldset disabled={busy} className="space-y-4 disabled:opacity-60">
+        <legend className={`mb-4 text-sm font-semibold ${ink}`}>
+          Business registration
+        </legend>
+        {identityLocked ? (
+          <p className={`text-xs ${body}`}>
+            Your existing registered business details are shown below. Contact
+            support if they need to change.
+          </p>
+        ) : null}
+        <div className="grid gap-4 sm:grid-cols-2">
+          {LEGAL_FIELDS.map(([name, label, type]) => (
+            <div key={name}>
+              <label htmlFor={`${id}-${name}`} className={fieldLabel}>
+                {label}
+              </label>
+              <input
+                id={`${id}-${name}`}
+                name={name}
+                type={type}
+                required
+                readOnly={identityLocked}
+                defaultValue={String(fields[name] || "")}
+                maxLength={
+                  name === "address"
+                    ? 200
+                    : name === "authorizedRepEmail"
+                      ? 254
+                      : 120
+                }
+                className={inputField}
+              />
+            </div>
+          ))}
+          <div>
+            <label htmlFor={`${id}-state`} className={fieldLabel}>
+              State
+            </label>
+            <select
+              id={`${id}-state`}
+              name="state"
+              required
+              disabled={identityLocked}
+              defaultValue={String(fields.state || "")}
+              className={inputField}
+            >
+              <option value="">Choose a state</option>
+              {US_STATES.map(([code, name]) => (
+                <option key={code} value={code}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor={`${id}-entity`} className={fieldLabel}>
+              Business structure
+            </label>
+            <select
+              id={`${id}-entity`}
+              name="entityType"
+              required
+              disabled={identityLocked}
+              defaultValue={String(fields.entityType || "")}
+              className={inputField}
+            >
+              <option value="">Choose a structure</option>
+              <option value="llc">LLC</option>
+              <option value="c_corp">C corporation</option>
+              <option value="s_corp">S corporation</option>
+              <option value="nonprofit">Nonprofit</option>
+              <option value="partnership">Partnership</option>
+              <option value="sole_proprietor">Sole proprietor</option>
+            </select>
+          </div>
+          <div>
+            <label
+              htmlFor={fields.hasEin ? undefined : `${id}-ein`}
+              className={fieldLabel}
+            >
+              Employer identification number (EIN)
+            </label>
+            {fields.hasEin ? (
+              <p className={`rounded-2xl p-3 text-sm ${statusSuccess}`}>
+                EIN already saved. It is not displayed here.
+              </p>
+            ) : (
+              <input
+                id={`${id}-ein`}
+                name="ein"
+                required
+                type="password"
+                autoComplete="off"
+                placeholder="XX-XXXXXXX"
+                pattern="[0-9]{2}-?[0-9]{7}"
+                maxLength={10}
+                className={inputField}
+              />
+            )}
+          </div>
+        </div>
+        <div>
+          <label htmlFor={`${id}-consent`} className={fieldLabel}>
+            How do customers agree to review-request texts?
+          </label>
+          <textarea
+            id={`${id}-consent`}
+            name="consentDescription"
+            required
+            minLength={20}
+            maxLength={1500}
+            rows={4}
+            defaultValue={String(
+              overview.account?.draft.consentDescription || "",
+            )}
+            placeholder="Describe the actual opt-in wording and when customers agree."
+            className={inputField}
+          />
+          <p className={`mt-1 text-xs ${body}`}>
+            Having a customer’s phone number does not establish permission to
+            send automated review requests.
+          </p>
+        </div>
+        <div>
+          <label htmlFor={`${id}-evidence`} className={fieldLabel}>
+            Consent evidence URL
+          </label>
+          <input
+            id={`${id}-evidence`}
+            name="consentEvidenceUrl"
+            type="url"
+            required
+            pattern="https://.*"
+            defaultValue={String(
+              overview.account?.draft.consentEvidenceUrl || "",
+            )}
+            placeholder="https://yourbusiness.com/text-permission"
+            className={inputField}
+          />
+          <p className={`mt-1 text-xs ${body}`}>
+            Link to the public form, terms, or documented script showing the
+            permission process you actually use.
+          </p>
+        </div>
+      </fieldset>
+      {included ? (
+        <div className={`${tile} p-4`}>
+          <p className={`text-sm font-semibold ${ink}`}>
+            Your existing texting number
+          </p>
+          <p className={`mt-2 text-sm ${body}`}>
+            {phone ||
+              "Your number needs to be confirmed before approval. Contact support."}
+          </p>
+        </div>
+      ) : (
+        <PhoneNumberSelector
+          selectionBusyLabel="Selecting…"
+          initialPhoneNumber={initialPhone || undefined}
+          initialPhoneNumberPending
+          initialConsentAgreed={Boolean(initialPhone)}
+          request={phoneRequest}
+          onConsentChange={onConsentChange}
+          onNumberPurchased={setPhone}
+          onReplacementModeChange={(replacing) => {
+            if (replacing) setPhone("");
+          }}
+          pendingDescription="This is a preferred number, not a purchase or reservation. Save your details, then complete paid registration. Texting starts after approval and activation."
+          consentDescription="I authorize registration of this number for my business’s automated review requests to customers who have agreed to receive them. I will keep permission records and honor opt-outs. Customers may reply STOP at any time."
+        />
+      )}
+      {error ? (
+        <p role="alert" className={`rounded-2xl p-3 text-sm ${statusDanger}`}>
+          {error}
+        </p>
+      ) : null}
+      <button
+        type="submit"
+        disabled={busy || !phone || (!included && !consented)}
+        className={`${btnPrimaryInline} disabled:opacity-50`}
+      >
+        {busy ? "Saving…" : "Save approval details"}
+      </button>
+    </form>
+  );
+}
+
+export default function ReviewSmsPanel({
+  onStatusChanged,
+}: {
+  onStatusChanged: (canSend: boolean) => void;
+}) {
+  const [overview, setOverview] = useState<ReviewSmsOverview | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [quote, setQuote] = useState<ReviewSmsQuote | null>(null);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [feeAgreed, setFeeAgreed] = useState(false);
+  const load = useCallback(async () => {
+    const value = await reviewRequest<ReviewSmsOverview>(ENDPOINT);
+    setOverview(value);
+    onStatusChanged(value.enabled && value.canSend);
+  }, [onStatusChanged]);
+  useEffect(() => {
+    let current = true;
+    reviewRequest<ReviewSmsOverview>(ENDPOINT)
+      .then((value) => {
+        if (current) {
+          setOverview(value);
+          onStatusChanged(value.enabled && value.canSend);
+        }
+      })
+      .catch((cause) => {
+        if (current) setError(requestError(cause));
+      });
+    return () => {
+      current = false;
+    };
+  }, [onStatusChanged]);
+  async function perform(action: string) {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      if (action === "quote") {
+        setQuote(
+          await reviewRequest<ReviewSmsQuote>(ENDPOINT, {
+            method: "POST",
+            body: JSON.stringify({ action }),
+          }),
+        );
+        return;
+      }
+      const result = await reviewRequest<{
+        url?: string;
+        paymentUrl?: string;
+        active?: boolean;
+        refunded?: boolean;
+        cancelAt?: string;
+      }>(ENDPOINT, {
+        method: "POST",
+        body: JSON.stringify({
+          action,
+          ...(action === "activate" && quote
+            ? { operationId: quote.operationId, fingerprint: quote.fingerprint }
+            : {}),
+        }),
+      });
+      const destination = result.url || result.paymentUrl;
+      if (destination) {
+        const url = new URL(destination);
+        if (
+          url.protocol !== "https:" ||
+          ![
+            "checkout.stripe.com",
+            "invoice.stripe.com",
+            "billing.stripe.com",
+          ].includes(url.hostname)
+        )
+          throw new Error(
+            "The payment link could not be verified. Refresh and try again.",
+          );
+        window.location.assign(url.toString());
+        return;
+      }
+      setQuote(null);
+      setCancelOpen(false);
+      await load();
+      if (action === "refund")
+        setNotice(
+          "Your unsubmitted activation was canceled and the refund was requested.",
+        );
+      if (action === "cancel")
+        setNotice(
+          `Review texting will end ${result.cancelAt ? reviewTime(result.cancelAt) : "at the end of the paid period"}.`,
+        );
+      if (action === "activate")
+        setNotice(
+          result.active
+            ? "Text review requests are active."
+            : "Payment is being confirmed. Refresh to check activation.",
+        );
+    } catch (cause) {
+      setError(requestError(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+  const account = overview?.account;
+  const direct = overview?.eligibleSource === "direct";
+  const state = account?.state;
+  return (
+    <section
+      className={`${card} p-5 sm:p-7`}
+      aria-labelledby="review-sms-title"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2
+            id="review-sms-title"
+            className={`flex items-center gap-2 text-lg font-semibold ${ink}`}
+          >
+            <MessageSquare className="h-5 w-5" />
+            Text review requests
+          </h2>
+          <p className={`mt-1 text-sm ${body}`}>
+            Add text invitations after your business and review-request use case
+            are approved.
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={busy || !overview?.enabled}
+          onClick={() => perform("refresh")}
+          className={`${btnSecondaryCompact} disabled:opacity-50`}
+        >
+          <RefreshCw className="h-3.5 w-3.5" />
+          Check status
+        </button>
+      </div>
+      {error && !quote && !cancelOpen ? (
+        <p
+          role="alert"
+          className={`mt-4 rounded-2xl p-3 text-sm ${statusDanger}`}
+        >
+          {error}
+        </p>
+      ) : null}
+      {notice ? (
+        <p
+          role="status"
+          className={`mt-4 rounded-2xl p-3 text-sm ${statusSuccess}`}
+        >
+          {notice}
+        </p>
+      ) : null}
+      {!overview && !error ? (
+        <p role="status" className={`mt-4 text-sm ${body}`}>
+          Loading texting setup…
+        </p>
+      ) : null}
+      {overview ? (
+        !overview.enabled ? (
+          <p className={`mt-4 text-sm ${body}`}>
+            Review texting is not available for this account yet. Email reviews
+            remain available.
+          </p>
+        ) : (
+          <div className="mt-5 space-y-5">
+            <div className={`${tile} p-4`}>
+              <p className={`font-semibold ${ink}`}>
+                {smsPriceSummary(overview)}
+              </p>
+              <p className={`mt-2 text-sm ${body}`}>
+                {overview.price.includedParts} total SMS parts per full billing
+                period. Inbound texts, invitations, replies, and reminders share
+                this allowance. Longer messages can use several parts.
+              </p>
+              {direct ? (
+                <p className={`mt-2 text-sm ${body}`}>
+                  {amount(overview.price.activationCents)} one-time activation
+                  covers one submitted application. It is refundable before
+                  submission; after submission it covers that attempt. Further
+                  paid attempts require a separate quote. SimplAssist covers
+                  corrections caused by its own mistakes.
+                </p>
+              ) : null}
+            </div>
+            {account ? (
+              <div>
+                <p className={`flex items-center gap-2 font-semibold ${ink}`}>
+                  {overview.canSend ? (
+                    <CheckCircle2 className="h-4 w-4" />
+                  ) : null}
+                  {STATES[account.state]}
+                </p>
+                {account.last_error ? (
+                  <p className={`mt-2 text-sm ${body}`}>
+                    {reviewReason(account.last_error)}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+            {(!account || editing) && overview.eligibleSource !== "grant" ? (
+              <SmsSetupForm
+                key={editing ? "edit" : "new"}
+                overview={overview}
+                onSaved={async () => {
+                  await load();
+                  setEditing(false);
+                  setNotice(
+                    "Approval details saved. No registration charge has been made.",
+                  );
+                }}
+              />
+            ) : null}
+            {overview.eligibleSource === "grant" ? (
+              <p className={`text-sm ${body}`}>
+                Contact your account provider to arrange review texting and
+                confirm the included allowance. This screen does not charge your
+                card.
+              </p>
+            ) : null}
+            {account &&
+            ["draft", "activation_pending"].includes(account.state) &&
+            !editing ? (
+              <div className="space-y-4">
+                <p className={`text-sm ${body}`}>
+                  Preferred number:{" "}
+                  {String(account.draft.phoneNumber || "Not selected")}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setEditing(true)}
+                  className={btnSecondaryCompact}
+                >
+                  Edit approval details
+                </button>
+                {direct ? (
+                  <>
+                    <label className={`flex items-start gap-3 text-sm ${body}`}>
+                      <input
+                        type="checkbox"
+                        checked={feeAgreed}
+                        onChange={(event) => setFeeAgreed(event.target.checked)}
+                        className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--brand-primary)]"
+                      />
+                      I understand the activation charge covers one submitted
+                      application and approval is required before review texts
+                      can be sent.
+                    </label>
+                    <button
+                      type="button"
+                      disabled={busy || !feeAgreed}
+                      onClick={() => perform("checkout")}
+                      className={`${btnPrimaryInline} disabled:opacity-50`}
+                    >
+                      Pay {amount(overview.price.activationCents)} and request
+                      approval
+                    </button>
+                  </>
+                ) : (
+                  <p className={`rounded-2xl p-3 text-sm ${statusWarning}`}>
+                    Your approval details are saved. Existing texting approval
+                    must cover review requests before this feature is enabled.
+                    Contact support to complete the review.
+                  </p>
+                )}
+              </div>
+            ) : null}
+            {state === "support_required" || state === "released" ? (
+              <p className={`text-sm ${body}`}>
+                Contact support before starting another application. Any
+                additional paid attempt will be quoted separately; you will not
+                be charged automatically.
+              </p>
+            ) : null}
+            {state === "carrier_pending" ? (
+              <p className={`text-sm ${body}`}>
+                Your business registration is being reviewed. Email reviews
+                remain available. The monthly review-texting add-on starts only
+                after approval and successful payment.
+              </p>
+            ) : null}
+            {state === "ready_unpaid" ? (
+              <div className="space-y-3">
+                <p className={`text-sm ${body}`}>
+                  Your number is ready. Review the prorated charge and
+                  first-period SMS allowance before activating.
+                  {account?.ready_expires_at
+                    ? ` Complete payment by ${reviewTime(account.ready_expires_at)} to keep this setup.`
+                    : ""}
+                </p>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => perform("quote")}
+                  className={`${btnPrimaryInline} disabled:opacity-50`}
+                >
+                  Review activation price
+                </button>
+              </div>
+            ) : null}
+            {state === "active" || state === "cancel_pending" ? (
+              <div className="space-y-3">
+                <p className={`text-sm ${body}`}>
+                  {overview.eligibleSource === "included"
+                    ? overview.price.includedParts
+                    : (account?.period_allowance ??
+                      overview.price.includedParts)}{" "}
+                  parts in the current period
+                  {account?.paid_period_end
+                    ? `, ending ${reviewTime(account.paid_period_end)}`
+                    : ""}
+                  .{" "}
+                  {overview.canSend
+                    ? "Text is now available when creating a review request."
+                    : "Sending is currently unavailable. Check billing or refresh the approval status."}
+                </p>
+                {direct && state === "active" ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setCancelOpen(true);
+                      setError(null);
+                    }}
+                    className={btnSecondaryInline}
+                  >
+                    Cancel review texting
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+            {state === "cancel_pending" && account?.cancel_at ? (
+              <p className={`rounded-2xl p-3 text-sm ${statusWarning}`}>
+                Review texting ends {reviewTime(account.cancel_at)}. Complete
+                any number transfer before then. Resources used only for review
+                texting are released when the paid term ends; your base plan
+                remains active.
+              </p>
+            ) : null}
+            {account?.activation_paid_at &&
+            !account.provider_started_at &&
+            !account.provider_submitted_at &&
+            !account.activation_refunded_at &&
+            direct ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => perform("refund")}
+                className={`${btnSecondaryInline} disabled:opacity-50`}
+              >
+                Cancel before submission and refund activation
+              </button>
+            ) : null}
+          </div>
+        )
+      ) : null}
+      {quote ? (
+        <CustomerDialog
+          title="Activate review texting"
+          onClose={() => setQuote(null)}
+          busy={busy}
+        >
+          <div className="space-y-4">
+            <p className={`text-2xl font-semibold ${ink}`}>
+              {amount(quote.amountDueCents)} due today
+            </p>
+            <p className={`text-sm ${body}`}>
+              Includes {quote.includedParts} SMS parts through{" "}
+              {reviewTime(quote.periodEnd)}. This first allowance and charge are
+              prorated to your existing billing cycle.
+            </p>
+            <p className={`text-sm ${body}`}>
+              Then {amount(quote.monthlyPriceCents)} per month in addition to
+              your current base plan, with 250 total SMS parts per full period.
+              Review texting does not add missed-call or AI texting features.
+            </p>
+            <p className={`text-xs ${body}`}>
+              Quote expires {reviewTime(quote.expiresAt)}.
+            </p>
+            {error ? (
+              <p
+                role="alert"
+                className={`rounded-2xl p-3 text-sm ${statusDanger}`}
+              >
+                {error}
+              </p>
+            ) : null}
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => perform("activate")}
+              className={`${btnPrimaryInline} disabled:opacity-50`}
+            >
+              {busy
+                ? "Confirming payment…"
+                : `Activate for ${amount(quote.amountDueCents)}`}
+            </button>
+          </div>
+        </CustomerDialog>
+      ) : null}
+      {cancelOpen ? (
+        <CustomerDialog
+          title="Cancel review texting"
+          onClose={() => setCancelOpen(false)}
+          busy={busy}
+        >
+          <div className="space-y-4">
+            <p className={`text-sm ${body}`}>
+              Review texting will remain available until{" "}
+              {account?.paid_period_end
+                ? reviewTime(account.paid_period_end)
+                : "the end of your paid term"}
+              . Your base plan and email reviews stay active.
+            </p>
+            <p className={`rounded-2xl p-3 text-sm ${statusWarning}`}>
+              If you want to keep your review number, complete its transfer
+              before the paid term ends. The number and registration used only
+              for review texting are released at that time.
+            </p>
+            {error ? (
+              <p
+                role="alert"
+                className={`rounded-2xl p-3 text-sm ${statusDanger}`}
+              >
+                {error}
+              </p>
+            ) : null}
+            <div className="flex flex-wrap gap-3">
+              <button
+                disabled={busy}
+                onClick={() => perform("cancel")}
+                className={`${btnPrimaryInline} disabled:opacity-50`}
+              >
+                {busy ? "Scheduling cancellation…" : "Cancel at term end"}
+              </button>
+              <button
+                disabled={busy}
+                onClick={() => setCancelOpen(false)}
+                className={btnSecondaryInline}
+              >
+                Keep review texting
+              </button>
+            </div>
+          </div>
+        </CustomerDialog>
+      ) : null}
+    </section>
+  );
+}

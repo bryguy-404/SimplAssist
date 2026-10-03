@@ -1,7 +1,46 @@
 import type { SubscriptionPlan } from "@/types/database";
 
-export const SETUP_FEE_CENTS = 2500;
+// Public package copy and checkout validation must switch together in a build.
+// This is a release flag, not a tenant entitlement or a subscription migration.
+export const CUSTOMER_REVIEWS_PRICING_ENABLED =
+  process.env.NEXT_PUBLIC_CUSTOMER_REVIEWS_PRICING_ENABLED === "1";
+export const LEGACY_PLAN_PRICES: Record<SubscriptionPlan, number> = {
+  chat_only: 10,
+  sms_only: 25,
+  sms_and_chat: 45,
+  full: 65,
+};
+export const CUSTOMER_REVIEW_PLAN_PRICES: Record<SubscriptionPlan, number> = {
+  chat_only: 15,
+  sms_only: 29,
+  sms_and_chat: 49,
+  full: 79,
+};
+export const REVIEW_EMAIL_ALLOWANCES: Record<SubscriptionPlan, number> = {
+  chat_only: 500,
+  sms_only: 500,
+  sms_and_chat: 1000,
+  full: 2000,
+};
+export const REVIEW_SMS_ADDON_CENTS = 2000;
+export const REVIEW_SMS_INCLUDED_PARTS = 250;
+export const REVIEW_SMS_ACTIVATION_CENTS = 4900;
+export const SETUP_FEE_CENTS = CUSTOMER_REVIEWS_PRICING_ENABLED
+  ? REVIEW_SMS_ACTIVATION_CENTS
+  : 2500;
 export const SMS_OVERAGE_CENTS = 3;
+
+const packagePrices = CUSTOMER_REVIEWS_PRICING_ENABLED
+  ? CUSTOMER_REVIEW_PLAN_PRICES
+  : LEGACY_PLAN_PRICES;
+export const customerFeatures = (plan: SubscriptionPlan): string[] =>
+  CUSTOMER_REVIEWS_PRICING_ENABLED
+    ? [
+        "Customer workspace with CSV import and export",
+        `${REVIEW_EMAIL_ALLOWANCES[plan].toLocaleString("en-US")} review emails/billing month`,
+        "Scheduled review requests and one optional reminder",
+      ]
+    : [];
 
 export const SUBSCRIPTION_PLANS: Record<
   SubscriptionPlan,
@@ -16,7 +55,7 @@ export const SUBSCRIPTION_PLANS: Record<
 > = {
   chat_only: {
     name: "Chat Only",
-    price: 10,
+    price: packagePrices.chat_only,
     includedSmsParts: 0,
     includedVoiceMinutes: 0,
     includedAiReplies: 200,
@@ -29,11 +68,12 @@ export const SUBSCRIPTION_PLANS: Record<
       "AI answer, tone, FAQ, and service customization",
       "Google Calendar connection",
       "AI appointment scheduling",
+      ...customerFeatures("chat_only"),
     ],
   },
   sms_only: {
     name: "Starter / SMS Only",
-    price: 25,
+    price: packagePrices.sms_only,
     includedSmsParts: 500,
     includedVoiceMinutes: 0,
     includedAiReplies: null,
@@ -44,11 +84,12 @@ export const SUBSCRIPTION_PLANS: Record<
       "500 included SMS parts/month",
       "Contact management",
       "Conversation inbox",
+      ...customerFeatures("sms_only"),
     ],
   },
   sms_and_chat: {
     name: "Growth / SMS + Web Chat",
-    price: 45,
+    price: packagePrices.sms_and_chat,
     includedSmsParts: 1500,
     includedVoiceMinutes: 0,
     includedAiReplies: null,
@@ -62,11 +103,12 @@ export const SUBSCRIPTION_PLANS: Record<
       "Google Calendar connection",
       "AI appointment scheduling",
       "1,500 included SMS parts/month",
+      ...customerFeatures("sms_and_chat"),
     ],
   },
   full: {
     name: "Pro / Full Suite",
-    price: 65,
+    price: packagePrices.full,
     includedSmsParts: 2500,
     includedVoiceMinutes: 100,
     includedAiReplies: null,
@@ -78,6 +120,7 @@ export const SUBSCRIPTION_PLANS: Record<
       "Call transcripts and recordings",
       "Custom AI rules and guardrails",
       "2,500 included SMS parts/month",
+      ...customerFeatures("full"),
     ],
   },
 };
@@ -98,10 +141,51 @@ const PLAN_PRICE_ENV: Record<StripePricedSubscriptionPlan, string> = {
 };
 
 const CHAT_ONLY_PRICE_ENV = "STRIPE_PRICE_CHAT_ONLY";
+const LEGACY_PRICE_ENV: Record<SubscriptionPlan, string> = {
+  chat_only: "STRIPE_LEGACY_PRICE_CHAT_ONLY",
+  sms_only: "STRIPE_LEGACY_PRICE_SMS_ONLY",
+  sms_and_chat: "STRIPE_LEGACY_PRICE_SMS_AND_CHAT",
+  full: "STRIPE_LEGACY_PRICE_FULL",
+};
+
+/** Only the explicitly retained subscriptions need old-Price compatibility. */
+export function legacyPlanFromStripePriceId(
+  priceId: string | null | undefined,
+): SubscriptionPlan | null {
+  if (!priceId) return null;
+  const matches = (
+    Object.entries(LEGACY_PRICE_ENV) as [SubscriptionPlan, string][]
+  ).filter(([, key]) => process.env[key] === priceId);
+  if (matches.length > 1)
+    throw new Error("A legacy Stripe Price cannot belong to multiple plans");
+  return matches[0]?.[0] ?? null;
+}
+
+export function approvedBasePriceCents(
+  plan: SubscriptionPlan,
+  priceId: string,
+): number {
+  const legacy = legacyPlanFromStripePriceId(priceId);
+  if (legacy && legacy !== plan) throw new Error("Stripe Price plan mismatch");
+  if (
+    legacy &&
+    CUSTOMER_REVIEWS_PRICING_ENABLED &&
+    process.env[
+      plan === "chat_only" ? CHAT_ONLY_PRICE_ENV : PLAN_PRICE_ENV[plan]
+    ] === priceId
+  ) {
+    throw new Error("New package prices must use distinct Stripe Price IDs");
+  }
+  return (
+    (legacy ? LEGACY_PLAN_PRICES[plan] : SUBSCRIPTION_PLANS[plan].price) * 100
+  );
+}
 const NON_CHAT_PRICE_ENV = [
   ...Object.values(PLAN_PRICE_ENV),
   "STRIPE_PRICE_SETUP_FEE",
   "STRIPE_PRICE_SMS_OVERAGE_PART",
+  "STRIPE_PRICE_REVIEW_SMS",
+  "STRIPE_PRICE_REVIEW_SMS_ACTIVATION",
 ] as const;
 
 type StripePriceEnvironment = Readonly<Record<string, string | undefined>>;
@@ -129,6 +213,15 @@ export function isStripePricedSubscriptionPlan(
  * only after a caller has selected and authorized Chat Only.
  */
 export function stripePriceIdForPlan(plan: SubscriptionPlan): string {
+  const selected = readPriceId(
+    plan === "chat_only" ? CHAT_ONLY_PRICE_ENV : PLAN_PRICE_ENV[plan],
+  );
+  if (
+    CUSTOMER_REVIEWS_PRICING_ENABLED &&
+    legacyPlanFromStripePriceId(selected)
+  ) {
+    throw new Error("New package prices must use distinct Stripe Price IDs");
+  }
   if (plan === "chat_only") {
     const chatOnlyPriceId = readPriceId(CHAT_ONLY_PRICE_ENV);
     if (collidesWithConfiguredNonChatPrice(chatOnlyPriceId, process.env)) {
@@ -139,7 +232,7 @@ export function stripePriceIdForPlan(plan: SubscriptionPlan): string {
     return chatOnlyPriceId;
   }
 
-  return readPriceId(PLAN_PRICE_ENV[plan]);
+  return selected;
 }
 
 /**
@@ -155,6 +248,10 @@ export function hasValidChatOnlyStripePrice(
     value &&
     value.startsWith("price_") &&
     value.length > 6 &&
+    !(
+      CUSTOMER_REVIEWS_PRICING_ENABLED &&
+      Object.values(LEGACY_PRICE_ENV).some((key) => environment[key] === value)
+    ) &&
     !collidesWithConfiguredNonChatPrice(value, environment),
   );
 }
@@ -171,6 +268,17 @@ export function planFromStripePriceId(
   priceId: string | null | undefined,
 ): SubscriptionPlan | null {
   if (!priceId) return null;
+  const legacy = legacyPlanFromStripePriceId(priceId);
+  if (legacy) {
+    for (const [plan, envName] of Object.entries({
+      ...PLAN_PRICE_ENV,
+      chat_only: CHAT_ONLY_PRICE_ENV,
+    })) {
+      if (process.env[envName] === priceId && plan !== legacy)
+        throw new Error("Stripe Price plan mismatch");
+    }
+    return legacy;
+  }
   const ids = stripePriceIds();
   const rawChatOnlyPriceId = process.env[CHAT_ONLY_PRICE_ENV];
   if (

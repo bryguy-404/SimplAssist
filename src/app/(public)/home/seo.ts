@@ -1,3 +1,5 @@
+
+import { SETUP_FEE_CENTS } from "@/lib/stripe/config";
 import type { Metadata } from "next";
 import { isPlanAvailable } from "@/lib/billing/planAvailability";
 import { FULL_SUITE_PACKAGE_SUMMARY } from "@/lib/billing/fullSuitePresentation";
@@ -13,18 +15,18 @@ export const HOME_TITLE =
   "SimplAssist — Missed-Call Text Back for Small Businesses";
 
 export const HOME_DESCRIPTION =
-  "SimplAssist provides small businesses with missed call text back from $25/month, plus AI conversations, website chat, and appointment booking at $45/month.";
+  `SimplAssist provides small businesses with missed call text back from $${SUBSCRIPTION_PLANS.sms_only.price}/month, plus AI conversations, website chat, and appointment booking at $${SUBSCRIPTION_PLANS.sms_and_chat.price}/month.`;
 
 export const HOME_DEFINITION =
-  "SimplAssist is a missed call text back service for small businesses, with plans starting at $25/month. Its $45/month plan adds an AI receptionist for SMS and web chat, a website chat widget, and Google Calendar appointment booking. With Full Suite, SimplAssist can also talk with callers, answer questions, collect their details, and help book appointments when you can't pick up.";
+  `SimplAssist is a missed call text back service for small businesses, with plans starting at $${SUBSCRIPTION_PLANS.sms_only.price}/month. Its $${SUBSCRIPTION_PLANS.sms_and_chat.price}/month plan adds an AI receptionist for SMS and web chat, a website chat widget, and Google Calendar appointment booking. With Full Suite, SimplAssist can also talk with callers, answer questions, collect their details, and help book appointments when you can't pick up.`;
 
 export const CHAT_ONLY_HOME_TITLE = HOME_TITLE;
 
 export const CHAT_ONLY_HOME_DESCRIPTION =
-  "Missed call text back for small businesses from $25/month. Keep leads talking with SimplAssist. Explore $10 website chat and Full Suite phone answering.";
+  `Missed call text back for small businesses from $${SUBSCRIPTION_PLANS.sms_only.price}/month. Keep leads talking with SimplAssist. Explore $${SUBSCRIPTION_PLANS.chat_only.price} website chat and Full Suite phone answering.`;
 
 export const CHAT_ONLY_HOME_DEFINITION =
-  "SimplAssist is a missed call text back service for small businesses. SMS Only starts at $25/month: missed callers receive an automatic text, and you follow up from your inbox. SMS + Web Chat at $45/month adds AI text conversations, website chat, and Google Calendar booking. For website chat on its own, Chat Only is $10/month with 200 completed AI replies and no setup fee. Full Suite adds SimplAssist Voice, so callers can have a spoken conversation, ask questions, and get help booking appointments.";
+  `SimplAssist is a missed call text back service for small businesses. SMS Only starts at $${SUBSCRIPTION_PLANS.sms_only.price}/month: missed callers receive an automatic text, and you follow up from your inbox. SMS + Web Chat at $${SUBSCRIPTION_PLANS.sms_and_chat.price}/month adds AI text conversations, website chat, and Google Calendar booking. For website chat on its own, Chat Only is $${SUBSCRIPTION_PLANS.chat_only.price}/month with 200 completed AI replies and no setup fee. Full Suite adds SimplAssist Voice, so callers can have a spoken conversation, ask questions, and get help booking appointments.`;
 
 export type HomepageFaq = {
   question: string;
@@ -57,17 +59,17 @@ const BASE_HOME_FAQS = [
   {
     question: "What is SimplAssist?",
     answer:
-      "SimplAssist is a customer communication service built for small businesses. The $25/month SMS Only plan gives you missed call text back and a shared inbox, and the $45/month plan adds an AI receptionist for SMS and web chat, a website chat widget, and appointment booking synced with Google Calendar. Full Suite adds AI phone answering so callers can speak with your receptionist when you can't pick up.",
+      `SimplAssist is a customer communication service built for small businesses. The $${SUBSCRIPTION_PLANS.sms_only.price}/month SMS Only plan gives you missed call text back and a shared inbox, and the $${SUBSCRIPTION_PLANS.sms_and_chat.price}/month plan adds an AI receptionist for SMS and web chat, a website chat widget, and appointment booking synced with Google Calendar. Full Suite adds AI phone answering so callers can speak with your receptionist when you can't pick up.`,
   },
   {
     question: "How does SimplAssist's missed call text back work?",
     answer:
-      "When someone calls and you can't pick up, SimplAssist automatically sends them a branded text inviting them to reply. Their replies land in your shared inbox, and on the $45/month plan your AI receptionist can carry the conversation for you.",
+      `When someone calls and you can't pick up, SimplAssist automatically sends them a branded text inviting them to reply. Their replies land in your shared inbox, and on the $${SUBSCRIPTION_PLANS.sms_and_chat.price}/month plan your AI receptionist can carry the conversation for you.`,
   },
   {
     question: "How much does SimplAssist cost?",
     answer:
-      `SMS Only is $25/month with 500 included SMS parts, and SMS + Web Chat is $45/month with 1,500 included SMS parts. There's a one-time $25 setup fee per business when you activate paid SMS, which covers your carrier registration. ${fullSuitePricingCopy}`,
+      `SMS Only is $${SUBSCRIPTION_PLANS.sms_only.price}/month with 500 included SMS parts, and SMS + Web Chat is $${SUBSCRIPTION_PLANS.sms_and_chat.price}/month with 1,500 included SMS parts. There's a one-time $${SETUP_FEE_CENTS / 100} setup fee per business when you activate paid SMS, which covers your carrier registration. ${fullSuitePricingCopy}`,
   },
   {
     question: "What kinds of businesses is SimplAssist for?",
@@ -82,16 +84,16 @@ const BASE_HOME_FAQS = [
   {
     question: "How long does setup take?",
     answer:
-      "Most SMS registrations are approved within a few business days of payment, though additional carrier review can sometimes stretch that to a few weeks — that timeline is set by the phone carriers, not by us. Texting goes live as soon as carrier approval and your phone-number assignment are complete. Learn more about what the one-time $25 setup fee covers.",
+      `Most SMS registrations are approved within a few business days of payment, though additional carrier review can sometimes stretch that to a few weeks — that timeline is set by the phone carriers, not by us. Texting goes live as soon as carrier approval and your phone-number assignment are complete. Learn more about what the one-time $${SETUP_FEE_CENTS / 100} setup fee covers.`,
     answerLink: {
-      text: "what the one-time $25 setup fee covers.",
+      text: `what the one-time $${SETUP_FEE_CENTS / 100} setup fee covers.`,
       href: "/support/setup-fee",
     },
   },
   {
     question: "Can I cancel anytime?",
     answer:
-      "Yes — you can cancel anytime, and there are no contracts. The one-time $25 setup fee is non-refundable once carrier registration begins, since it covers that registration process itself.",
+      `Yes — you can cancel anytime, and there are no contracts. The one-time $${SETUP_FEE_CENTS / 100} setup fee is non-refundable once carrier registration begins, since it covers that registration process itself.`,
   },
 ] as const satisfies readonly HomepageFaq[];
 
@@ -114,14 +116,14 @@ export const CHAT_ONLY_HOME_FAQS = [
   {
     question: "How much does SimplAssist cost?",
     answer:
-      `Chat Only is $10/month with 200 completed website-chat AI replies and no setup fee. SMS Only is $25/month with 500 included SMS parts, and SMS + Web Chat is $45/month with 1,500 included SMS parts. Paid SMS activation has a one-time $25 setup fee per business for carrier registration. ${fullSuitePricingCopy}`,
+      `Chat Only is $${SUBSCRIPTION_PLANS.chat_only.price}/month with 200 completed website-chat AI replies and no setup fee. SMS Only is $${SUBSCRIPTION_PLANS.sms_only.price}/month with 500 included SMS parts, and SMS + Web Chat is $${SUBSCRIPTION_PLANS.sms_and_chat.price}/month with 1,500 included SMS parts. Paid SMS activation has a one-time $${SETUP_FEE_CENTS / 100} setup fee per business for carrier registration. ${fullSuitePricingCopy}`,
   },
   ...VOICE_FAQS,
   BASE_HOME_FAQS[2],
   {
     question: "What is included in Chat Only?",
     answer:
-      "Chat Only is $10/month and includes a website chat widget, 200 completed AI replies per month, web-chat lead capture, a contact and conversation inbox, AI answer and tone customization, Google Calendar connection, and AI appointment booking. It has no phone number, SMS, MMS, or setup fee.",
+      `Chat Only is $${SUBSCRIPTION_PLANS.chat_only.price}/month and includes a website chat widget, 200 completed AI replies per month, web-chat lead capture, a contact and conversation inbox, AI answer and tone customization, Google Calendar connection, and AI appointment booking. It has no phone number, SMS, MMS, or setup fee.`,
   },
   BASE_HOME_FAQS[4],
   {
@@ -132,9 +134,9 @@ export const CHAT_ONLY_HOME_FAQS = [
   {
     ...BASE_HOME_FAQS[6],
     answer:
-      "Chat Only can launch without phone or carrier registration after billing and core setup are complete. SMS registrations are usually approved within a few business days of payment, though additional carrier review can sometimes take a few weeks. Texting goes live after carrier approval and phone-number assignment. Learn more about what the one-time $25 SMS setup fee covers.",
+      `Chat Only can launch without phone or carrier registration after billing and core setup are complete. SMS registrations are usually approved within a few business days of payment, though additional carrier review can sometimes take a few weeks. Texting goes live after carrier approval and phone-number assignment. Learn more about what the one-time $${SETUP_FEE_CENTS / 100} SMS setup fee covers.`,
     answerLink: {
-      text: "what the one-time $25 SMS setup fee covers.",
+      text: `what the one-time $${SETUP_FEE_CENTS / 100} SMS setup fee covers.`,
       href: "/support/setup-fee",
     },
   },

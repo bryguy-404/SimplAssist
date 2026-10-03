@@ -1,6 +1,7 @@
 import "server-only";
 
 import type Stripe from "stripe";
+import { approvedBasePriceCents } from "./config";
 
 export class ChatOnlyStripePriceConfigurationError extends Error {
   constructor() {
@@ -17,7 +18,7 @@ type ChatOnlyStripePriceRequirements = {
 };
 
 /**
- * Authoritative product check for the approved flat $10/month Chat Only tier.
+ * Authoritative product check for the selected flat monthly Chat package.
  * Environment-variable shape alone cannot establish amount or recurrence, so
  * both Checkout creation and webhook synchronization use this same boundary.
  */
@@ -35,7 +36,7 @@ export function assertApprovedChatOnlyStripePrice(
     (requirements.requireActive !== true || price.active === true) &&
     price.type === "recurring" &&
     price.currency.toLowerCase() === "usd" &&
-    price.unit_amount === 1_000 &&
+    price.unit_amount === approvedBasePriceCents("chat_only", price.id) &&
     recurring?.interval === "month" &&
     recurring.interval_count === 1 &&
     recurring.usage_type === "licensed";

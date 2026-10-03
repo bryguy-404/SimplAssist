@@ -1,4 +1,4 @@
-import { telnyx } from "./client";
+import { sendTenantSms } from "./tenantSmsSend.server";
 import { getOutboundSendContext } from "./lookup";
 import { isE164PhoneNumber } from "@/lib/phone/e164";
 import {
@@ -42,7 +42,7 @@ export async function sendMissedCallSMS(
   // caller can record-and-let-retry.
   if (!isE164PhoneNumber(callerPhone)) {
     console.warn(
-      `[missed-call] caller phone is not textable (anonymous/withheld): ${callerPhone}`
+      `[missed-call] caller phone is not textable (anonymous/withheld): ${callerPhone}`,
     );
     return;
   }
@@ -51,7 +51,7 @@ export async function sendMissedCallSMS(
     const entitlements = await resolveBusinessEntitlements(businessId);
     if (!canUseFeature(entitlements, "missed_call_sms")) {
       console.warn(
-        `[missed-call] Automatic SMS is not entitled for inactive business ${businessId}`
+        `[missed-call] Automatic SMS is not entitled for inactive business ${businessId}`,
       );
       return;
     }
@@ -84,17 +84,17 @@ export async function sendMissedCallSMS(
     // silently loses the SMS on a DB blip.
     if (businessError) {
       throw new Error(
-        `[missed-call] business read failed for ${businessId}: ${businessError.message}`
+        `[missed-call] business read failed for ${businessId}: ${businessError.message}`,
       );
     }
     if (phoneError) {
       throw new Error(
-        `[missed-call] phone number read failed for ${businessId}: ${phoneError.message}`
+        `[missed-call] phone number read failed for ${businessId}: ${phoneError.message}`,
       );
     }
     if (aiSettingsError) {
       throw new Error(
-        `[missed-call] AI language setting read failed for ${businessId}: ${aiSettingsError.message}`
+        `[missed-call] AI language setting read failed for ${businessId}: ${aiSettingsError.message}`,
       );
     }
 
@@ -105,7 +105,7 @@ export async function sendMissedCallSMS(
 
     if (!phoneNumberRow) {
       console.warn(
-        `[missed-call] No active phone number for business: ${businessId}`
+        `[missed-call] No active phone number for business: ${businessId}`,
       );
       return;
     }
@@ -117,7 +117,9 @@ export async function sendMissedCallSMS(
       language,
     });
 
-    const sendContext = await getOutboundSendContext(phoneNumberRow.phone_number);
+    const sendContext = await getOutboundSendContext(
+      phoneNumberRow.phone_number,
+    );
 
     // Ensure a contact + conversation exist so the dashboard can show the
     // missed-call SMS in the conversation thread for that caller. We add
@@ -127,23 +129,20 @@ export async function sendMissedCallSMS(
       businessId,
       callerPhone,
       null,
-      "sms"
+      "sms",
     );
     const conversation = await getOrCreateConversation(
       businessId,
       contact.id,
       "sms",
       {
-        defaultAiHandling: canUseFeature(
-          entitlements,
-          "ai_sms_conversations"
-        ),
-      }
+        defaultAiHandling: canUseFeature(entitlements, "ai_sms_conversations"),
+      },
     );
 
     if (!sendContext.smsReady) {
       console.warn(
-        `[missed-call] send blocked: reason=${sendContext.blockReason} campaign_status=${sendContext.campaignStatus} assignment_status=${sendContext.assignmentStatus} for business ${businessId}`
+        `[missed-call] send blocked: reason=${sendContext.blockReason} campaign_status=${sendContext.campaignStatus} assignment_status=${sendContext.assignmentStatus} for business ${businessId}`,
       );
       await insertPausedSystemMessageIfNeeded({
         conversationId: conversation.id,
@@ -161,7 +160,7 @@ export async function sendMissedCallSMS(
       // 500-loop every missed call for this business across the provider's
       // retry schedule with no chance of success.
       console.error(
-        `[missed-call] Missing messaging profile for business ${businessId} — SMS skipped (provisioning problem, not retryable)`
+        `[missed-call] Missing messaging profile for business ${businessId} — SMS skipped (provisioning problem, not retryable)`,
       );
       return;
     }
@@ -173,7 +172,7 @@ export async function sendMissedCallSMS(
     });
     if (!usage.allowed) {
       console.warn(
-        `[missed-call] send blocked by usage gate: reason=${usage.reason} for business ${businessId}`
+        `[missed-call] send blocked by usage gate: reason=${usage.reason} for business ${businessId}`,
       );
       await insertPausedSystemMessageIfNeeded({
         conversationId: conversation.id,
@@ -187,11 +186,11 @@ export async function sendMissedCallSMS(
 
     const operationalAccess = await resolveOutboundSmsOperationalAccess(
       businessId,
-      "missed_call"
+      "missed_call",
     );
     if (!operationalAccess.allowed) {
       console.warn(
-        `[missed-call] send blocked by operational controls: reason=${operationalAccess.reason} for business ${businessId}`
+        `[missed-call] send blocked by operational controls: reason=${operationalAccess.reason} for business ${businessId}`,
       );
       await insertPausedSystemMessageIfNeeded({
         conversationId: conversation.id,
@@ -206,16 +205,17 @@ export async function sendMissedCallSMS(
     // Voice fallback claims persist before crossing the provider boundary.
     // A timeout after this point is ambiguous and must never cause a resend.
     if (delivery && !(await delivery.claim())) return;
-    const body = {
+    const result = await sendTenantSms({
+      businessId,
       from: phoneNumberRow.phone_number,
       to: callerPhone,
       text: smsBody,
-      messaging_profile_id: sendContext.messagingProfileId,
-      type: "SMS" as const,
-    };
-    const result = delivery
-      ? await telnyx.messages.send(body, { maxRetries: 0, timeout: 10000 })
-      : await telnyx.messages.send(body);
+      messagingProfileId: sendContext.messagingProfileId,
+      purpose: "missed_call",
+      idempotencyKey: `missed-call:${callSessionOrControlId}`,
+      conversationId: conversation.id,
+    });
+    if (result.replayed) return;
 
     const occurredAt = new Date();
     try {
@@ -224,10 +224,7 @@ export async function sendMissedCallSMS(
         metricKey: "missed_call_caught",
         quantity: 1,
         occurredAt,
-        sourceKey: buildMissedCallSourceKey(
-          businessId,
-          callSessionOrControlId
-        ),
+        sourceKey: buildMissedCallSourceKey(businessId, callSessionOrControlId),
         origin: null,
       });
     } catch {
@@ -238,13 +235,19 @@ export async function sendMissedCallSMS(
     }
 
     console.log(
-      `[missed-call] SMS sent to ${callerPhone} for business ${businessId} (lang=${language}, telnyxId=${result.data?.id})`
+      `[missed-call] SMS sent to ${callerPhone} for business ${businessId} (lang=${language}, telnyxId=${result.data?.id})`,
     );
 
     // Decoupled from the send: a logging failure here must not look like an
     // SMS failure in the outer catch. The customer already got the text.
     try {
-      await addMessage(conversation.id, businessId, "assistant", smsBody, "sms");
+      await addMessage(
+        conversation.id,
+        businessId,
+        "assistant",
+        smsBody,
+        "sms",
+      );
       await recordOutboundSmsUsage({
         businessId,
         text: smsBody,
@@ -258,7 +261,7 @@ export async function sendMissedCallSMS(
     } catch (logErr) {
       console.error(
         `[missed-call] SMS sent (telnyxId=${result.data?.id}) but failed to persist to messages table — manual reconciliation may be needed:`,
-        logErr
+        logErr,
       );
     }
   } catch (error) {
@@ -274,16 +277,14 @@ export async function sendMissedCallSMS(
 }
 
 function toPausedReason(
-  reason: SmsBlockReason | null
+  reason: SmsBlockReason | null,
 ): "campaign_not_approved" | "assignment_pending" | "assignment_failed" {
   if (reason === "assignment_failed") return "assignment_failed";
   if (reason === "assignment_pending") return "assignment_pending";
   return "campaign_not_approved";
 }
 
-function usageToPausedReason(
-  reason: UsageBlockReason
-): PausedReason {
+function usageToPausedReason(reason: UsageBlockReason): PausedReason {
   if (isOutboundSmsOperationalBlockReason(reason)) return reason;
   if (reason === "usage_limit_reached") return "usage_limit_reached";
   if (reason === "telnyx_submission_disabled") return "submission_disabled";

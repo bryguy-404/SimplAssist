@@ -18,7 +18,7 @@ import { CtaRace } from "@/lib/theme-v2/cta-race";
 import { FullSuiteWaitlistButton } from "@/components/waitlist/FullSuiteWaitlistButton";
 import { isChatOnlyPublicLaunchEnabled } from "@/lib/billing/chatOnlyPublicLaunch.server";
 import { isPlanAvailable } from "@/lib/billing/planAvailability";
-import { SETUP_FEE_CENTS, SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
+import { customerFeatures, SETUP_FEE_CENTS, SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
 import { FULL_SUITE_DESCRIPTION, FULL_SUITE_HIGHLIGHTS, FULL_SUITE_USAGE_NOTE } from "@/lib/billing/fullSuitePresentation";
 import { OpenChatButton } from "./open-chat-button";
 import { HomepageChatWidget } from "./homepage-chat-widget";
@@ -168,6 +168,7 @@ const chatOnlyPlan = {
     "AI appointment scheduling",
     "No phone number, SMS, MMS, or carrier activation",
     "No setup or SMS activation fee",
+    ...customerFeatures("chat_only"),
   ],
   highlighted: false,
 };
@@ -194,6 +195,7 @@ const existingPlans = [
       `${formattedSmsParts("sms_only")} included SMS parts/month`,
       "Contact management",
       "Conversation inbox",
+      ...customerFeatures("sms_only"),
       smsActivationFeeLabel,
     ],
     highlighted: false,
@@ -222,6 +224,7 @@ const existingPlans = [
       "Google Calendar connection",
       "AI appointment scheduling",
       `${formattedSmsParts("sms_and_chat")} included SMS parts/month`,
+      ...customerFeatures("sms_and_chat"),
     ],
     highlighted: true,
   },
@@ -998,8 +1001,8 @@ export default function HomePage() {
             }
             subtitle={
               publicChatOnlyAvailable
-                ? "No contracts. Chat Only has no setup fee; paid SMS activation includes a one-time $25 setup fee."
-                : "No contracts. Paid SMS activation includes a one-time $25 setup fee."
+                ? `No contracts. Chat Only has no setup fee; paid SMS activation includes a one-time $${SETUP_FEE_CENTS / 100} setup fee.`
+                : `No contracts. Paid SMS activation includes a one-time $${SETUP_FEE_CENTS / 100} setup fee.`
             }
           />
 

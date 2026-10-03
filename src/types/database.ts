@@ -29,6 +29,7 @@ export type BookingMode = "collect_info" | "schedule_direct";
 export type PrimaryGoal = "book" | "signup" | "quote" | "callback";
 
 export type Channel = "sms" | "web_chat" | "voice";
+export type ContactSource = Channel | "manual" | "csv_import";
 
 export type OperationalService = "ai_replies" | "texting" | "bookings";
 
@@ -142,9 +143,7 @@ export type NoEinHoldStatus =
 
 export type RegistrationStatus = "pending" | "approved" | "rejected";
 
-export type TelnyxBrandSource =
-  | "created_by_simplassist"
-  | "linked_existing";
+export type TelnyxBrandSource = "created_by_simplassist" | "linked_existing";
 
 export type OnboardingStep =
   | "business_info"
@@ -549,19 +548,27 @@ export interface AISettings {
 }
 
 export interface Contact {
+  provided_phone_number?: string | null;
   id: string;
   business_id: string;
   name: string | null;
   phone_number: string | null;
   email: string | null;
   session_id: string | null;
-  source_channel: Channel;
+  source_channel: ContactSource;
   lead_score: number;
   lead_status: "normal" | "warm" | "hot";
   lead_status_updated_at: string;
   notes: string | null;
   created_at: string;
   last_contacted_at: string;
+  company?: string | null;
+  service_address?: string | null;
+  customer_stage?: "lead" | "customer" | "inactive";
+  is_priority?: boolean;
+  owner_warmth_override?: "normal" | "warm" | "hot" | null;
+  next_follow_up_at?: string | null;
+  tags?: string[];
 }
 
 export interface Conversation {

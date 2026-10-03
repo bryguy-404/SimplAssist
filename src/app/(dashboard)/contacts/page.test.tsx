@@ -9,9 +9,15 @@ const mocks = vi.hoisted(() => ({
   contactStats: vi.fn(() => null),
   contactsTable: vi.fn(() => null),
   from: vi.fn(),
+  customerWorkspaceEnabled: vi.fn(),
+  reviewsEnabled: vi.fn(),
+  customersWorkspace: vi.fn(() => null),
 }));
 
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
+vi.mock("@/lib/billing/customerReviewsRollout.server", () => ({ customerWorkspaceEnabled: mocks.customerWorkspaceEnabled }));
+vi.mock("@/lib/reviews/config", () => ({ isEmailReviewsEnabledForBusiness: mocks.reviewsEnabled }));
+vi.mock("@/components/customers/CustomersWorkspace", () => ({ default: mocks.customersWorkspace }));
 vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
   requireWorkspacePageAccess: mocks.requireWorkspacePageAccess,
 }));
@@ -85,9 +91,30 @@ const CONVERSATION: Conversation = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.requireWorkspacePageAccess.mockResolvedValue(undefined);
+  mocks.customerWorkspaceEnabled.mockReturnValue(false);
+  mocks.reviewsEnabled.mockReturnValue(false);
 });
 
 describe("ContactsPage", () => {
+  it("opens the gated customer workspace without loading all contacts or conversations", async () => {
+    mocks.customerWorkspaceEnabled.mockReturnValue(true);
+    mocks.getDashboardBusinessContext.mockResolvedValue({ status: "resolved", supabase: { from: mocks.from }, user: { id: "user-1" }, business: { id: BUSINESS_ID } });
+    renderToStaticMarkup(await ContactsPage({ searchParams: { contact: CONTACT.id } }));
+    expect(mocks.requireWorkspacePageAccess).toHaveBeenCalledOnce();
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.customersWorkspace).toHaveBeenCalledWith(expect.objectContaining({ initialSelectedId: CONTACT.id, reviewsEnabled: false }), expect.anything());
+    expect(mocks.customerWorkspaceEnabled).toHaveBeenCalledWith(BUSINESS_ID);
+  });
+
+  it("uses the server review gate independently from the customer workspace", async () => {
+    mocks.customerWorkspaceEnabled.mockReturnValue(true);
+    mocks.reviewsEnabled.mockReturnValue(true);
+    mocks.getDashboardBusinessContext.mockResolvedValue({ status: "resolved", supabase: { from: mocks.from }, user: { id: "user-1" }, business: { id: BUSINESS_ID } });
+    renderToStaticMarkup(await ContactsPage({ searchParams: { contact: [CONTACT.id] } }));
+    expect(mocks.customersWorkspace).toHaveBeenCalledWith(expect.objectContaining({ initialSelectedId: undefined, reviewsEnabled: true }), expect.anything());
+    expect(mocks.reviewsEnabled).toHaveBeenCalledWith(BUSINESS_ID);
+  });
+
   it("resolves an omitted deep-linked contact with one bounded owner-scoped lookup", async () => {
     const selected = query({ data: CONTACT, error: null });
     mocks.from.mockReturnValueOnce(query({ data: [], error: null }))

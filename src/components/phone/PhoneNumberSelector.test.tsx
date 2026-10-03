@@ -33,7 +33,7 @@ const DEFAULT_REQUEST_BRAND: RequestBrand = {
 };
 
 function renderPhoneNumberSelector(
-  props: React.ComponentProps<typeof PhoneNumberSelector> = {}
+  props: React.ComponentProps<typeof PhoneNumberSelector> = {},
 ): string {
   return renderToStaticMarkup(
     <BrandProvider requestBrand={DEFAULT_REQUEST_BRAND}>
@@ -79,6 +79,18 @@ describe("PhoneNumberSelector canonical legal links", () => {
     expect(markup).toContain("focus:border-[var(--brand-primary-dark)]");
     expect(markup).toContain("bg-[var(--brand-primary-alt)]");
   });
+
+  it("can describe review-only permission while retaining the canonical legal links", () => {
+    const markup = renderPhoneNumberSelector({
+      consentDescription:
+        "I authorize review requests only to customers who agreed to receive them.",
+    });
+    expect(markup).toContain("review requests only to customers who agreed");
+    expect(markup).not.toContain(
+      "on my business&#x27;s behalf to customers who contact me",
+    );
+    expect(markup).toContain(`href="${canonicalLegalUrl("/terms")}"`);
+  });
 });
 
 describe("PhoneNumberSelector pending-number replacement", () => {
@@ -89,7 +101,7 @@ describe("PhoneNumberSelector pending-number replacement", () => {
         pendingSelection: true,
         pendingFailureReason: "That number is no longer available",
         replacingNumber: false,
-      })
+      }),
     ).toBe(true);
 
     expect(
@@ -98,7 +110,7 @@ describe("PhoneNumberSelector pending-number replacement", () => {
         pendingSelection: true,
         pendingFailureReason: null,
         replacingNumber: false,
-      })
+      }),
     ).toBe(false);
   });
 
@@ -109,7 +121,7 @@ describe("PhoneNumberSelector pending-number replacement", () => {
         pendingSelection: true,
         pendingFailureReason: null,
         replacingNumber: true,
-      })
+      }),
     ).toBe(true);
   });
 

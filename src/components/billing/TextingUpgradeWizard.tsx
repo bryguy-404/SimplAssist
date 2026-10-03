@@ -7,7 +7,7 @@ import BrandVerificationForm from "@/components/onboarding/BrandVerificationForm
 import SmsUseCaseForm from "@/components/onboarding/SmsUseCaseForm";
 import PhoneNumberSelector, { shouldDisablePhoneNumberNext } from "@/components/phone/PhoneNumberSelector";
 import { evaluateContentQuality } from "@/lib/contentQuality";
-import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
+import { SETUP_FEE_CENTS, SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
 import type { SmsPlan } from "@/lib/stripe/smsBilling";
 import { TEXTING_UPGRADE_STEPS, type TextingUpgradeQuote, type TextingUpgradeState, type TextingUpgradeStep } from "@/lib/billing/textingUpgrade";
 import { primaryCtaInlineClass, secondaryCtaClass } from "@/lib/glass";
@@ -130,7 +130,7 @@ export default function TextingUpgradeWizard({ initialState }: { initialState?: 
         {step !== "status" && <p className="mb-5 text-sm" aria-live="polite">Step {TEXTING_UPGRADE_STEPS.indexOf(step) + 1} of 6 · {labels[step]}</p>}
         {step === "plan" && <div className="space-y-4">
           <h2 className="text-xl font-semibold">Choose your texting plan</h2>
-          <p>Choose now, then review the exact upgrade charge and one-time $25 setup fee after setup.</p>
+          <p>Choose now, then review the exact upgrade charge and one-time ${SETUP_FEE_CENTS / 100} setup fee after setup.</p>
           {state.availablePlans.map((plan) => <label key={plan} className="flex cursor-pointer items-start gap-3 rounded-xl border p-4">
             <input className="mt-1" type="radio" name="texting-upgrade-plan" checked={selected === plan} disabled={busy || !state.actions.canSelect} onChange={() => { setSelected(plan); setStarterAcknowledged(false); }} />
             <span><span className="font-semibold">{SUBSCRIPTION_PLANS[plan].name} · ${SUBSCRIPTION_PLANS[plan].price}/month</span><span className="mt-1 block text-sm">{plan === "sms_only" ? "Manual texting and missed-call texts. Website chat ends when texting activates." : plan === "sms_and_chat" ? "Keep website chat and add AI texting." : "Keep website chat and add AI texting and voice."}</span></span>

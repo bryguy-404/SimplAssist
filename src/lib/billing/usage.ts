@@ -29,10 +29,8 @@ const USAGE_BLOCK_MESSAGES = {
   ai_replies_paused: outboundSmsOperationalBlockMessage("ai_replies_paused"),
   telnyx_submission_disabled:
     "SMS sending is disabled for this account. Contact support if this looks wrong.",
-  billing_required:
-    "Choose an active plan before sending SMS.",
-  canceled:
-    "Choose an active plan before SMS sending can continue.",
+  billing_required: "Choose an active plan before sending SMS.",
+  canceled: "Choose an active plan before SMS sending can continue.",
   plan_not_entitled:
     "Your current plan does not include this type of SMS sending.",
   usage_limit_reached:
@@ -135,24 +133,42 @@ export async function preflightOutboundSms(args: {
     return blocked("canceled", smsParts);
   }
   const servicePlan = await resolveOutboundServicePlan(context);
-  if (!canPlanUseFeature(servicePlan, smsFeatureForPurpose(args.purpose))) {
+  const reviewPurpose = args.purpose.startsWith("review_");
+  let reviewAllowance = 0;
+  if (reviewPurpose) {
+    const access = await supabaseAdmin.rpc("has_review_sms_access", {
+      p_business_id: args.businessId,
+    });
+    const allowance = await supabaseAdmin.rpc("review_sms_allowance", {
+      p_business_id: args.businessId,
+    });
+    if (access.error || allowance.error)
+      throw new Error("Review SMS access unavailable");
+    if (access.data !== true) return blocked("plan_not_entitled", smsParts);
+    reviewAllowance = typeof allowance.data === "number" ? allowance.data : 0;
+  }
+  if (
+    !reviewPurpose &&
+    !canPlanUseFeature(servicePlan, smsFeatureForPurpose(args.purpose))
+  ) {
     return blocked("plan_not_entitled", smsParts);
   }
 
   const period = await ensureUsagePeriod(context);
   const used = period.inbound_sms_parts + period.outbound_sms_parts;
   const nextUsed = used + smsParts;
-  const included = period.included_sms_parts;
+  const included = period.included_sms_parts + reviewAllowance;
   // Partner plans are fixed allowances. Legacy override flags and an old
   // overage opt-in must never turn invoiced/comped partner billing into an
   // unlimited plan. Stripe subscriptions and Stripe-mode legacy overrides
   // retain their existing overage behavior.
   const overageAllowed =
+    !reviewPurpose &&
     context.source !== "partner_billing" &&
     (context.business.sms_overage_opt_in ||
       context.source === "billing_override");
 
-  if (included > 0 && nextUsed > included && !overageAllowed) {
+  if (nextUsed > included && !overageAllowed) {
     await markHardLimitReached(period.id);
     return blocked("usage_limit_reached", smsParts);
   }
@@ -245,6 +261,9 @@ function blocked(reason: UsageBlockReason, smsParts: number): UsagePreflight {
 
 function smsFeatureForPurpose(purpose: OutboundSmsPurpose): FeatureKey {
   switch (purpose) {
+    case "review_invitation":
+    case "review_reminder":
+    case "review_reply":
     case "manual_dashboard_send":
       return "manual_sms";
     case "missed_call":
@@ -257,12 +276,18 @@ function smsFeatureForPurpose(purpose: OutboundSmsPurpose): FeatureKey {
 }
 
 /** Service availability can lag billing while a paid Chat upgrade is reviewed. */
-async function resolveOutboundServicePlan(context: UsageContext): Promise<SubscriptionPlan> {
-  if (context.source !== "subscription" || context.plan === "chat_only") return context.plan;
-  const { data, error } = await supabaseAdmin.rpc("get_business_effective_service_plan", {
-    p_business_id: context.business.id,
-    p_billed_plan: context.plan,
-  });
+async function resolveOutboundServicePlan(
+  context: UsageContext,
+): Promise<SubscriptionPlan> {
+  if (context.source !== "subscription" || context.plan === "chat_only")
+    return context.plan;
+  const { data, error } = await supabaseAdmin.rpc(
+    "get_business_effective_service_plan",
+    {
+      p_business_id: context.business.id,
+      p_billed_plan: context.plan,
+    },
+  );
   if (error || (data !== context.plan && data !== "chat_only")) {
     throw new Error("[billing:usage] Effective service plan unavailable");
   }
@@ -277,7 +302,7 @@ async function resolveUsageContext(businessId: string): Promise<UsageContext> {
     supabaseAdmin
       .from("businesses")
       .select(
-        "id, operations_suspended_at, ai_replies_paused_at, texting_paused_at, bookings_paused_at, billing_mode, partner_plan, billing_pilot, billing_comped, billing_exempt, telnyx_submission_disabled, sms_overage_opt_in"
+        "id, operations_suspended_at, ai_replies_paused_at, texting_paused_at, bookings_paused_at, billing_mode, partner_plan, billing_pilot, billing_comped, billing_exempt, telnyx_submission_disabled, sms_overage_opt_in",
       )
       .eq("id", businessId)
       .single<BusinessBillingRow>(),
@@ -299,7 +324,7 @@ async function resolveUsageContext(businessId: string): Promise<UsageContext> {
 
   if (subscriptionError) {
     throw new Error(
-      `[billing:usage] Failed to read subscription for ${businessId}: ${subscriptionError.message}`
+      `[billing:usage] Failed to read subscription for ${businessId}: ${subscriptionError.message}`,
     );
   }
 
@@ -309,7 +334,7 @@ async function resolveUsageContext(businessId: string): Promise<UsageContext> {
       !isKnownSubscriptionStatus(subscription.status))
   ) {
     throw new Error(
-      `[billing:usage] Subscription for ${businessId} has malformed billing values`
+      `[billing:usage] Subscription for ${businessId} has malformed billing values`,
     );
   }
 
@@ -326,7 +351,7 @@ async function resolveUsageContext(businessId: string): Promise<UsageContext> {
   } else {
     if (!isBillingMode(business.billing_mode)) {
       throw new Error(
-        `[billing:usage] Business ${businessId} has malformed partner billing values`
+        `[billing:usage] Business ${businessId} has malformed partner billing values`,
       );
     }
 
@@ -336,7 +361,7 @@ async function resolveUsageContext(businessId: string): Promise<UsageContext> {
     ) {
       if (!isSubscriptionPlan(business.partner_plan)) {
         throw new Error(
-          `[billing:usage] Business ${businessId} has malformed partner billing values`
+          `[billing:usage] Business ${businessId} has malformed partner billing values`,
         );
       }
       source = "partner_billing";
@@ -344,7 +369,7 @@ async function resolveUsageContext(businessId: string): Promise<UsageContext> {
     } else {
       if (business.partner_plan !== null) {
         throw new Error(
-          `[billing:usage] Business ${businessId} has malformed partner billing values`
+          `[billing:usage] Business ${businessId} has malformed partner billing values`,
         );
       }
 
@@ -375,12 +400,14 @@ async function resolveUsageContext(businessId: string): Promise<UsageContext> {
   };
 }
 
-async function ensureUsagePeriod(context: UsageContext): Promise<UsagePeriodRow> {
+async function ensureUsagePeriod(
+  context: UsageContext,
+): Promise<UsagePeriodRow> {
   const included = SUBSCRIPTION_PLANS[context.plan].includedSmsParts;
   const { data: existing, error: existingError } = await supabaseAdmin
     .from("billing_usage_periods")
     .select(
-      "id, plan, included_sms_parts, inbound_sms_parts, outbound_sms_parts, warning_80_sent_at, hard_limit_reached_at"
+      "id, plan, included_sms_parts, inbound_sms_parts, outbound_sms_parts, warning_80_sent_at, hard_limit_reached_at",
     )
     .eq("business_id", context.business.id)
     .eq("period_start", context.periodStart)
@@ -388,7 +415,7 @@ async function ensureUsagePeriod(context: UsageContext): Promise<UsagePeriodRow>
 
   if (existingError) {
     throw new Error(
-      `[billing:usage] Failed to read usage period for ${context.business.id}: ${existingError.message}`
+      `[billing:usage] Failed to read usage period for ${context.business.id}: ${existingError.message}`,
     );
   }
 
@@ -409,13 +436,13 @@ async function ensureUsagePeriod(context: UsageContext): Promise<UsagePeriodRow>
         })
         .eq("id", existing.id)
         .select(
-          "id, plan, included_sms_parts, inbound_sms_parts, outbound_sms_parts, warning_80_sent_at, hard_limit_reached_at"
+          "id, plan, included_sms_parts, inbound_sms_parts, outbound_sms_parts, warning_80_sent_at, hard_limit_reached_at",
         )
         .single<UsagePeriodRow>();
 
       if (reconcileError || !reconciled) {
         throw new Error(
-          `[billing:usage] Failed to reconcile usage period ${existing.id}: ${reconcileError?.message ?? "not found"}`
+          `[billing:usage] Failed to reconcile usage period ${existing.id}: ${reconcileError?.message ?? "not found"}`,
         );
       }
       return reconciled;
@@ -433,13 +460,14 @@ async function ensureUsagePeriod(context: UsageContext): Promise<UsagePeriodRow>
       included_sms_parts: included,
     })
     .select(
-      "id, plan, included_sms_parts, inbound_sms_parts, outbound_sms_parts, warning_80_sent_at, hard_limit_reached_at"
+      "id, plan, included_sms_parts, inbound_sms_parts, outbound_sms_parts, warning_80_sent_at, hard_limit_reached_at",
     )
     .single<UsagePeriodRow>();
 
+  if (error?.code === "23505") return ensureUsagePeriod(context);
   if (error || !data) {
     throw new Error(
-      `[billing:usage] Failed to ensure usage period for ${context.business.id}: ${error?.message ?? "not found"}`
+      `[billing:usage] Failed to ensure usage period for ${context.business.id}: ${error?.message ?? "not found"}`,
     );
   }
   return data;
@@ -470,18 +498,18 @@ async function recordUsageEvent(args: {
       p_mms_events: args.mmsEvents,
       p_provider_message_id: args.providerMessageId,
       p_metadata: args.metadata ?? null,
-    }
+    },
   );
 
   if (error) {
     throw new Error(
-      `[billing:usage] Failed to record usage event ${args.idempotencyKey}: ${error.message}`
+      `[billing:usage] Failed to record usage event ${args.idempotencyKey}: ${error.message}`,
     );
   }
 
   if (typeof data !== "boolean") {
     throw new Error(
-      `[billing:usage] Usage RPC returned an invalid response for ${args.idempotencyKey}`
+      `[billing:usage] Usage RPC returned an invalid response for ${args.idempotencyKey}`,
     );
   }
 }
@@ -505,12 +533,14 @@ async function markHardLimitReached(periodId: string): Promise<void> {
 function currentUtcMonthPeriod(): { start: string; end: string } {
   const now = new Date();
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+  const end = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1),
+  );
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
 function isKnownSubscriptionStatus(
-  status: unknown
+  status: unknown,
 ): status is SubscriptionStatus {
   return (
     status === "active" ||

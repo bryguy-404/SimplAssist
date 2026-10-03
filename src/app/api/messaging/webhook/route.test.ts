@@ -1,10 +1,12 @@
-vi.mock('server-only', () => ({}));
+vi.mock("server-only", () => ({}));
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   unwrap: vi.fn(),
+  processTenantSmsInbound: vi.fn(),
+  reconcileTenantSmsReceipt: vi.fn(),
   send: vi.fn(),
   claimMessagingWebhookEvent: vi.fn(),
   completeMessagingWebhookEvent: vi.fn(),
@@ -30,6 +32,11 @@ const mocks = vi.hoisted(() => ({
   recordBusinessMetricEventBestEffort: vi.fn(),
 }));
 
+vi.mock("@/lib/messaging/tenantSmsSend.server", () => ({
+  sendTenantSms: mocks.send,
+  processTenantSmsInbound: mocks.processTenantSmsInbound,
+  reconcileTenantSmsReceipt: mocks.reconcileTenantSmsReceipt,
+}));
 vi.mock("@/lib/messaging/client", () => ({
   telnyx: {
     webhooks: { unwrap: mocks.unwrap },
@@ -69,7 +76,7 @@ vi.mock("@/lib/ai/engine", () => {
         | "conversation_in_manual_mode"
         | "account_suspended"
         | "ai_replies_paused"
-        | "texting_paused"
+        | "texting_paused",
     ) {
       super(`AI processing blocked: ${reason}`);
       this.name = "AIProcessingBlockedError";
@@ -95,7 +102,7 @@ vi.mock("@/lib/messaging/outboundSmsOperational.server", () => ({
     mocks.resolveOutboundSmsOperationalAccess,
   isOutboundSmsOperationalBlockReason: (reason: string) =>
     ["account_suspended", "texting_paused", "ai_replies_paused"].includes(
-      reason
+      reason,
     ),
 }));
 vi.mock("@/lib/messaging/pausedNotice", () => ({
@@ -171,7 +178,7 @@ function inboundEvent(
     id: string;
     text: string;
     media: unknown[];
-  }> = {}
+  }> = {},
 ) {
   return {
     data: {
@@ -187,7 +194,7 @@ function inboundEvent(
   };
 }
 
-function request(body = "{\"data\":\"signed payload\"}") {
+function request(body = '{"data":"signed payload"}') {
   return new NextRequest("http://localhost/api/messaging/webhook", {
     method: "POST",
     body,
@@ -197,15 +204,23 @@ function request(body = "{\"data\":\"signed payload\"}") {
 beforeEach(() => {
   vi.clearAllMocks();
   tableQueues.clear();
+  mocks.processTenantSmsInbound.mockResolvedValue({
+    reviewHeld: false,
+    keyword: null,
+  });
+  mocks.reconcileTenantSmsReceipt.mockResolvedValue(false);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
   vi.spyOn(console, "log").mockImplementation(() => undefined);
 
   mocks.from.mockImplementation((table: string) => {
-    const result = tableQueues.get(table)?.shift() ?? {
-      data: null,
-      error: { message: `Unexpected ${table} query` },
-    };
+    const result =
+      table === "businesses"
+        ? { data: { telnyx_messaging_profile_id: "profile-1" }, error: null }
+        : (tableQueues.get(table)?.shift() ?? {
+            data: null,
+            error: { message: `Unexpected ${table} query` },
+          });
     const chain: Record<string, ReturnType<typeof vi.fn>> = {};
     for (const method of [
       "select",
@@ -237,7 +252,7 @@ beforeEach(() => {
       entitlements.active &&
       (feature !== "ai_sms_conversations" ||
         entitlements.plan === "sms_and_chat" ||
-        entitlements.plan === "full")
+        entitlements.plan === "full"),
   );
   mocks.findOrCreateContact.mockResolvedValue(CONTACT);
   mocks.getOrCreateConversation.mockResolvedValue(ACTIVE_CONVERSATION);
@@ -270,13 +285,13 @@ beforeEach(() => {
   mocks.addMessage.mockResolvedValue({ id: "assistant_message_1" });
   mocks.recordOutboundSmsUsage.mockResolvedValue(undefined);
   mocks.buildAiConversationSourceKey.mockReturnValue(
-    `ai-conversation:${ACTIVE_CONVERSATION.id}:2026-08`
+    `ai-conversation:${ACTIVE_CONVERSATION.id}:2026-08`,
   );
   mocks.recordBusinessMetricEventBestEffort.mockReturnValue(undefined);
-  queueTable(
-    "phone_numbers",
-    { data: { business_id: BUSINESS_ID }, error: null }
-  );
+  queueTable("phone_numbers", {
+    data: { business_id: BUSINESS_ID },
+    error: null,
+  });
   queueTable("messages", { data: { id: "prior_assistant" }, error: null });
 });
 
@@ -291,20 +306,20 @@ describe("POST /api/messaging/webhook", () => {
       expect.objectContaining({
         businessId: BUSINESS_ID,
         providerEventId: "telnyx:message.received:evt_inbound_1",
-      })
+      }),
     );
     expect(mocks.addInboundMessageOnce).toHaveBeenCalledWith(
       ACTIVE_CONVERSATION.id,
       BUSINESS_ID,
       "Can I get an estimate?",
       "sms",
-      "telnyx:message.received:evt_inbound_1"
+      "telnyx:message.received:evt_inbound_1",
     );
     expect(mocks.getOrCreateConversation).toHaveBeenCalledWith(
       BUSINESS_ID,
       CONTACT.id,
       "sms",
-      { defaultAiHandling: false }
+      { defaultAiHandling: false },
     );
     expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
     expect(mocks.getOutboundSendContext).not.toHaveBeenCalled();
@@ -313,7 +328,7 @@ describe("POST /api/messaging/webhook", () => {
     expect(mocks.from).not.toHaveBeenCalledWith("ai_settings");
     expect(mocks.completeMessagingWebhookEvent).toHaveBeenCalledWith(
       "telnyx:message.received:evt_inbound_1",
-      "claim-token-1"
+      "claim-token-1",
     );
   });
 
@@ -335,21 +350,21 @@ describe("POST /api/messaging/webhook", () => {
     delete (event.data as { id?: string }).id;
     mocks.unwrap.mockResolvedValue(event);
     mocks.resolveBusinessEntitlements.mockResolvedValue(STARTER_ENTITLEMENTS);
-    const rawBody = "{\"signed\":\"same bytes on every retry\"}";
+    const rawBody = '{"signed":"same bytes on every retry"}';
     const expectedHash = createHash("sha256").update(rawBody).digest("hex");
 
     const response = await messagingWebhook(request(rawBody));
 
     expect(response.status).toBe(200);
     expect(mocks.claimMessagingWebhookEvent).toHaveBeenCalledWith(
-      `telnyx:message.received:${expectedHash}`
+      `telnyx:message.received:${expectedHash}`,
     );
     expect(mocks.addInboundMessageOnce).toHaveBeenCalledWith(
       ACTIVE_CONVERSATION.id,
       BUSINESS_ID,
       expect.any(String),
       "sms",
-      `telnyx:message.received:${expectedHash}`
+      `telnyx:message.received:${expectedHash}`,
     );
   });
 
@@ -425,23 +440,23 @@ describe("POST /api/messaging/webhook", () => {
       () =>
         new Promise((_, reject) => {
           rejectGeneration = reject;
-        })
+        }),
     );
 
     const response = await messagingWebhook(request());
     expect(response.status).toBe(200);
 
     await vi.waitFor(() =>
-      expect(mocks.processIncomingMessageDetailed).toHaveBeenCalledOnce()
+      expect(mocks.processIncomingMessageDetailed).toHaveBeenCalledOnce(),
     );
     expect(mocks.completeMessagingWebhookEvent).toHaveBeenCalledWith(
       "telnyx:message.received:evt_inbound_1",
-      "claim-token-1"
+      "claim-token-1",
     );
     expect(
-      mocks.completeMessagingWebhookEvent.mock.invocationCallOrder[0]
+      mocks.completeMessagingWebhookEvent.mock.invocationCallOrder[0],
     ).toBeLessThan(
-      mocks.processIncomingMessageDetailed.mock.invocationCallOrder[0]
+      mocks.processIncomingMessageDetailed.mock.invocationCallOrder[0],
     );
 
     rejectGeneration(new AIProcessingBlockedError("ai_replies_paused"));
@@ -453,7 +468,7 @@ describe("POST /api/messaging/webhook", () => {
         channel: "sms",
         context: "ai_reply",
         reason: "ai_replies_paused",
-      })
+      }),
     );
     expect(mocks.from).not.toHaveBeenCalledWith("ai_settings");
     expect(mocks.preflightOutboundSms).not.toHaveBeenCalled();
@@ -463,7 +478,7 @@ describe("POST /api/messaging/webhook", () => {
     expect(mocks.recordKnowledgeGap).not.toHaveBeenCalled();
     expect(console.error).not.toHaveBeenCalledWith(
       "[messaging:webhook] AI reply processing failed:",
-      expect.anything()
+      expect.anything(),
     );
   });
 
@@ -471,7 +486,7 @@ describe("POST /api/messaging/webhook", () => {
     "converts the typed %s AI-engine block into a known successful suppression",
     async (reason) => {
       mocks.processIncomingMessageDetailed.mockRejectedValueOnce(
-        new AIProcessingBlockedError(reason)
+        new AIProcessingBlockedError(reason),
       );
 
       const response = await messagingWebhook(request());
@@ -484,7 +499,7 @@ describe("POST /api/messaging/webhook", () => {
           channel: "sms",
           context: "ai_reply",
           reason,
-        })
+        }),
       );
       expect(mocks.completeMessagingWebhookEvent).toHaveBeenCalledOnce();
       expect(mocks.releaseMessagingWebhookClaim).not.toHaveBeenCalled();
@@ -492,7 +507,7 @@ describe("POST /api/messaging/webhook", () => {
       expect(mocks.send).not.toHaveBeenCalled();
       expect(mocks.addMessage).not.toHaveBeenCalled();
       expect(mocks.recordOutboundSmsUsage).not.toHaveBeenCalled();
-    }
+    },
   );
 
   it("fails closed when operational state becomes indeterminate inside background AI processing", async () => {
@@ -505,8 +520,8 @@ describe("POST /api/messaging/webhook", () => {
     await vi.waitFor(() =>
       expect(console.error).toHaveBeenCalledWith(
         "[messaging:webhook] AI reply processing failed:",
-        resolutionError
-      )
+        resolutionError,
+      ),
     );
     expect(mocks.completeMessagingWebhookEvent).toHaveBeenCalledOnce();
     expect(mocks.releaseMessagingWebhookClaim).not.toHaveBeenCalled();
@@ -539,7 +554,7 @@ describe("POST /api/messaging/webhook", () => {
         channel: "sms",
         context: "ai_reply",
         reason: "ai_replies_paused",
-      })
+      }),
     );
     expect(mocks.processIncomingMessageDetailed).toHaveBeenCalledOnce();
     expect(mocks.resolveOutboundSmsOperationalAccess).toHaveBeenCalledTimes(2);
@@ -578,7 +593,9 @@ describe("POST /api/messaging/webhook", () => {
       expect(mocks.preflightOutboundSms).not.toHaveBeenCalled();
 
       await vi.advanceTimersByTimeAsync(1);
-      expect(mocks.resolveOutboundSmsOperationalAccess).toHaveBeenCalledTimes(2);
+      expect(mocks.resolveOutboundSmsOperationalAccess).toHaveBeenCalledTimes(
+        2,
+      );
       expect(mocks.insertPausedSystemMessageIfNeeded).toHaveBeenCalledWith({
         conversationId: ACTIVE_CONVERSATION.id,
         businessId: BUSINESS_ID,
@@ -607,7 +624,9 @@ describe("POST /api/messaging/webhook", () => {
 
     await vi.waitFor(() => expect(mocks.send).toHaveBeenCalledTimes(1));
     await vi.waitFor(() =>
-      expect(mocks.recordBusinessMetricEventBestEffort).toHaveBeenCalledTimes(1)
+      expect(mocks.recordBusinessMetricEventBestEffort).toHaveBeenCalledTimes(
+        1,
+      ),
     );
     expect(mocks.processIncomingMessageDetailed).toHaveBeenCalledWith(
       BUSINESS_ID,
@@ -621,14 +640,14 @@ describe("POST /api/messaging/webhook", () => {
         persistAssistant: false,
         sourceMessageId: "message_1",
         conversation: ACTIVE_CONVERSATION,
-      })
+      }),
     );
     expect(mocks.send).toHaveBeenCalledWith(
       expect.objectContaining({
         from: "+15745550200",
         to: "+15745550100",
         text: "Yes, we can help.",
-      })
+      }),
     );
     expect(mocks.preflightOutboundSms).toHaveBeenCalledWith({
       businessId: BUSINESS_ID,
@@ -637,29 +656,27 @@ describe("POST /api/messaging/webhook", () => {
     });
     expect(mocks.resolveOutboundSmsOperationalAccess).toHaveBeenCalledTimes(3);
     expect(
-      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[1]
+      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[1],
     ).toBeLessThan(mocks.preflightOutboundSms.mock.invocationCallOrder[0]);
-    expect(
-      mocks.preflightOutboundSms.mock.invocationCallOrder[0]
-    ).toBeLessThan(
-      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[2]
+    expect(mocks.preflightOutboundSms.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[2],
     );
     expect(
-      mocks.resolveBusinessEntitlements.mock.invocationCallOrder[2]
+      mocks.resolveBusinessEntitlements.mock.invocationCallOrder[2],
     ).toBeLessThan(
-      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[2]
+      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[2],
     );
     expect(
-      mocks.getConversationAiState.mock.invocationCallOrder[1]
+      mocks.getConversationAiState.mock.invocationCallOrder[1],
     ).toBeLessThan(
-      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[2]
+      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[2],
     );
     expect(
-      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[2]
+      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[2],
     ).toBeLessThan(mocks.send.mock.invocationCallOrder[0]);
     expect(mocks.buildAiConversationSourceKey).toHaveBeenCalledTimes(1);
-    const [metricConversationId, metricOccurredAt] =
-      mocks.buildAiConversationSourceKey.mock.calls[0] as [string, Date];
+    const [metricConversationId, metricOccurredAt] = mocks
+      .buildAiConversationSourceKey.mock.calls[0] as [string, Date];
     expect(metricConversationId).toBe(ACTIVE_CONVERSATION.id);
     expect(metricOccurredAt).toBeInstanceOf(Date);
     expect(mocks.recordBusinessMetricEventBestEffort).toHaveBeenCalledWith({
@@ -671,10 +688,10 @@ describe("POST /api/messaging/webhook", () => {
       origin: null,
     });
     expect(mocks.send.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.recordBusinessMetricEventBestEffort.mock.invocationCallOrder[0]
+      mocks.recordBusinessMetricEventBestEffort.mock.invocationCallOrder[0],
     );
     expect(
-      mocks.recordBusinessMetricEventBestEffort.mock.invocationCallOrder[0]
+      mocks.recordBusinessMetricEventBestEffort.mock.invocationCallOrder[0],
     ).toBeLessThan(mocks.addMessage.mock.invocationCallOrder[0]);
     expect(mocks.recordKnowledgeGap).not.toHaveBeenCalled();
     expect(mocks.finalizeGoalLinkEvent).not.toHaveBeenCalled();
@@ -698,7 +715,7 @@ describe("POST /api/messaging/webhook", () => {
     expect(response.status).toBe(200);
 
     await vi.waitFor(() =>
-      expect(mocks.recordOutboundSmsUsage).toHaveBeenCalledOnce()
+      expect(mocks.recordOutboundSmsUsage).toHaveBeenCalledOnce(),
     );
     expect(mocks.finalizeGoalLinkEvent).toHaveBeenCalledOnce();
     const finalizationInput = mocks.finalizeGoalLinkEvent.mock.calls[0]?.[0];
@@ -709,15 +726,16 @@ describe("POST /api/messaging/webhook", () => {
       occurredAt: expect.any(Date),
     });
     expect(mocks.send.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.addMessage.mock.invocationCallOrder[0]
+      mocks.addMessage.mock.invocationCallOrder[0],
     );
     expect(mocks.addMessage.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.finalizeGoalLinkEvent.mock.invocationCallOrder[0]
+      mocks.finalizeGoalLinkEvent.mock.invocationCallOrder[0],
     );
     expect(
-      mocks.finalizeGoalLinkEvent.mock.invocationCallOrder[0]
+      mocks.finalizeGoalLinkEvent.mock.invocationCallOrder[0],
     ).toBeLessThan(mocks.recordOutboundSmsUsage.mock.invocationCallOrder[0]);
-    const metricOccurredAt = mocks.buildAiConversationSourceKey.mock.calls[0]?.[1];
+    const metricOccurredAt =
+      mocks.buildAiConversationSourceKey.mock.calls[0]?.[1];
     expect(finalizationInput.occurredAt).toBe(metricOccurredAt);
   });
 
@@ -749,7 +767,7 @@ describe("POST /api/messaging/webhook", () => {
         channel: "sms",
         context: "ai_reply",
         reason: "usage_limit_reached",
-      })
+      }),
     );
     expect(mocks.send).not.toHaveBeenCalled();
     expect(mocks.addMessage).not.toHaveBeenCalled();
@@ -782,7 +800,7 @@ describe("POST /api/messaging/webhook", () => {
       const first = await messagingWebhook(request());
       expect(first.status).toBe(200);
       await vi.waitFor(() =>
-        expect(mocks.recordOutboundSmsUsage).toHaveBeenCalledOnce()
+        expect(mocks.recordOutboundSmsUsage).toHaveBeenCalledOnce(),
       );
 
       const retry = await messagingWebhook(request());
@@ -791,7 +809,7 @@ describe("POST /api/messaging/webhook", () => {
       expect(mocks.addMessage).toHaveBeenCalledOnce();
       expect(mocks.finalizeGoalLinkEvent).toHaveBeenCalledOnce();
       expect(mocks.addInboundMessageOnce).toHaveBeenCalledOnce();
-    }
+    },
   );
 
   it("reports and swallows finalization failure so post-send work continues and a completed retry cannot resend", async () => {
@@ -818,7 +836,9 @@ describe("POST /api/messaging/webhook", () => {
 
     const first = await messagingWebhook(request());
     expect(first.status).toBe(200);
-    await vi.waitFor(() => expect(mocks.recordKnowledgeGap).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(mocks.recordKnowledgeGap).toHaveBeenCalledOnce(),
+    );
 
     expect(console.error).toHaveBeenCalledWith(
       "[messaging:webhook] Goal event finalization failed:",
@@ -828,12 +848,12 @@ describe("POST /api/messaging/webhook", () => {
         sourceMessageId: "message_1",
         assistantMessageId: "assistant_message_1",
       },
-      finalizationError
+      finalizationError,
     );
     expect(mocks.recordOutboundSmsUsage).toHaveBeenCalledOnce();
     expect(console.error).not.toHaveBeenCalledWith(
       "[messaging:webhook] AI reply processing failed:",
-      expect.anything()
+      expect.anything(),
     );
 
     const retry = await messagingWebhook(request());
@@ -856,7 +876,7 @@ describe("POST /api/messaging/webhook", () => {
     expect(response.status).toBe(200);
 
     await vi.waitFor(() =>
-      expect(mocks.recordOutboundSmsUsage).toHaveBeenCalledTimes(1)
+      expect(mocks.recordOutboundSmsUsage).toHaveBeenCalledTimes(1),
     );
     expect(mocks.send).toHaveBeenCalledTimes(1);
     expect(mocks.addMessage).toHaveBeenCalledTimes(1);
@@ -866,11 +886,11 @@ describe("POST /api/messaging/webhook", () => {
       {
         businessId: BUSINESS_ID,
         metricKey: "ai_conversation_engaged",
-      }
+      },
     );
     expect(console.error).not.toHaveBeenCalledWith(
       "[messaging:webhook] AI reply processing failed:",
-      expect.anything()
+      expect.anything(),
     );
   });
 
@@ -894,21 +914,21 @@ describe("POST /api/messaging/webhook", () => {
     expect(response.status).toBe(200);
 
     await vi.waitFor(() =>
-      expect(mocks.recordKnowledgeGap).toHaveBeenCalledTimes(1)
+      expect(mocks.recordKnowledgeGap).toHaveBeenCalledTimes(1),
     );
     const finalReply =
       "I don't see free trials mentioned. Please call us.\n\nReply STOP to opt out.";
     expect(mocks.send).toHaveBeenCalledWith(
       expect.objectContaining({
         text: finalReply,
-      })
+      }),
     );
     expect(mocks.addMessage).toHaveBeenCalledWith(
       ACTIVE_CONVERSATION.id,
       BUSINESS_ID,
       "assistant",
       finalReply,
-      "sms"
+      "sms",
     );
     expect(mocks.recordKnowledgeGap).toHaveBeenCalledWith({
       businessId: BUSINESS_ID,
@@ -916,13 +936,13 @@ describe("POST /api/messaging/webhook", () => {
       aiResponseText: finalReply,
     });
     expect(mocks.send.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.addMessage.mock.invocationCallOrder[0]
+      mocks.addMessage.mock.invocationCallOrder[0],
     );
     expect(mocks.addMessage.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.recordKnowledgeGap.mock.invocationCallOrder[0]
+      mocks.recordKnowledgeGap.mock.invocationCallOrder[0],
     );
     expect(
-      mocks.recordOutboundSmsUsage.mock.invocationCallOrder[0]
+      mocks.recordOutboundSmsUsage.mock.invocationCallOrder[0],
     ).toBeLessThan(mocks.recordKnowledgeGap.mock.invocationCallOrder[0]);
   });
 
@@ -947,15 +967,15 @@ describe("POST /api/messaging/webhook", () => {
       expect(console.error).toHaveBeenCalledWith(
         "[messaging:webhook] Knowledge gap capture failed:",
         { businessId: BUSINESS_ID, sourceMessageId: "message_1" },
-        captureError
-      )
+        captureError,
+      ),
     );
     expect(mocks.send).toHaveBeenCalledTimes(1);
     expect(mocks.addMessage).toHaveBeenCalledTimes(1);
     expect(mocks.recordOutboundSmsUsage).toHaveBeenCalledTimes(1);
     expect(console.error).not.toHaveBeenCalledWith(
       "[messaging:webhook] AI reply processing failed:",
-      expect.anything()
+      expect.anything(),
     );
   });
 
@@ -981,8 +1001,8 @@ describe("POST /api/messaging/webhook", () => {
     await vi.waitFor(() =>
       expect(console.error).toHaveBeenCalledWith(
         "[messaging:webhook] AI reply processing failed:",
-        expect.any(Error)
-      )
+        expect.any(Error),
+      ),
     );
     expect(mocks.addMessage).not.toHaveBeenCalled();
     expect(mocks.recordKnowledgeGap).not.toHaveBeenCalled();
@@ -1012,8 +1032,8 @@ describe("POST /api/messaging/webhook", () => {
     await vi.waitFor(() =>
       expect(console.error).toHaveBeenCalledWith(
         "[messaging:webhook] AI reply processing failed:",
-        expect.any(Error)
-      )
+        expect.any(Error),
+      ),
     );
     expect(mocks.send).toHaveBeenCalledTimes(1);
     expect(mocks.recordBusinessMetricEventBestEffort).toHaveBeenCalledTimes(1);
@@ -1033,7 +1053,7 @@ describe("POST /api/messaging/webhook", () => {
     expect(mocks.completeMessagingWebhookEvent).not.toHaveBeenCalled();
     expect(mocks.releaseMessagingWebhookClaim).toHaveBeenCalledWith(
       "telnyx:message.received:evt_inbound_1",
-      "claim-token-1"
+      "claim-token-1",
     );
     expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
     expect(mocks.send).not.toHaveBeenCalled();
@@ -1080,13 +1100,13 @@ describe("POST /api/messaging/webhook", () => {
       null,
       expect.objectContaining({
         conversation: ACTIVE_CONVERSATION,
-      })
+      }),
     );
   });
 
   it("records manual MMS without sending the canned fallback", async () => {
     mocks.unwrap.mockResolvedValue(
-      inboundEvent({ text: "", media: [{ content_type: "image/jpeg" }] })
+      inboundEvent({ text: "", media: [{ content_type: "image/jpeg" }] }),
     );
     mocks.getOrCreateConversation.mockResolvedValue({
       ...ACTIVE_CONVERSATION,
@@ -1098,7 +1118,7 @@ describe("POST /api/messaging/webhook", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.recordInboundMessagingUsage).toHaveBeenCalledWith(
-      expect.objectContaining({ mediaCount: 1 })
+      expect.objectContaining({ mediaCount: 1 }),
     );
     expect(mocks.addInboundMessageOnce).toHaveBeenCalled();
     expect(mocks.send).not.toHaveBeenCalled();
@@ -1106,7 +1126,7 @@ describe("POST /api/messaging/webhook", () => {
 
   it("records Starter MMS without sending the canned fallback", async () => {
     mocks.unwrap.mockResolvedValue(
-      inboundEvent({ text: "", media: [{ content_type: "image/jpeg" }] })
+      inboundEvent({ text: "", media: [{ content_type: "image/jpeg" }] }),
     );
     mocks.resolveBusinessEntitlements.mockResolvedValue(STARTER_ENTITLEMENTS);
 
@@ -1114,7 +1134,7 @@ describe("POST /api/messaging/webhook", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.recordInboundMessagingUsage).toHaveBeenCalledWith(
-      expect.objectContaining({ mediaCount: 1 })
+      expect.objectContaining({ mediaCount: 1 }),
     );
     expect(mocks.addInboundMessageOnce).toHaveBeenCalled();
     expect(mocks.getOutboundSendContext).not.toHaveBeenCalled();
@@ -1123,12 +1143,7 @@ describe("POST /api/messaging/webhook", () => {
   });
 
   it.each([
-    [
-      "account suspension",
-      "account_suspended",
-      inboundEvent(),
-      "ai_reply",
-    ],
+    ["account suspension", "account_suspended", inboundEvent(), "ai_reply"],
     [
       "texting pause",
       "texting_paused",
@@ -1151,18 +1166,18 @@ describe("POST /api/messaging/webhook", () => {
       expect(mocks.recordInboundMessagingUsage).toHaveBeenCalledOnce();
       expect(mocks.addInboundMessageOnce).toHaveBeenCalledOnce();
       expect(
-        mocks.recordInboundMessagingUsage.mock.invocationCallOrder[0]
+        mocks.recordInboundMessagingUsage.mock.invocationCallOrder[0],
       ).toBeLessThan(
-        mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[0]
+        mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[0],
       );
       expect(
-        mocks.addInboundMessageOnce.mock.invocationCallOrder[0]
+        mocks.addInboundMessageOnce.mock.invocationCallOrder[0],
       ).toBeLessThan(
-        mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[0]
+        mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[0],
       );
       expect(mocks.resolveOutboundSmsOperationalAccess).toHaveBeenCalledWith(
         BUSINESS_ID,
-        purpose
+        purpose,
       );
       expect(mocks.insertPausedSystemMessageIfNeeded).toHaveBeenCalledWith({
         conversationId: ACTIVE_CONVERSATION.id,
@@ -1172,13 +1187,13 @@ describe("POST /api/messaging/webhook", () => {
         reason,
       });
       expect(
-        mocks.insertPausedSystemMessageIfNeeded.mock.invocationCallOrder[0]
+        mocks.insertPausedSystemMessageIfNeeded.mock.invocationCallOrder[0],
       ).toBeLessThan(
-        mocks.completeMessagingWebhookEvent.mock.invocationCallOrder[0]
+        mocks.completeMessagingWebhookEvent.mock.invocationCallOrder[0],
       );
       expect(mocks.completeMessagingWebhookEvent).toHaveBeenCalledWith(
         "telnyx:message.received:evt_inbound_1",
-        "claim-token-1"
+        "claim-token-1",
       );
       expect(mocks.releaseMessagingWebhookClaim).not.toHaveBeenCalled();
       expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
@@ -1186,12 +1201,12 @@ describe("POST /api/messaging/webhook", () => {
       expect(mocks.preflightOutboundSms).not.toHaveBeenCalled();
       expect(mocks.send).not.toHaveBeenCalled();
       expect(mocks.recordOutboundSmsUsage).not.toHaveBeenCalled();
-    }
+    },
   );
 
   it("releases the claim only after preserving inbound activity when operational state is indeterminate", async () => {
     mocks.resolveOutboundSmsOperationalAccess.mockRejectedValue(
-      new Error("operational state unavailable")
+      new Error("operational state unavailable"),
     );
 
     const response = await messagingWebhook(request());
@@ -1202,7 +1217,7 @@ describe("POST /api/messaging/webhook", () => {
     expect(mocks.completeMessagingWebhookEvent).not.toHaveBeenCalled();
     expect(mocks.releaseMessagingWebhookClaim).toHaveBeenCalledWith(
       "telnyx:message.received:evt_inbound_1",
-      "claim-token-1"
+      "claim-token-1",
     );
     expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
     expect(mocks.send).not.toHaveBeenCalled();
@@ -1210,7 +1225,7 @@ describe("POST /api/messaging/webhook", () => {
 
   it("adds opt-out copy to the first automated MMS fallback", async () => {
     mocks.unwrap.mockResolvedValue(
-      inboundEvent({ text: "", media: [{ content_type: "image/jpeg" }] })
+      inboundEvent({ text: "", media: [{ content_type: "image/jpeg" }] }),
     );
     queueTable("messages", { data: null, error: null });
 
@@ -1227,38 +1242,36 @@ describe("POST /api/messaging/webhook", () => {
     });
     expect(mocks.resolveOutboundSmsOperationalAccess).toHaveBeenCalledTimes(3);
     expect(
-      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[1]
+      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[1],
     ).toBeLessThan(mocks.preflightOutboundSms.mock.invocationCallOrder[0]);
-    expect(
-      mocks.preflightOutboundSms.mock.invocationCallOrder[0]
-    ).toBeLessThan(
-      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[2]
+    expect(mocks.preflightOutboundSms.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[2],
     );
     expect(
-      mocks.resolveBusinessEntitlements.mock.invocationCallOrder[2]
+      mocks.resolveBusinessEntitlements.mock.invocationCallOrder[2],
     ).toBeLessThan(
-      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[2]
+      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[2],
     );
     expect(
-      mocks.getConversationAiState.mock.invocationCallOrder[1]
+      mocks.getConversationAiState.mock.invocationCallOrder[1],
     ).toBeLessThan(
-      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[2]
+      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[2],
     );
     expect(
-      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[2]
+      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[2],
     ).toBeLessThan(mocks.send.mock.invocationCallOrder[0]);
     expect(mocks.send).toHaveBeenCalledWith(
-      expect.objectContaining({ text: expected })
+      expect.objectContaining({ text: expected }),
     );
     expect(mocks.addMessage).toHaveBeenCalledWith(
       ACTIVE_CONVERSATION.id,
       BUSINESS_ID,
       "assistant",
       expected,
-      "sms"
+      "sms",
     );
     expect(mocks.recordOutboundSmsUsage).toHaveBeenCalledWith(
-      expect.objectContaining({ text: expected })
+      expect.objectContaining({ text: expected }),
     );
     expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
     expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
@@ -1266,7 +1279,7 @@ describe("POST /api/messaging/webhook", () => {
 
   it("does not repeat opt-out copy on later automated MMS fallbacks", async () => {
     mocks.unwrap.mockResolvedValue(
-      inboundEvent({ text: "", media: [{ content_type: "image/jpeg" }] })
+      inboundEvent({ text: "", media: [{ content_type: "image/jpeg" }] }),
     );
 
     const response = await messagingWebhook(request());
@@ -1274,13 +1287,15 @@ describe("POST /api/messaging/webhook", () => {
 
     await vi.waitFor(() => expect(mocks.send).toHaveBeenCalledTimes(1));
     expect(mocks.send).toHaveBeenCalledWith(
-      expect.objectContaining({ text: "I can't process images yet — please describe what you need in text and I'll help." })
+      expect.objectContaining({
+        text: "I can't process images yet — please describe what you need in text and I'll help.",
+      }),
     );
   });
 
   it("blocks MMS at the final gate when texting pauses after preflight", async () => {
     mocks.unwrap.mockResolvedValue(
-      inboundEvent({ text: "", media: [{ content_type: "image/jpeg" }] })
+      inboundEvent({ text: "", media: [{ content_type: "image/jpeg" }] }),
     );
     mocks.resolveOutboundSmsOperationalAccess
       .mockResolvedValueOnce({ allowed: true })
@@ -1300,7 +1315,7 @@ describe("POST /api/messaging/webhook", () => {
         channel: "sms",
         context: "mms_fallback",
         reason: "texting_paused",
-      })
+      }),
     );
     expect(mocks.preflightOutboundSms).toHaveBeenCalledWith({
       businessId: BUSINESS_ID,
@@ -1344,7 +1359,7 @@ describe("POST /api/messaging/webhook", () => {
         channel: "sms",
         context: "ai_reply",
         reason: "ai_replies_paused",
-      })
+      }),
     );
     expect(mocks.preflightOutboundSms).toHaveBeenCalledWith({
       businessId: BUSINESS_ID,
@@ -1377,8 +1392,8 @@ describe("POST /api/messaging/webhook", () => {
     await vi.waitFor(() =>
       expect(console.error).toHaveBeenCalledWith(
         "[messaging:webhook] AI reply processing failed:",
-        resolutionError
-      )
+        resolutionError,
+      ),
     );
     expect(mocks.preflightOutboundSms).toHaveBeenCalledOnce();
     expect(mocks.resolveOutboundSmsOperationalAccess).toHaveBeenCalledTimes(3);
@@ -1413,7 +1428,7 @@ describe("POST /api/messaging/webhook", () => {
     expect(suppressed.status).toBe(200);
     expect(mocks.completeMessagingWebhookEvent).toHaveBeenCalledWith(
       "telnyx:message.received:evt_inbound_1",
-      "claim-token-paused"
+      "claim-token-paused",
     );
 
     const duplicateAfterReactivation = await messagingWebhook(request());
@@ -1439,14 +1454,14 @@ describe("POST /api/messaging/webhook", () => {
     expect(mocks.addInboundMessageOnce).toHaveBeenCalledTimes(2);
     expect(mocks.completeMessagingWebhookEvent).toHaveBeenCalledWith(
       "telnyx:message.received:evt_inbound_new",
-      "claim-token-new"
+      "claim-token-new",
     );
     expect(mocks.resolveOutboundSmsOperationalAccess).toHaveBeenCalledTimes(4);
   });
 
   it("releases the claim and returns 500 when entitlement state is indeterminate", async () => {
     mocks.resolveBusinessEntitlements.mockRejectedValue(
-      new Error("subscription lookup failed")
+      new Error("subscription lookup failed"),
     );
 
     const response = await messagingWebhook(request());
@@ -1454,7 +1469,7 @@ describe("POST /api/messaging/webhook", () => {
     expect(response.status).toBe(500);
     expect(mocks.releaseMessagingWebhookClaim).toHaveBeenCalledWith(
       "telnyx:message.received:evt_inbound_1",
-      "claim-token-1"
+      "claim-token-1",
     );
     expect(mocks.recordInboundMessagingUsage).not.toHaveBeenCalled();
     expect(mocks.addInboundMessageOnce).not.toHaveBeenCalled();
@@ -1470,14 +1485,14 @@ describe("POST /api/messaging/webhook", () => {
     expect(mocks.recordInboundMessagingUsage).toHaveBeenCalled();
     expect(mocks.releaseMessagingWebhookClaim).toHaveBeenCalledWith(
       "telnyx:message.received:evt_inbound_1",
-      "claim-token-1"
+      "claim-token-1",
     );
     expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
   });
 
   it("does not dispatch AI when completing the owned claim fails", async () => {
     mocks.completeMessagingWebhookEvent.mockRejectedValue(
-      new Error("completion RPC unavailable")
+      new Error("completion RPC unavailable"),
     );
 
     const response = await messagingWebhook(request());
@@ -1485,7 +1500,7 @@ describe("POST /api/messaging/webhook", () => {
     expect(response.status).toBe(500);
     expect(mocks.releaseMessagingWebhookClaim).toHaveBeenCalledWith(
       "telnyx:message.received:evt_inbound_1",
-      "claim-token-1"
+      "claim-token-1",
     );
     expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
     expect(mocks.send).not.toHaveBeenCalled();
@@ -1501,7 +1516,7 @@ describe("POST /api/messaging/webhook", () => {
     expect(failed.status).toBe(500);
     expect(mocks.releaseMessagingWebhookClaim).toHaveBeenCalledWith(
       "telnyx:message.received:evt_inbound_1",
-      "claim-token-1"
+      "claim-token-1",
     );
 
     vi.clearAllMocks();
@@ -1518,7 +1533,7 @@ describe("POST /api/messaging/webhook", () => {
     expect(unknown.status).toBe(200);
     expect(mocks.completeMessagingWebhookEvent).toHaveBeenCalledWith(
       "telnyx:message.received:evt_unknown",
-      "claim-token-unknown"
+      "claim-token-unknown",
     );
     expect(mocks.releaseMessagingWebhookClaim).not.toHaveBeenCalled();
   });
@@ -1576,13 +1591,66 @@ describe("POST /api/messaging/webhook", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.claimMessagingWebhookEvent).toHaveBeenCalledWith(
-      "telnyx:message.received:evt_malformed"
+      "telnyx:message.received:evt_malformed",
     );
     expect(mocks.completeMessagingWebhookEvent).toHaveBeenCalledWith(
       "telnyx:message.received:evt_malformed",
-      "claim-token-1"
+      "claim-token-1",
     );
     expect(mocks.releaseMessagingWebhookClaim).not.toHaveBeenCalled();
     expect(mocks.recordInboundMessagingUsage).not.toHaveBeenCalled();
+  });
+});
+
+describe("shared review reply suppression boundary", () => {
+  it.each(["stop", "start"] as const)(
+    "persists inbound %s without generating an automated response",
+    async (keyword) => {
+      mocks.processTenantSmsInbound.mockResolvedValue({
+        keyword,
+        reviewHeld: false,
+      });
+      expect((await messagingWebhook(request())).status).toBe(200);
+      expect(mocks.addInboundMessageOnce).toHaveBeenCalledOnce();
+      expect(mocks.processTenantSmsInbound).toHaveBeenCalledWith(
+        expect.objectContaining({
+          businessId: BUSINESS_ID,
+          conversationId: ACTIVE_CONVERSATION.id,
+        }),
+      );
+      expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+      expect(mocks.send).not.toHaveBeenCalled();
+    },
+  );
+  it("saves ordinary review replies in the human inbox and stops before AI work", async () => {
+    mocks.processTenantSmsInbound.mockResolvedValue({
+      keyword: null,
+      reviewHeld: true,
+    });
+    expect((await messagingWebhook(request())).status).toBe(200);
+    expect(mocks.addInboundMessageOnce).toHaveBeenCalledOnce();
+    expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+    expect(mocks.completeMessagingWebhookEvent).toHaveBeenCalledOnce();
+  });
+  it("requests webhook redelivery if the durable STOP write fails", async () => {
+    mocks.processTenantSmsInbound.mockRejectedValue(
+      new Error("database unavailable"),
+    );
+    expect((await messagingWebhook(request())).status).toBe(500);
+    expect(mocks.releaseMessagingWebhookClaim).toHaveBeenCalledOnce();
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+  it("reconciles outbound receipts only after signature verification", async () => {
+    mocks.unwrap.mockRejectedValue(new Error("invalid signature"));
+    expect((await messagingWebhook(request())).status).toBe(403);
+    expect(mocks.reconcileTenantSmsReceipt).not.toHaveBeenCalled();
+    mocks.unwrap.mockResolvedValue({
+      data: { event_type: "message.finalized", payload: { id: "provider" } },
+    });
+    expect((await messagingWebhook(request())).status).toBe(200);
+    expect(mocks.reconcileTenantSmsReceipt).toHaveBeenCalledWith(
+      { id: "provider" },
+      null,
+    );
   });
 });

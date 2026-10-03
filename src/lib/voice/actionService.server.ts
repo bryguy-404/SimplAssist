@@ -1,7 +1,15 @@
-import { getBookingNotificationDraft, sendBookingNotification } from '@/lib/booking/notifications.server';
-import { getBookingSettings } from '@/lib/booking/settings.server';
-import { isBookingConfirmationEnabled } from '@/lib/booking/draft';
-import { buildBookingDraft, prepareBookingDraft, confirmBookingDraft } from '@/lib/booking/drafts.server';
+import { sendTenantSms } from "@/lib/messaging/tenantSmsSend.server";
+import {
+  getBookingNotificationDraft,
+  sendBookingNotification,
+} from "@/lib/booking/notifications.server";
+import { getBookingSettings } from "@/lib/booking/settings.server";
+import { isBookingConfirmationEnabled } from "@/lib/booking/draft";
+import {
+  buildBookingDraft,
+  prepareBookingDraft,
+  confirmBookingDraft,
+} from "@/lib/booking/drafts.server";
 import { persistVoiceSmsBookkeeping } from "./actionRecovery.server";
 import "server-only";
 import { supabaseAdmin as db } from "@/lib/supabase/admin";
@@ -67,9 +75,15 @@ export async function loadVoiceActionContext(sessionId: string) {
   ]);
   if (be || se || ae || permissions.some((r) => r.error) || !b || !settings)
     throw new Error("voice_action_context_unavailable");
-  const requestAllowed = isBookingConfirmationEnabled() && settings.booking_mode === 'collect_info'
-    ? await db.rpc('voice_action_allowed', { p_session_id: s.id, p_kind: 'booking_request' }) : null;
-  if (requestAllowed?.error) throw new Error('voice_action_context_unavailable');
+  const requestAllowed =
+    isBookingConfirmationEnabled() && settings.booking_mode === "collect_info"
+      ? await db.rpc("voice_action_allowed", {
+          p_session_id: s.id,
+          p_kind: "booking_request",
+        })
+      : null;
+  if (requestAllowed?.error)
+    throw new Error("voice_action_context_unavailable");
   return {
     session: s,
     business: b,
@@ -112,16 +126,50 @@ async function completedActionAnswer(
   action: VoiceAction,
   summary: string,
 ): Promise<VoiceAnswer> {
-  if (isBookingConfirmationEnabled() && ['booking','booking_request'].includes(action.kind) && action.status === 'succeeded') {
+  if (
+    isBookingConfirmationEnabled() &&
+    ["booking", "booking_request"].includes(action.kind) &&
+    action.status === "succeeded"
+  ) {
     try {
       const [draft, evidence] = await Promise.all([
-        db.from('booking_drafts').select('id,revision,status').eq('business_id', action.business_id).eq('voice_action_id', action.id).maybeSingle(),
-        db.from('voice_actions').select('request_event_ids').eq('id', action.id).eq('business_id', action.business_id).single(),
+        db
+          .from("booking_drafts")
+          .select("id,revision,status")
+          .eq("business_id", action.business_id)
+          .eq("voice_action_id", action.id)
+          .maybeSingle(),
+        db
+          .from("voice_actions")
+          .select("request_event_ids")
+          .eq("id", action.id)
+          .eq("business_id", action.business_id)
+          .single(),
       ]);
-      if (draft.error || evidence.error || !draft.data || !['confirmed','requested'].includes(draft.data.status) || !evidence.data?.request_event_ids?.length) return { text: summary };
-      const permission = await runVoiceDecision(sessionId, { intent: 'propose', payload: { kind: 'booking_confirmation_text', draftId: draft.data.id, revision: draft.data.revision }, requestEventIds: evidence.data.request_event_ids });
-      return { ...permission, text: `${summary} If the caller has declined texts, respect that. Otherwise offer this next step naturally now: ${permission.text}` };
-    } catch { return { text: `${summary} Offer further help naturally.` }; }
+      if (
+        draft.error ||
+        evidence.error ||
+        !draft.data ||
+        !["confirmed", "requested"].includes(draft.data.status) ||
+        !evidence.data?.request_event_ids?.length
+      )
+        return { text: summary };
+      const permission = await runVoiceDecision(sessionId, {
+        intent: "propose",
+        payload: {
+          kind: "booking_confirmation_text",
+          draftId: draft.data.id,
+          revision: draft.data.revision,
+        },
+        requestEventIds: evidence.data.request_event_ids,
+      });
+      return {
+        ...permission,
+        text: `${summary} If the caller has declined texts, respect that. Otherwise offer this next step naturally now: ${permission.text}`,
+      };
+    } catch {
+      return { text: `${summary} Offer further help naturally.` };
+    }
   }
   if (action.kind !== "contact" || action.status !== "succeeded")
     return { text: summary };
@@ -192,7 +240,13 @@ export async function runVoiceDecision(
   if (decision.intent === "answer") return { text: decision.text };
   if (decision.intent === "availability") {
     assertCapability(ctx, "booking");
-    const availabilityRevision = isBookingConfirmationEnabled() ? (await getBookingSettings(ctx.session.action_business_id || ctx.session.business_id)).revision : null;
+    const availabilityRevision = isBookingConfirmationEnabled()
+      ? (
+          await getBookingSettings(
+            ctx.session.action_business_id || ctx.session.business_id,
+          )
+        ).revision
+      : null;
     const slots = await checkAvailability(
       ctx.session.action_business_id || ctx.session.business_id,
       decision.date,
@@ -202,7 +256,12 @@ export async function runVoiceDecision(
     );
     const saved = await db.from("voice_availability").upsert({
       session_id: sessionId,
-      ...(isBookingConfirmationEnabled() ? { service_id: decision.serviceId, settings_revision: availabilityRevision } : {}),
+      ...(isBookingConfirmationEnabled()
+        ? {
+            service_id: decision.serviceId,
+            settings_revision: availabilityRevision,
+          }
+        : {}),
       date: decision.date,
       slots,
       checked_at: new Date().toISOString(),
@@ -215,9 +274,19 @@ export async function runVoiceDecision(
   if (decision.intent === "propose") {
     const payload = voiceActionPayload.parse(decision.payload);
     assertCapability(ctx, payload.kind);
-    if (payload.kind === 'booking_review_text' || payload.kind === 'booking_confirmation_text') {
-      if (!isBookingConfirmationEnabled()) throw new Error('booking_text_disabled');
-      await getBookingNotificationDraft(ctx.session.action_business_id || ctx.session.business_id, (ctx.session.action_conversation_id || ctx.session.conversation_id)!, payload.draftId, payload.revision, payload.kind === 'booking_review_text' ? 'review' : 'confirmation');
+    if (
+      payload.kind === "booking_review_text" ||
+      payload.kind === "booking_confirmation_text"
+    ) {
+      if (!isBookingConfirmationEnabled())
+        throw new Error("booking_text_disabled");
+      await getBookingNotificationDraft(
+        ctx.session.action_business_id || ctx.session.business_id,
+        (ctx.session.action_conversation_id || ctx.session.conversation_id)!,
+        payload.draftId,
+        payload.revision,
+        payload.kind === "booking_review_text" ? "review" : "confirmation",
+      );
     }
     if ("email" in payload && payload.email)
       payload.email = payload.email.toLowerCase();
@@ -228,7 +297,13 @@ export async function runVoiceDecision(
         hour = Number(payload.startTime.slice(11, 13)),
         minute = payload.startTime.slice(14, 16);
       const label = `${hour % 12 || 12}:${minute} ${hour >= 12 ? "PM" : "AM"}`;
-      const currentBookingRevision = isBookingConfirmationEnabled() ? (await getBookingSettings(ctx.session.action_business_id || ctx.session.business_id)).revision : null;
+      const currentBookingRevision = isBookingConfirmationEnabled()
+        ? (
+            await getBookingSettings(
+              ctx.session.action_business_id || ctx.session.business_id,
+            )
+          ).revision
+        : null;
       const { data: offered, error: av } = await db
         .from("voice_availability")
         .select("slots,checked_at,service_id,settings_revision")
@@ -240,7 +315,9 @@ export async function runVoiceDecision(
         !offered ||
         Date.now() - Date.parse(offered.checked_at) > 300000 ||
         !offered.slots.includes(label) ||
-        (isBookingConfirmationEnabled() && (offered.service_id !== payload.serviceId || offered.settings_revision !== currentBookingRevision))
+        (isBookingConfirmationEnabled() &&
+          (offered.service_id !== payload.serviceId ||
+            offered.settings_revision !== currentBookingRevision))
       )
         return {
           text: "Check current availability and offer a returned slot before preparing a booking.",
@@ -257,20 +334,57 @@ export async function runVoiceDecision(
       ctx.session.caller_phone,
       ctx.business.timezone,
     );
-    let bookingPreparation: Parameters<typeof buildBookingDraft>[0] | null = null;
-    if (isBookingConfirmationEnabled() && (payload.kind === 'booking' || payload.kind === 'booking_request')) {
-      const conversationId = ctx.session.action_conversation_id || ctx.session.conversation_id;
-      const conversation = await db.from('conversations').select('contact_id').eq('id', conversationId!).eq('business_id', ctx.session.action_business_id || ctx.session.business_id).single();
-      if (conversation.error || !conversation.data) throw new Error('booking_conversation_missing');
-      bookingPreparation = { businessId: ctx.session.action_business_id || ctx.session.business_id, conversationId: conversationId!, contactId: conversation.data.contact_id, sourceMessageId: null, input: { name: payload.name, phone: payload.phone, email: payload.email, serviceId: payload.serviceId, requestedService: payload.service, emailAsked: payload.emailAsked ?? false, customerAddress: payload.customerAddress, newAppointment: payload.newAppointment, ...(payload.kind === 'booking' ? { startTime: payload.startTime } : { requestedTime: payload.requestedTime }) } };
+    let bookingPreparation: Parameters<typeof buildBookingDraft>[0] | null =
+      null;
+    if (
+      isBookingConfirmationEnabled() &&
+      (payload.kind === "booking" || payload.kind === "booking_request")
+    ) {
+      const conversationId =
+        ctx.session.action_conversation_id || ctx.session.conversation_id;
+      const conversation = await db
+        .from("conversations")
+        .select("contact_id")
+        .eq("id", conversationId!)
+        .eq(
+          "business_id",
+          ctx.session.action_business_id || ctx.session.business_id,
+        )
+        .single();
+      if (conversation.error || !conversation.data)
+        throw new Error("booking_conversation_missing");
+      bookingPreparation = {
+        businessId: ctx.session.action_business_id || ctx.session.business_id,
+        conversationId: conversationId!,
+        contactId: conversation.data.contact_id,
+        sourceMessageId: null,
+        input: {
+          name: payload.name,
+          phone: payload.phone,
+          email: payload.email,
+          serviceId: payload.serviceId,
+          requestedService: payload.service,
+          emailAsked: payload.emailAsked ?? false,
+          customerAddress: payload.customerAddress,
+          newAppointment: payload.newAppointment,
+          ...(payload.kind === "booking"
+            ? { startTime: payload.startTime }
+            : { requestedTime: payload.requestedTime }),
+        },
+      };
       const built = await buildBookingDraft(bookingPreparation);
-      if (built.snapshot.offering.serviceName !== payload.service) throw new Error('booking_service_name_mismatch');
+      if (built.snapshot.offering.serviceName !== payload.service)
+        throw new Error("booking_service_name_mismatch");
       readback = built.summary;
     }
     const { data: a, error } = await db.rpc("propose_voice_action", {
       p_session_id: sessionId,
       p_kind: payload.kind,
-      p_fingerprint: actionFingerprint(payload, url || undefined, bookingPreparation ? readback : undefined),
+      p_fingerprint: actionFingerprint(
+        payload,
+        url || undefined,
+        bookingPreparation ? readback : undefined,
+      ),
       p_payload: { ...payload, ...(url ? { approvedUrl: url } : {}) },
       p_readback: readback,
       p_event_ids: decision.requestEventIds,
@@ -298,7 +412,12 @@ export async function runVoiceDecision(
         a.result?.summary ||
           "This request was already attempted. Do not repeat it or claim a new success.",
       );
-    if (bookingPreparation) await prepareBookingDraft({ ...bookingPreparation, voiceActionId: a.id, readback });
+    if (bookingPreparation)
+      await prepareBookingDraft({
+        ...bookingPreparation,
+        voiceActionId: a.id,
+        readback,
+      });
     return {
       text: `Ask this confirmation naturally, preserving every detail: ${readback} Wait for a clear yes. Nothing has been saved, booked, or sent yet.`,
       confirmationActionId: a.id,
@@ -414,13 +533,30 @@ async function executeVoiceAction(
     delete body.approvedUrl;
     const payload = voiceActionPayload.parse(body);
     await assertCurrentAction(a.id);
-    const notification = payload.kind === 'booking_review_text' || payload.kind === 'booking_confirmation_text';
-    const link = notification ? { contactId: '', conversationId: (ctx.session.action_conversation_id || ctx.session.conversation_id)!, conflicts: [] as string[] } : await saveConfirmedContact({ ...a, payload });
+    const notification =
+      payload.kind === "booking_review_text" ||
+      payload.kind === "booking_confirmation_text";
+    const link = notification
+      ? {
+          contactId: "",
+          conversationId: (ctx.session.action_conversation_id ||
+            ctx.session.conversation_id)!,
+          conflicts: [] as string[],
+        }
+      : await saveConfirmedContact({ ...a, payload });
     let result: Record<string, unknown> & { summary: string };
-    if (payload.kind === 'booking_review_text' || payload.kind === 'booking_confirmation_text') {
-      if (!isBookingConfirmationEnabled()) throw new Error('booking_text_disabled');
+    if (
+      payload.kind === "booking_review_text" ||
+      payload.kind === "booking_confirmation_text"
+    ) {
+      if (!isBookingConfirmationEnabled())
+        throw new Error("booking_text_disabled");
       submitted = true;
-      result = await sendBookingNotification({ ...a, payload }, ctx.session, fresh.business.name);
+      result = await sendBookingNotification(
+        { ...a, payload },
+        ctx.session,
+        fresh.business.name,
+      );
     } else if (payload.kind === "contact")
       result = {
         summary:
@@ -428,16 +564,35 @@ async function executeVoiceAction(
         contactId: link.contactId,
         conflicts: link.conflicts,
       };
-    else if (isBookingConfirmationEnabled() && (payload.kind === 'booking' || payload.kind === 'booking_request')) {
-      const draft = await db.from('booking_drafts').select('id,revision').eq('business_id', a.business_id).eq('voice_action_id', a.id).maybeSingle();
-      if (draft.error || !draft.data) throw new Error('booking_draft_missing');
+    else if (
+      isBookingConfirmationEnabled() &&
+      (payload.kind === "booking" || payload.kind === "booking_request")
+    ) {
+      const draft = await db
+        .from("booking_drafts")
+        .select("id,revision")
+        .eq("business_id", a.business_id)
+        .eq("voice_action_id", a.id)
+        .maybeSingle();
+      if (draft.error || !draft.data) throw new Error("booking_draft_missing");
       submitted = true;
-      const bookingResult = await confirmBookingDraft({ businessId: a.business_id, draftId: draft.data.id, revision: draft.data.revision, confirmationMessageId: a.source_message_id!, voiceAuthority: { sessionId: ctx.session.id, actionId: a.id } });
-      if (bookingResult.status === 'failed') throw new VoiceBookingNotSubmittedError();
-      if (bookingResult.status === 'uncertain') throw new Error('booking_result_uncertain');
-      result = { ...bookingResult, summary: String(bookingResult.summary), conflicts: link.conflicts };
-    }
-    else if (payload.kind === "booking_request") {
+      const bookingResult = await confirmBookingDraft({
+        businessId: a.business_id,
+        draftId: draft.data.id,
+        revision: draft.data.revision,
+        confirmationMessageId: a.source_message_id!,
+        voiceAuthority: { sessionId: ctx.session.id, actionId: a.id },
+      });
+      if (bookingResult.status === "failed")
+        throw new VoiceBookingNotSubmittedError();
+      if (bookingResult.status === "uncertain")
+        throw new Error("booking_result_uncertain");
+      result = {
+        ...bookingResult,
+        summary: String(bookingResult.summary),
+        conflicts: link.conflicts,
+      };
+    } else if (payload.kind === "booking_request") {
       await recordBookingRequest({
         businessId: a.business_id,
         contactId: link.contactId,
@@ -517,16 +672,15 @@ async function executeVoiceAction(
         throw new Error("voice_sms_blocked");
       await assertCurrentAction(a.id);
       submitted = true;
-      const response = await telnyx.messages.send(
-        {
-          from: ctx.session.called_phone,
-          to: ctx.session.caller_phone,
-          text: sms,
-          messaging_profile_id: send.messagingProfileId,
-          type: "SMS",
-        },
-        { maxRetries: 0 },
-      );
+      const response = await sendTenantSms({
+        businessId: a.business_id,
+        from: ctx.session.called_phone,
+        to: ctx.session.caller_phone,
+        text: sms,
+        messagingProfileId: send.messagingProfileId,
+        purpose: "voice_followup",
+        idempotencyKey: `voice-action:${a.id}`,
+      });
       if (!response.data?.id) throw new Error("voice_sms_result_uncertain");
       result = {
         summary:
@@ -550,13 +704,20 @@ async function executeVoiceAction(
       if (saved.error) throw new Error("voice_sms_result_save_failed");
       await persistVoiceSmsBookkeeping(a, result);
     }
-    const finalStatus = notification && result.deliveryStatus === 'uncertain' ? 'uncertain' : notification && ['failed','cancelled'].includes(String(result.deliveryStatus)) ? 'failed' : 'succeeded';
+    const finalStatus =
+      notification && result.deliveryStatus === "uncertain"
+        ? "uncertain"
+        : notification &&
+            ["failed", "cancelled"].includes(String(result.deliveryStatus))
+          ? "failed"
+          : "succeeded";
     const { error } = await db
       .from("voice_actions")
       .update({
         status: finalStatus,
         result,
-        recovery_complete: payload.kind !== "signup" && finalStatus !== "uncertain",
+        recovery_complete:
+          payload.kind !== "signup" && finalStatus !== "uncertain",
         updated_at: new Date().toISOString(),
       })
       .eq("id", a.id)

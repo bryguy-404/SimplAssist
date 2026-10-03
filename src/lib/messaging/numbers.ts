@@ -287,7 +287,8 @@ export async function getActivePhoneNumberForBusiness(
 
 export async function purchaseNumber(
   phoneNumber: string,
-  businessId: string
+  businessId: string,
+  options?: { beforePaidSubmit: () => Promise<void> },
 ): Promise<PurchasedNumber> {
   // Defense in depth: search requests local inventory and filters toll-free
   // responses, but a stale client or direct request must still be rejected
@@ -319,6 +320,8 @@ export async function purchaseNumber(
       `[messaging:numbers] Business ${businessId} has no telnyx_voice_application_id — complete brand verification before purchasing a number`
     );
   }
+
+  await options?.beforePaidSubmit();
 
   // Persist the ambiguity fence before the paid POST. If the request reaches
   // Telnyx but its response is lost, Retry must recover this exact owned

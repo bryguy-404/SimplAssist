@@ -69,7 +69,7 @@ describe("authenticated API workspace-access inventory", () => {
     for (const method of route.methods) {
       it(`${method} ${route.path} gates before every other awaited operation`, () => {
         const handler = handlerSource(routeSource(route.path), method);
-        const gate = handler.indexOf("await requireWorkspaceRouteAccess()");
+        const gate = handler.search(/await require(?:Fresh)?WorkspaceRouteAccess\(\)/);
 
         expect(handler).not.toBe("");
         expect(gate).toBeGreaterThan(-1);

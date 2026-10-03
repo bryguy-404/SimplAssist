@@ -25,8 +25,9 @@ const EXPECTED_FEATURES = {
     "ai_customization",
     "calendar",
     "direct_booking",
+    "review_requests",
   ],
-  sms_only: ["missed_call_sms", "manual_sms", "contacts_inbox"],
+  sms_only: ["missed_call_sms", "manual_sms", "contacts_inbox", "review_requests"],
   sms_and_chat: [
     "missed_call_sms",
     "manual_sms",
@@ -37,6 +38,7 @@ const EXPECTED_FEATURES = {
     "ai_customization",
     "calendar",
     "direct_booking",
+    "review_requests",
   ],
   full: [
     "missed_call_sms",
@@ -49,6 +51,7 @@ const EXPECTED_FEATURES = {
     "calendar",
     "direct_booking",
     "advanced_guardrails",
+    "review_requests",
     "ai_voice_answering",
   ],
 } as const satisfies Record<SubscriptionPlan, readonly FeatureKey[]>;
@@ -68,7 +71,7 @@ const EXPECTED_DISPLAY_REQUIRED_PLAN = {
   conversion_reporting: "full",
   weekly_summary: "full",
   lead_alerts: "full",
-  review_requests: "full",
+  review_requests: "chat_only",
   follow_up_automation: "full",
   priority_support: "full",
   ai_voice_answering: "full",
@@ -107,6 +110,7 @@ describe("feature plan matrix", () => {
       "ai_customization",
       "calendar",
       "direct_booking",
+      "review_requests",
     ]);
     expect(canPlanUseFeature("chat_only", "missed_call_sms")).toBe(false);
     expect(canPlanUseFeature("chat_only", "manual_sms")).toBe(false);
@@ -119,7 +123,6 @@ describe("feature plan matrix", () => {
       "conversion_reporting",
       "weekly_summary",
       "lead_alerts",
-      "review_requests",
       "follow_up_automation",
       "priority_support",
     ];

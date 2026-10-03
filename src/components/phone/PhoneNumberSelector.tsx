@@ -46,6 +46,9 @@ interface PhoneNumberSelectorProps {
   onConsentChange?: (agreed: boolean) => void;
   onNumberPurchased?: (phoneNumber: string) => void;
   onReplacementModeChange?: (replacing: boolean) => void;
+  /** Override the owner agreement for a distinct registered use case. */
+  consentDescription?: string;
+  selectionBusyLabel?: string;
 }
 
 export function shouldDisablePhoneNumberNext(args: {
@@ -56,8 +59,8 @@ export function shouldDisablePhoneNumberNext(args: {
 }): boolean {
   return Boolean(
     !args.phoneNumber ||
-      args.replacingNumber ||
-      (args.pendingSelection && args.pendingFailureReason)
+    args.replacingNumber ||
+    (args.pendingSelection && args.pendingFailureReason),
   );
 }
 
@@ -71,6 +74,8 @@ export default function PhoneNumberSelector({
   onConsentChange,
   onNumberPurchased,
   onReplacementModeChange,
+  consentDescription,
+  selectionBusyLabel = "Purchasing...",
 }: PhoneNumberSelectorProps) {
   const brand = useBrand();
   const [areaCode, setAreaCode] = useState("");
@@ -83,7 +88,7 @@ export default function PhoneNumberSelector({
           phone_number: initialPhoneNumber,
           pending: initialPhoneNumberPending,
         }
-      : null
+      : null,
   );
   const [error, setError] = useState<string | null>(initialFailureReason);
   const [consented, setConsented] = useState(initialConsentAgreed);
@@ -127,7 +132,7 @@ export default function PhoneNumberSelector({
 
     try {
       const res = await request(
-        `/api/messaging/numbers/search?areaCode=${areaCode}`
+        `/api/messaging/numbers/search?areaCode=${areaCode}`,
       );
       const data = await res.json();
 
@@ -228,11 +233,9 @@ export default function PhoneNumberSelector({
           className="mt-0.5 h-4 w-4 rounded accent-[var(--brand-primary-dark)] flex-shrink-0"
         />
         <span className="text-sm text-slate-600 dark:text-[#bdbdbf] leading-relaxed">
-          By selecting a phone number, I agree that this number will be registered to my business
-          for carrier compliance, and that SimplAssist will send automated text messages on my
-          business&apos;s behalf to customers who contact me. I will not use this number for spam or
-          unsolicited marketing. Customers can opt out at any time by replying STOP. I agree to
-          SimplAssist&apos;s{" "}
+          {consentDescription ||
+            "By selecting a phone number, I agree that this number will be registered to my business for carrier compliance, and that SimplAssist will send automated text messages on my business's behalf to customers who contact me. I will not use this number for spam or unsolicited marketing. Customers can opt out at any time by replying STOP."}{" "}
+          I agree to SimplAssist&apos;s{" "}
           <a
             href={canonicalLegalUrl("/terms")}
             target="_blank"
@@ -249,12 +252,15 @@ export default function PhoneNumberSelector({
             className="text-[var(--brand-primary-dark)] underline hover:text-[var(--brand-primary-soft-dark)]"
           >
             Privacy Policy
-          </a>.
+          </a>
+          .
         </span>
       </label>
 
       {/* Search area — disabled until consented */}
-      <div className={`flex gap-3 transition-opacity ${!consented ? "opacity-50 pointer-events-none" : ""}`}>
+      <div
+        className={`flex gap-3 transition-opacity ${!consented ? "opacity-50 pointer-events-none" : ""}`}
+      >
         <input
           type="text"
           value={areaCode}
@@ -289,15 +295,19 @@ export default function PhoneNumberSelector({
               className="flex items-center justify-between px-4 py-3 dark:hover:bg-white/[0.04]"
             >
               <div>
-                <p className="font-medium text-slate-900 dark:text-[#f5f5f5]">{n.phoneNumber}</p>
-                <p className="text-sm text-slate-500 dark:text-[#bdbdbf]">{n.friendlyName}</p>
+                <p className="font-medium text-slate-900 dark:text-[#f5f5f5]">
+                  {n.phoneNumber}
+                </p>
+                <p className="text-sm text-slate-500 dark:text-[#bdbdbf]">
+                  {n.friendlyName}
+                </p>
               </div>
               <button
                 onClick={() => handlePurchase(n.phoneNumber)}
                 disabled={purchasing !== null}
                 className="rounded-md bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {purchasing === n.phoneNumber ? "Purchasing..." : "Select"}
+                {purchasing === n.phoneNumber ? selectionBusyLabel : "Select"}
               </button>
             </li>
           ))}

@@ -15,6 +15,7 @@ import {
   CreditCard,
   LogOut,
   Lock,
+  Star,
 } from "lucide-react";
 import { BrandLogo } from "@/components/branding/BrandLogo";
 import { createBrowserClient } from "@/lib/supabase/client";
@@ -28,7 +29,7 @@ const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/conversations", label: "Conversations", icon: MessageSquare },
   { href: "/knowledge-gaps", label: "Knowledge Gaps", icon: CircleHelp },
-  { href: "/contacts", label: "Contacts", icon: Users },
+  { href: "/contacts", label: "Customers", icon: Users },
   { href: "/calendar", label: "Calendar", icon: Calendar },
   { href: "/settings", label: "Settings", icon: Cog },
   { href: "/widget", label: "Widget", icon: AppWindow },
@@ -47,6 +48,7 @@ export default function Sidebar({
   canUseCalendar = true,
   canUseWidget = true,
   isPartnerManagedBilling = false,
+  canUseReviews = false,
 }: {
   userEmail: string;
   websiteUrl: string | null;
@@ -57,6 +59,7 @@ export default function Sidebar({
   canUseCalendar?: boolean;
   canUseWidget?: boolean;
   isPartnerManagedBilling?: boolean;
+  canUseReviews?: boolean;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -68,9 +71,12 @@ export default function Sidebar({
           item.href === "/calendar" ? leadsNavItem : item
         )
       : navItems;
-  const visibleNavItems = isPartnerManagedBilling
-    ? goalAwareNavItems.filter((item) => item.href !== "/billing")
+  const reviewAwareNavItems = canUseReviews
+    ? goalAwareNavItems.flatMap((item) => item.href === "/contacts" ? [item, { href: "/reviews", label: "Reviews", icon: Star }] : [item])
     : goalAwareNavItems;
+  const visibleNavItems = isPartnerManagedBilling
+    ? reviewAwareNavItems.filter((item) => item.href !== "/billing")
+    : reviewAwareNavItems;
 
   async function handleSignOut() {
     // Global scope (the default) is deliberate: it is the customer's only

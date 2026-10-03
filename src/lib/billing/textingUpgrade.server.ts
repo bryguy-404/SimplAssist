@@ -15,7 +15,7 @@ import type { SmsPlan } from "@/lib/stripe/smsBilling";
 import type { OnboardingState } from "@/lib/onboarding/types";
 
 export function textingUpgradeQuote(op: SmsBillingOperation) {
-  return { ...view(op), quoteFingerprint: op.source_fingerprint, setupFeeCents: 2500 };
+  return { ...view(op), quoteFingerprint: op.source_fingerprint, setupFeeCents: Number(op.quote.setupFeeCents ?? 2500) };
 }
 
 /** Actual requirements, never the completed signup timestamp or its saved step. */

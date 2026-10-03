@@ -8,6 +8,11 @@ export async function findOrCreateContact(
   channel: Channel,
   sessionId: string | null = null
 ): Promise<Contact> {
+  // An email supplied by an anonymous visitor is contact information, not
+  // proof that the visitor owns an existing customer's conversation.
+  if (channel === "web_chat" && !sessionId?.trim()) {
+    throw new Error("A widget session is required to resolve a web chat contact.");
+  }
   const existing = await findExistingContact(
     businessId,
     phone,
@@ -59,8 +64,8 @@ export async function findOrCreateContact(
  * Find the canonical contact using provider-stable identities first.
  *
  * A widget session identifies the live visitor thread more reliably than an
- * optional/re-entered email address, so web chat always checks session before
- * falling back to email. SMS callers are keyed by their phone number.
+ * optional/re-entered email address, so web chat resolves only by session.
+ * SMS callers are keyed by their provider-supplied phone number.
  */
 async function findExistingContact(
   businessId: string,
@@ -82,16 +87,12 @@ async function findExistingContact(
     if (bySession) return bySession;
   }
 
-  if (channel === "web_chat" && email) {
-    return queryContactByIdentity(businessId, "email", email);
-  }
-
   return null;
 }
 
 async function queryContactByIdentity(
   businessId: string,
-  column: "phone_number" | "session_id" | "email",
+  column: "phone_number" | "session_id",
   value: string
 ): Promise<Contact | null> {
   const { data, error } = await supabaseAdmin

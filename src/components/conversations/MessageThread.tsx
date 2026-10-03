@@ -2,7 +2,16 @@
 
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { Send, Bot, User, ArrowLeftRight, Phone, MessageCircle, Info, Lock } from "lucide-react";
+import {
+  Send,
+  Bot,
+  User,
+  ArrowLeftRight,
+  Phone,
+  MessageCircle,
+  Info,
+  Lock,
+} from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { cn, formatPhoneNumber } from "@/lib/utils";
 import {
@@ -20,6 +29,7 @@ import {
 import { BookingReviewPanel } from "./BookingReview";
 import { VoiceCallReviewPanel } from "./VoiceCallReview";
 import { VoiceTranscriptPanel } from "./VoiceTranscript";
+import { customerPhoneValue } from "@/lib/customers/domain";
 
 interface MessageThreadProps {
   conversation: ConversationWithContact;
@@ -70,6 +80,22 @@ export function MessageThread({
   const [messages, setMessages] = useState<Message[]>(demoMessages ?? []);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [reviewReply, setReviewReply] = useState<{
+    conversationId: string;
+    destination: string;
+  } | null>(null);
+  const reviewReplyAllowed = reviewReply?.conversationId === conversation.id;
+  const customerPhone = conversation.contact
+    ? customerPhoneValue(conversation.contact)
+    : null;
+  const smsDestination = reviewReplyAllowed
+    ? reviewReply.destination
+    : customerPhone;
+  const sendAttempt = useRef<{
+    conversationId: string;
+    content: string;
+    id: string;
+  } | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const [isAiHandling, setIsAiHandling] = useState(conversation.is_ai_handling);
   const [toggling, setToggling] = useState(false);
@@ -77,19 +103,43 @@ export function MessageThread({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageScrollRef = useRef<HTMLDivElement>(null);
   const supabase = createBrowserClient();
-  const smsBlocked = conversation.channel === "sms" && !smsReady;
-  const {
-    smsPlanLocked,
-    webChatLocked,
-    effectiveIsAiHandling,
-    canToggleAi,
-  } = getConversationAccessState({
-    channel: conversation.channel,
-    storedIsAiHandling: isAiHandling,
-    canUseManualSms,
-    canUseAiSms,
-    canUseWebChat,
-  });
+  const smsBlocked =
+    conversation.channel === "sms" &&
+    ((!smsReady && !reviewReplyAllowed) || !smsDestination);
+  const { smsPlanLocked, webChatLocked, effectiveIsAiHandling, canToggleAi } =
+    getConversationAccessState({
+      channel: conversation.channel,
+      storedIsAiHandling: isAiHandling,
+      canUseManualSms: canUseManualSms || reviewReplyAllowed,
+      canUseAiSms,
+      canUseWebChat,
+    });
+
+  useEffect(() => {
+    let current = true;
+    setReviewReply(null);
+    if (!demoMessages && conversation.channel === "sms") {
+      fetch(
+        `/api/messaging/send?conversationId=${encodeURIComponent(conversation.id)}`,
+      )
+        .then((response) => (response.ok ? response.json() : null))
+        .then((value) => {
+          if (
+            current &&
+            value?.reviewReplyAllowed === true &&
+            /^\+[1-9]\d{7,14}$/.test(value?.destination ?? "")
+          )
+            setReviewReply({
+              conversationId: conversation.id,
+              destination: value.destination,
+            });
+        })
+        .catch(() => {});
+    }
+    return () => {
+      current = false;
+    };
+  }, [conversation.id, conversation.channel, demoMessages]);
 
   // Fetch messages
   useEffect(() => {
@@ -121,8 +171,16 @@ export function MessageThread({
     }
 
     fetchMessages();
-    return () => { current = false; };
-  }, [conversation.id, conversation.channel, conversation.is_ai_handling, supabase, demoMessages]);
+    return () => {
+      current = false;
+    };
+  }, [
+    conversation.id,
+    conversation.channel,
+    conversation.is_ai_handling,
+    supabase,
+    demoMessages,
+  ]);
 
   // Real-time subscription
   useEffect(() => {
@@ -140,10 +198,11 @@ export function MessageThread({
         (payload) => {
           setMessages((prev) => {
             // Avoid duplicates
-            if (prev.some((m) => m.id === (payload.new as Message).id)) return prev;
+            if (prev.some((m) => m.id === (payload.new as Message).id))
+              return prev;
             return [...prev, payload.new as Message];
           });
-        }
+        },
       )
       .subscribe();
 
@@ -159,7 +218,8 @@ export function MessageThread({
   }, [messages, conversation.channel]);
 
   useEffect(() => {
-    if (conversation.channel === "voice") messageScrollRef.current?.scrollTo({ top: 0 });
+    if (conversation.channel === "voice")
+      messageScrollRef.current?.scrollTo({ top: 0 });
   }, [conversation.id, conversation.channel]);
 
   async function handleSend() {
@@ -172,23 +232,40 @@ export function MessageThread({
       smsPlanLocked ||
       webChatLocked ||
       demoMessages
-    ) return;
+    )
+      return;
 
     setSending(true);
     setSendError(null);
     const content = input.trim();
     setInput("");
     let providerSent = false;
+    let smsMessage: Message | null = null;
+    if (
+      !sendAttempt.current ||
+      sendAttempt.current.conversationId !== conversation.id ||
+      sendAttempt.current.content !== content
+    ) {
+      sendAttempt.current = {
+        conversationId: conversation.id,
+        content,
+        id: crypto.randomUUID(),
+      };
+    }
 
     try {
-      if (conversation.channel === "sms" && conversation.contact?.phone_number) {
+      if (conversation.channel === "sms") {
+        if (!smsDestination)
+          throw new Error("This conversation has no valid SMS destination.");
         const response = await fetch("/api/messaging/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            to: conversation.contact.phone_number,
+            to: smsDestination,
             message: content,
             businessId,
+            conversationId: conversation.id,
+            requestId: sendAttempt.current.id,
           }),
         });
         const responseBody = await response.json().catch(() => ({}));
@@ -196,29 +273,37 @@ export function MessageThread({
           throw new Error(
             typeof responseBody.message === "string"
               ? responseBody.message
-              : "The SMS could not be sent."
+              : "The SMS could not be sent.",
           );
         }
         providerSent = true;
+        if (!responseBody.messageRecord)
+          throw new Error(
+            "The SMS was accepted, but its transcript could not be saved. Please do not resend it.",
+          );
+        smsMessage = responseBody.messageRecord as Message;
       }
 
       // Only show an agent message as sent after the provider accepted it.
-      const { data: newMsg, error: messageError } = await supabase
-        .from("messages")
-        .insert({
-          conversation_id: conversation.id,
-          business_id: businessId,
-          role: "human_agent",
-          content,
-          channel: conversation.channel,
-        })
-        .select("*")
-        .single();
+      const { data: newMsg, error: messageError } = smsMessage
+        ? { data: smsMessage, error: null }
+        : await supabase
+            .from("messages")
+            .insert({
+              conversation_id: conversation.id,
+              business_id: businessId,
+              role: "human_agent",
+              content,
+              channel: conversation.channel,
+            })
+            .select("*")
+            .single();
 
       if (messageError || !newMsg) {
         throw messageError ?? new Error("Transcript insert returned no row.");
       }
 
+      sendAttempt.current = null;
       setMessages((prev) => {
         if (prev.some((m) => m.id === newMsg.id)) return prev;
         return [...prev, newMsg as Message];
@@ -229,7 +314,10 @@ export function MessageThread({
         .update({ last_message_at: new Date().toISOString() })
         .eq("id", conversation.id);
       if (conversationError) {
-        console.error("Error updating conversation timestamp:", conversationError);
+        console.error(
+          "Error updating conversation timestamp:",
+          conversationError,
+        );
       }
     } catch (error) {
       console.error("Error sending message:", error);
@@ -238,11 +326,11 @@ export function MessageThread({
         setSendError(
           error instanceof Error
             ? error.message
-            : "The SMS could not be sent. Please try again."
+            : "The SMS could not be sent. Please try again.",
         );
       } else {
         setSendError(
-          "The SMS was sent, but the dashboard could not save its transcript. Please do not resend it."
+          "The SMS was sent, but the dashboard could not save its transcript. Please do not resend it.",
         );
       }
     } finally {
@@ -275,7 +363,7 @@ export function MessageThread({
     } catch (error) {
       console.error("Error toggling AI handling:", error);
       setToggleError(
-        "We couldn’t change who is handling this conversation. Please try again."
+        "We couldn’t change who is handling this conversation. Please try again.",
       );
     } finally {
       setToggling(false);
@@ -284,9 +372,7 @@ export function MessageThread({
 
   const contactName =
     conversation.contact?.name ||
-    (conversation.contact?.phone_number
-      ? formatPhoneNumber(conversation.contact.phone_number)
-      : "Unknown");
+    (customerPhone ? formatPhoneNumber(customerPhone) : "Unknown");
 
   return (
     <div className="flex h-full min-w-0 flex-col bg-white dark:bg-transparent">
@@ -294,46 +380,60 @@ export function MessageThread({
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#ece4d8] dark:border-white/[0.10] px-4 py-3">
         <div className="flex w-full min-w-0 items-center gap-3 sm:w-auto sm:flex-1">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-stone-100 dark:bg-white/[0.06]">
-            {conversation.channel === "sms" || conversation.channel === "voice" ? (
+            {conversation.channel === "sms" ||
+            conversation.channel === "voice" ? (
               <Phone className="h-5 w-5 text-stone-500 dark:text-[#bdbdbf]" />
             ) : (
               <MessageCircle className="h-5 w-5 text-stone-500 dark:text-[#bdbdbf]" />
             )}
           </div>
           <div className="min-w-0 flex-1">
-            <h2 className="break-words text-sm font-semibold text-stone-900 dark:text-[#f5f5f5]">{contactName}</h2>
+            <h2 className="break-words text-sm font-semibold text-stone-900 dark:text-[#f5f5f5]">
+              {contactName}
+            </h2>
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-stone-500 dark:text-[#bdbdbf]">
-              {conversation.contact?.phone_number && (
-                <span className="whitespace-nowrap">{formatPhoneNumber(conversation.contact.phone_number)}</span>
+              {customerPhone && (
+                <span className="whitespace-nowrap">
+                  {formatPhoneNumber(customerPhone)}
+                </span>
               )}
               {conversation.contact?.email && (
-                <span className="min-w-0 break-all">· {conversation.contact.email}</span>
+                <span className="min-w-0 break-all">
+                  · {conversation.contact.email}
+                </span>
               )}
               <span className="whitespace-nowrap">
-                · {conversation.channel === "voice" ? "AI voice call" : conversation.channel === "sms" ? "SMS" : "Web Chat"}
+                ·{" "}
+                {conversation.channel === "voice"
+                  ? "AI voice call"
+                  : conversation.channel === "sms"
+                    ? "SMS"
+                    : "Web Chat"}
               </span>
               <span
                 className={cn(
                   "rounded-full px-1.5 py-0.5 font-medium",
-                  webChatLocked || smsPlanLocked || (conversation.channel === "sms" && !canUseAiSms)
+                  webChatLocked ||
+                    smsPlanLocked ||
+                    (conversation.channel === "sms" && !canUseAiSms)
                     ? statusWarning
                     : conversation.status === "active"
-                    ? statusSuccess
-                    : conversation.status === "handed_off"
-                    ? statusWarning
-                    : statusNeutral
+                      ? statusSuccess
+                      : conversation.status === "handed_off"
+                        ? statusWarning
+                        : statusNeutral,
                 )}
               >
                 {webChatLocked
                   ? "Locked"
                   : smsPlanLocked
-                  ? "Paused"
-                  : conversation.channel === "sms" && !canUseAiSms
-                  ? "Manual"
-                  : conversation.status === "handed_off"
-                  ? "Handed Off"
-                  : conversation.status.charAt(0).toUpperCase() +
-                    conversation.status.slice(1)}
+                    ? "Paused"
+                    : conversation.channel === "sms" && !canUseAiSms
+                      ? "Manual"
+                      : conversation.status === "handed_off"
+                        ? "Handed Off"
+                        : conversation.status.charAt(0).toUpperCase() +
+                          conversation.status.slice(1)}
               </span>
             </div>
           </div>
@@ -348,14 +448,19 @@ export function MessageThread({
               effectiveIsAiHandling
                 ? "bg-stone-100 dark:bg-white/[0.08] text-stone-700 dark:text-[#d4d4d8] hover:bg-stone-200 dark:hover:bg-white/[0.12]"
                 : "bg-[var(--brand-accent-soft)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.16)] text-[var(--brand-accent)] dark:text-[var(--brand-text-soft-dark)] hover:bg-[var(--brand-tint-strong)] dark:hover:bg-[rgb(var(--brand-primary-dark-rgb)/.24)]",
-              toggling && "opacity-50"
+              toggling && "opacity-50",
             )}
           >
             <ArrowLeftRight className="h-4 w-4" />
             {effectiveIsAiHandling ? "Take Over" : "Let AI Handle"}
           </button>
         ) : (
-          <span className={cn("inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs font-medium", statusWarning)}>
+          <span
+            className={cn(
+              "inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs font-medium",
+              statusWarning,
+            )}
+          >
             {webChatLocked || smsPlanLocked ? (
               <Lock className="h-3.5 w-3.5" />
             ) : conversation.channel === "web_chat" ? (
@@ -366,10 +471,12 @@ export function MessageThread({
             {webChatLocked
               ? "Growth plan"
               : smsPlanLocked
-              ? "Plan inactive"
-              : conversation.channel === "web_chat"
-              ? "AI chat"
-              : conversation.channel === "voice" ? "Call transcript" : "Manual replies"}
+                ? "Plan inactive"
+                : conversation.channel === "web_chat"
+                  ? "AI chat"
+                  : conversation.channel === "voice"
+                    ? "Call transcript"
+                    : "Manual replies"}
           </span>
         )}
       </div>
@@ -384,14 +491,30 @@ export function MessageThread({
       )}
 
       {/* Messages */}
-      <div ref={messageScrollRef} className="min-w-0 flex-1 overflow-y-auto px-4 py-4">
-        {!demoMessages ? <BookingReviewPanel key={`booking-${conversation.id}`} conversationId={conversation.id} /> : null}
+      <div
+        ref={messageScrollRef}
+        className="min-w-0 flex-1 overflow-y-auto px-4 py-4"
+      >
+        {!demoMessages ? (
+          <BookingReviewPanel
+            key={`booking-${conversation.id}`}
+            conversationId={conversation.id}
+          />
+        ) : null}
         {conversation.channel === "voice" && !demoMessages ? (
-          <div className="space-y-8"><VoiceCallReviewPanel key={conversation.id} conversationId={conversation.id} />
-            <VoiceTranscriptPanel key={`transcript-${conversation.id}`} conversationId={conversation.id} />
+          <div className="space-y-8">
+            <VoiceCallReviewPanel
+              key={conversation.id}
+              conversationId={conversation.id}
+            />
+            <VoiceTranscriptPanel
+              key={`transcript-${conversation.id}`}
+              conversationId={conversation.id}
+            />
           </div>
         ) : null}
-        {conversation.channel === "voice" && !demoMessages ? null : messages.length === 0 ? (
+        {conversation.channel === "voice" &&
+        !demoMessages ? null : messages.length === 0 ? (
           <div className="flex h-full items-center justify-center text-sm text-stone-400 dark:text-[#bdbdbf]">
             No messages in this conversation yet.
           </div>
@@ -418,7 +541,7 @@ export function MessageThread({
                   key={msg.id}
                   className={cn(
                     "flex",
-                    isCustomer ? "justify-start" : "justify-end"
+                    isCustomer ? "justify-start" : "justify-end",
                   )}
                 >
                   <div className="max-w-[70%]">
@@ -426,7 +549,7 @@ export function MessageThread({
                     <div
                       className={cn(
                         "mb-1 flex items-center gap-1 text-xs text-stone-400 dark:text-[#bdbdbf]",
-                        isCustomer ? "justify-start" : "justify-end"
+                        isCustomer ? "justify-start" : "justify-end",
                       )}
                     >
                       {isCustomer ? (
@@ -448,8 +571,8 @@ export function MessageThread({
                         isCustomer
                           ? "rounded-bl-md border border-[#ece4d8] dark:border-white/[0.08] bg-[#f3ede3] dark:bg-white/[0.06] text-stone-800 dark:text-[#f0f0f0]"
                           : isHumanAgent
-                          ? "rounded-br-md bg-stone-800 text-white dark:bg-white/[0.16] dark:text-[#f5f5f5]"
-                          : "rounded-br-md bg-[var(--brand-primary)] text-white dark:bg-[var(--brand-primary-dark)] dark:text-[#16100b]"
+                            ? "rounded-br-md bg-stone-800 text-white dark:bg-white/[0.16] dark:text-[#f5f5f5]"
+                            : "rounded-br-md bg-[var(--brand-primary)] text-white dark:bg-[var(--brand-primary-dark)] dark:text-[#16100b]",
                       )}
                     >
                       {msg.content}
@@ -458,7 +581,7 @@ export function MessageThread({
                     <div
                       className={cn(
                         "mt-1 text-xs text-stone-400 dark:text-[#bdbdbf]",
-                        isCustomer ? "text-left" : "text-right"
+                        isCustomer ? "text-left" : "text-right",
                       )}
                     >
                       {formatTimestamp(msg.created_at)}
@@ -483,46 +606,85 @@ export function MessageThread({
           </div>
         )}
         {conversation.channel === "voice" ? (
-          <p className="px-4 py-3 text-sm text-stone-500">This voice transcript is read-only. Text sending and live takeover are unavailable.</p>
+          <p className="px-4 py-3 text-sm text-stone-500">
+            This voice transcript is read-only. Text sending and live takeover
+            are unavailable.
+          </p>
         ) : webChatLocked ? (
-          <div className={cn("flex items-start gap-3 rounded-lg px-4 py-3 text-sm", statusWarning)}>
+          <div
+            className={cn(
+              "flex items-start gap-3 rounded-lg px-4 py-3 text-sm",
+              statusWarning,
+            )}
+          >
             <Lock className="mt-0.5 h-4 w-4 shrink-0" />
             <div>
-              <p className="font-medium">This saved web-chat conversation is read-only.</p>
-              <Link href="/billing" className="mt-1 inline-flex text-xs font-semibold underline">
+              <p className="font-medium">
+                This saved web-chat conversation is read-only.
+              </p>
+              <Link
+                href="/billing"
+                className="mt-1 inline-flex text-xs font-semibold underline"
+              >
                 Manage plan
               </Link>
             </div>
           </div>
         ) : smsPlanLocked ? (
-          <div className={cn("flex items-start gap-3 rounded-lg px-4 py-3 text-sm", statusWarning)}>
+          <div
+            className={cn(
+              "flex items-start gap-3 rounded-lg px-4 py-3 text-sm",
+              statusWarning,
+            )}
+          >
             <Lock className="mt-0.5 h-4 w-4 shrink-0" />
             <div>
-              <p className="font-medium">
-                {smsPlanLockedMessage(smsIncluded)}
-              </p>
-              <Link href="/billing" className="mt-1 inline-flex text-xs font-semibold underline">
+              <p className="font-medium">{smsPlanLockedMessage(smsIncluded)}</p>
+              <Link
+                href="/billing"
+                className="mt-1 inline-flex text-xs font-semibold underline"
+              >
                 Manage billing
               </Link>
             </div>
           </div>
         ) : conversation.channel === "web_chat" ? (
-          <div className={cn("flex items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm", statusInfo)}>
+          <div
+            className={cn(
+              "flex items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm",
+              statusInfo,
+            )}
+          >
             <Bot className="h-4 w-4" />
             Website chat replies are handled automatically by AI.
           </div>
         ) : effectiveIsAiHandling ? (
-          <div className={cn("flex items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm", statusInfo)}>
+          <div
+            className={cn(
+              "flex items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm",
+              statusInfo,
+            )}
+          >
             <Bot className="h-4 w-4" />
-            AI is handling this conversation. Click &quot;Take Over&quot; to reply manually.
+            AI is handling this conversation. Click &quot;Take Over&quot; to
+            reply manually.
           </div>
         ) : smsBlocked ? (
-          <div className={cn("flex items-start gap-3 rounded-lg px-4 py-3 text-sm", statusWarning)}>
+          <div
+            className={cn(
+              "flex items-start gap-3 rounded-lg px-4 py-3 text-sm",
+              statusWarning,
+            )}
+          >
             <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-300" />
             <div>
-              <p className="font-medium text-amber-700 dark:text-amber-300">SMS sending paused</p>
+              <p className="font-medium text-amber-700 dark:text-amber-300">
+                SMS sending paused
+              </p>
               <p className="mt-0.5 text-xs text-amber-600/90 dark:text-amber-300/80">
-                {smsPausedCopy(smsBlockReason)}
+                {!smsDestination
+                  ? "This conversation has no valid customer phone number."
+                  : smsPausedCopy(smsBlockReason)}
               </p>
             </div>
           </div>

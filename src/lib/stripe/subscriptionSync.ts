@@ -5,7 +5,7 @@ export { normalizeStripeSubscriptionStatus } from "./subscriptionStatus";
 import type Stripe from "stripe";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { stripe } from "./client";
-import { planFromStripePriceId } from "./config";
+import { approvedBasePriceCents, planFromStripePriceId } from "./config";
 import { subscriptionPlanSchema } from "@/lib/billing/planSchema";
 import { assertApprovedChatOnlyStripePrice } from "./chatOnlyPrice";
 import {
@@ -252,6 +252,12 @@ export async function syncStripeSubscription(
   // Preserve unconditional status validation. Commercial voice additionally
   // versions a fresh provider read, so event arrival order cannot mint minutes.
   normalizeStripeSubscriptionStatus(subscription.status);
+  // Review texting is an explicit second item, never the base subscription.
+  // Reject every other multi-item shape before any plan synchronization.
+  if (subscription.items.has_more || subscription.items.data.length > 1) {
+    const { baseFirstSubscription } = await import("./subscriptionItems");
+    subscription = baseFirstSubscription(subscription);
+  }
   const transition = await synchronizeTextingUpgradeSubscription(subscription);
   subscription = transition.subscription;
   if (!transition.owned && subscription.metadata?.sms_billing_operation_id) {
@@ -276,6 +282,10 @@ export async function syncStripeSubscription(
     const { continueTextingUpgradeRegistration } = await import("@/lib/billing/textingUpgradeReconciliation.server");
     await continueTextingUpgradeRegistration(result.businessId);
   }
+  if (result && (subscription.metadata?.review_sms_operation_id || subscription.items.data.length > 1)) {
+    const { reconcileReviewSmsSubscription } = await import("./reviewSms.server");
+    await reconcileReviewSmsSubscription(subscription);
+  }
   return result;
 }
 
@@ -295,7 +305,10 @@ async function syncSubscriptionSnapshot(
   const customerId =
     typeof subscription.customer === "string" ? subscription.customer : null;
   const subscriptionId = subscription.id;
-  const primaryItem = subscription.items.data[0];
+  const { classifySubscriptionItems } = await import("./subscriptionItems");
+  const classified = subscription.items.data.length > 1 || subscription.items.has_more
+    ? classifySubscriptionItems(subscription) : null;
+  const primaryItem = classified?.base ?? subscription.items.data[0];
   const priceId = primaryItem?.price.id ?? null;
   const hasChatOnlyAttemptAuthority =
     !options.chatUpgradeAuthorized && (subscription.metadata?.plan === "chat_only" ||
@@ -332,7 +345,7 @@ async function syncSubscriptionSnapshot(
     assertApprovedChatOnlyStripePrice(primaryItem.price, {
       expectedPriceId: priceId ?? undefined,
       requireActive: false,
-      subscriptionItemCount: subscription.items.has_more
+      subscriptionItemCount: classified?.reviewSms ? 1 : subscription.items.has_more
         ? subscription.items.data.length + 1
         : subscription.items.data.length,
       quantity: primaryItem.quantity ?? null,
@@ -368,7 +381,7 @@ async function syncSubscriptionSnapshot(
   if (voice.revision !== null && chatAttempt) throw new Error("voice_billing_plan_family_mismatch");
   if (voice.revision !== null && plan === "full") {
     const price = primaryItem?.price;
-    if (price?.currency !== "usd" || price.unit_amount !== 6500 || price.type !== "recurring" ||
+    if (price?.currency !== "usd" || price.unit_amount !== approvedBasePriceCents("full", price.id) || price.type !== "recurring" ||
         price.recurring?.interval !== "month" || price.recurring.interval_count !== 1 ||
         price.recurring.usage_type !== "licensed" || primaryItem.quantity !== 1) {
       throw new Error("voice_billing_package_mismatch");

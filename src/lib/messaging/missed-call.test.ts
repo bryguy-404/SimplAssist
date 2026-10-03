@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   recordBusinessMetricEventBestEffort: vi.fn(),
 }));
 
+vi.mock("./tenantSmsSend.server", () => ({ sendTenantSms: mocks.send }));
 vi.mock("./client", () => ({
   telnyx: { messages: { send: mocks.send } },
 }));
@@ -49,7 +50,7 @@ vi.mock("./outboundSmsOperational.server", () => ({
     mocks.resolveOutboundSmsOperationalAccess,
   isOutboundSmsOperationalBlockReason: (reason: string) =>
     ["account_suspended", "texting_paused", "ai_replies_paused"].includes(
-      reason
+      reason,
     ),
 }));
 vi.mock("@/lib/billing/usage", () => ({
@@ -122,7 +123,7 @@ beforeEach(() => {
 
   mocks.resolveBusinessEntitlements.mockResolvedValue(STARTER);
   mocks.canUseFeature.mockImplementation(
-    (_entitlements: unknown, feature: string) => feature === "missed_call_sms"
+    (_entitlements: unknown, feature: string) => feature === "missed_call_sms",
   );
   mocks.getOutboundSendContext.mockResolvedValue({
     businessId: BUSINESS_ID,
@@ -159,93 +160,96 @@ describe("sendMissedCallSMS", () => {
       "both" as const,
       "Hi, this is Green Leaf Landscaping — saw your call come in. Just reply here with what you need and we'll get you taken care of.\n\nMsg frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out.",
     ],
-  ])("sends the exact static %s template without Anthropic", async (language, expected) => {
-    setRows(language);
+  ])(
+    "sends the exact static %s template without Anthropic",
+    async (language, expected) => {
+      setRows(language);
 
-    await sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID);
+      await sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID);
 
-    expect(mocks.send).toHaveBeenCalledWith({
-      from: BUSINESS_NUMBER,
-      to: CALLER,
-      text: expected,
-      messaging_profile_id: "profile_1",
-      type: "SMS",
-    });
-    expect(mocks.preflightOutboundSms).toHaveBeenCalledWith({
-      businessId: BUSINESS_ID,
-      text: expected,
-      purpose: "missed_call",
-    });
-    expect(mocks.resolveOutboundSmsOperationalAccess).toHaveBeenCalledWith(
-      BUSINESS_ID,
-      "missed_call"
-    );
-    expect(
-      mocks.preflightOutboundSms.mock.invocationCallOrder[0]
-    ).toBeLessThan(
-      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[0]
-    );
-    expect(
-      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[0]
-    ).toBeLessThan(mocks.send.mock.invocationCallOrder[0]);
-    expect(mocks.getOrCreateConversation).toHaveBeenCalledWith(
-      BUSINESS_ID,
-      "contact_1",
-      "sms",
-      { defaultAiHandling: false }
-    );
-    expect(expected).toContain("\n\n");
-    expect(expected).not.toContain("\\n\\n");
-    expect(expected.split("\n\n")).toHaveLength(2);
-    expect(mocks.addMessage).toHaveBeenCalledWith(
-      "conversation_1",
-      BUSINESS_ID,
-      "assistant",
-      expected,
-      "sms"
-    );
-    expect(mocks.recordOutboundSmsUsage).toHaveBeenCalledWith({
-      businessId: BUSINESS_ID,
-      text: expected,
-      source: "missed_call_sms",
-      providerMessageId: "telnyx_message_1",
-      idempotencyKey: "outbound:missed_call:telnyx_message_1",
-      metadata: { to: CALLER, from: BUSINESS_NUMBER },
-    });
-    expect(mocks.buildMissedCallSourceKey).toHaveBeenCalledWith(
-      BUSINESS_ID,
-      CALL_SESSION_ID
-    );
-    expect(mocks.recordBusinessMetricEventBestEffort).toHaveBeenCalledWith({
-      businessId: BUSINESS_ID,
-      metricKey: "missed_call_caught",
-      quantity: 1,
-      occurredAt: expect.any(Date),
-      sourceKey: MISSED_CALL_SOURCE_KEY,
-      origin: null,
-    });
-    expect(
-      mocks.send.mock.invocationCallOrder[0]
-    ).toBeLessThan(
-      mocks.recordBusinessMetricEventBestEffort.mock.invocationCallOrder[0]
-    );
-    expect(
-      mocks.recordBusinessMetricEventBestEffort.mock.invocationCallOrder[0]
-    ).toBeLessThan(mocks.addMessage.mock.invocationCallOrder[0]);
+      expect(mocks.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          from: BUSINESS_NUMBER,
+          to: CALLER,
+          text: expected,
+          messagingProfileId: "profile_1",
+          purpose: "missed_call",
+          idempotencyKey: `missed-call:${CALL_SESSION_ID}`,
+        }),
+      );
+      expect(mocks.preflightOutboundSms).toHaveBeenCalledWith({
+        businessId: BUSINESS_ID,
+        text: expected,
+        purpose: "missed_call",
+      });
+      expect(mocks.resolveOutboundSmsOperationalAccess).toHaveBeenCalledWith(
+        BUSINESS_ID,
+        "missed_call",
+      );
+      expect(
+        mocks.preflightOutboundSms.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[0],
+      );
+      expect(
+        mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[0],
+      ).toBeLessThan(mocks.send.mock.invocationCallOrder[0]);
+      expect(mocks.getOrCreateConversation).toHaveBeenCalledWith(
+        BUSINESS_ID,
+        "contact_1",
+        "sms",
+        { defaultAiHandling: false },
+      );
+      expect(expected).toContain("\n\n");
+      expect(expected).not.toContain("\\n\\n");
+      expect(expected.split("\n\n")).toHaveLength(2);
+      expect(mocks.addMessage).toHaveBeenCalledWith(
+        "conversation_1",
+        BUSINESS_ID,
+        "assistant",
+        expected,
+        "sms",
+      );
+      expect(mocks.recordOutboundSmsUsage).toHaveBeenCalledWith({
+        businessId: BUSINESS_ID,
+        text: expected,
+        source: "missed_call_sms",
+        providerMessageId: "telnyx_message_1",
+        idempotencyKey: "outbound:missed_call:telnyx_message_1",
+        metadata: { to: CALLER, from: BUSINESS_NUMBER },
+      });
+      expect(mocks.buildMissedCallSourceKey).toHaveBeenCalledWith(
+        BUSINESS_ID,
+        CALL_SESSION_ID,
+      );
+      expect(mocks.recordBusinessMetricEventBestEffort).toHaveBeenCalledWith({
+        businessId: BUSINESS_ID,
+        metricKey: "missed_call_caught",
+        quantity: 1,
+        occurredAt: expect.any(Date),
+        sourceKey: MISSED_CALL_SOURCE_KEY,
+        origin: null,
+      });
+      expect(mocks.send.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.recordBusinessMetricEventBestEffort.mock.invocationCallOrder[0],
+      );
+      expect(
+        mocks.recordBusinessMetricEventBestEffort.mock.invocationCallOrder[0],
+      ).toBeLessThan(mocks.addMessage.mock.invocationCallOrder[0]);
 
-    const telnyxBody = mocks.send.mock.calls[0]?.[0]?.text;
-    const preflightBody = mocks.preflightOutboundSms.mock.calls[0]?.[0]?.text;
-    const persistedBody = mocks.addMessage.mock.calls[0]?.[3];
-    const meteredBody =
-      mocks.recordOutboundSmsUsage.mock.calls[0]?.[0]?.text;
-    expect([telnyxBody, preflightBody, persistedBody, meteredBody]).toEqual([
-      expected,
-      expected,
-      expected,
-      expected,
-    ]);
-    expect(mocks.anthropicCreate).not.toHaveBeenCalled();
-  });
+      const telnyxBody = mocks.send.mock.calls[0]?.[0]?.text;
+      const preflightBody = mocks.preflightOutboundSms.mock.calls[0]?.[0]?.text;
+      const persistedBody = mocks.addMessage.mock.calls[0]?.[3];
+      const meteredBody = mocks.recordOutboundSmsUsage.mock.calls[0]?.[0]?.text;
+      expect([telnyxBody, preflightBody, persistedBody, meteredBody]).toEqual([
+        expected,
+        expected,
+        expected,
+        expected,
+      ]);
+      expect(mocks.anthropicCreate).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps an accepted SMS successful when metric dispatch throws", async () => {
     setRows("en");
@@ -254,7 +258,7 @@ describe("sendMissedCallSMS", () => {
     });
 
     await expect(
-      sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID)
+      sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID),
     ).resolves.toBeUndefined();
 
     expect(mocks.send).toHaveBeenCalledOnce();
@@ -265,7 +269,7 @@ describe("sendMissedCallSMS", () => {
       {
         businessId: BUSINESS_ID,
         metricKey: "missed_call_caught",
-      }
+      },
     );
   });
 
@@ -274,7 +278,7 @@ describe("sendMissedCallSMS", () => {
     mocks.send.mockRejectedValueOnce(new Error("provider rejected"));
 
     await expect(
-      sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID)
+      sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID),
     ).rejects.toThrow("provider rejected");
 
     expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
@@ -286,7 +290,7 @@ describe("sendMissedCallSMS", () => {
     mocks.canUseFeature.mockReturnValue(false);
 
     await expect(
-      sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID)
+      sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID),
     ).resolves.toBeUndefined();
 
     expect(mocks.from).not.toHaveBeenCalled();
@@ -296,14 +300,12 @@ describe("sendMissedCallSMS", () => {
 
   it("rethrows indeterminate entitlement failures for the voice webhook retry path", async () => {
     mocks.resolveBusinessEntitlements.mockRejectedValue(
-      new Error("subscription lookup failed")
+      new Error("subscription lookup failed"),
     );
 
     await expect(
-      sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID)
-    ).rejects.toThrow(
-      "subscription lookup failed"
-    );
+      sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID),
+    ).rejects.toThrow("subscription lookup failed");
     expect(mocks.send).not.toHaveBeenCalled();
     expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
   });
@@ -316,10 +318,8 @@ describe("sendMissedCallSMS", () => {
     });
 
     await expect(
-      sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID)
-    ).rejects.toThrow(
-      "AI language setting read failed"
-    );
+      sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID),
+    ).rejects.toThrow("AI language setting read failed");
     expect(mocks.send).not.toHaveBeenCalled();
     expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
   });
@@ -334,7 +334,7 @@ describe("sendMissedCallSMS", () => {
     });
 
     await expect(
-      sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID)
+      sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID),
     ).resolves.toBeUndefined();
 
     expect(mocks.insertPausedSystemMessageIfNeeded).toHaveBeenCalledWith({
@@ -359,15 +359,15 @@ describe("sendMissedCallSMS", () => {
     });
 
     await expect(
-      sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID)
+      sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID),
     ).resolves.toBeUndefined();
 
     expect(mocks.preflightOutboundSms).toHaveBeenCalledWith(
-      expect.objectContaining({ purpose: "missed_call" })
+      expect.objectContaining({ purpose: "missed_call" }),
     );
     expect(mocks.resolveOutboundSmsOperationalAccess).toHaveBeenCalledWith(
       BUSINESS_ID,
-      "missed_call"
+      "missed_call",
     );
     expect(mocks.insertPausedSystemMessageIfNeeded).toHaveBeenCalledWith({
       conversationId: "conversation_1",
@@ -385,21 +385,18 @@ describe("sendMissedCallSMS", () => {
   it("rethrows indeterminate final operational state for voice webhook retry", async () => {
     setRows("en");
     mocks.resolveOutboundSmsOperationalAccess.mockRejectedValue(
-      new Error("operational state unavailable")
+      new Error("operational state unavailable"),
     );
 
     await expect(
-      sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID)
-    ).rejects.toThrow(
-      "operational state unavailable"
-    );
+      sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID),
+    ).rejects.toThrow("operational state unavailable");
     expect(mocks.send).not.toHaveBeenCalled();
     expect(mocks.addMessage).not.toHaveBeenCalled();
     expect(mocks.recordOutboundSmsUsage).not.toHaveBeenCalled();
     expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
   });
 });
-
 
 describe("voice fallback send boundary", () => {
   it("skips provider delivery when another handler owns the claim", async () => {
@@ -420,10 +417,12 @@ describe("voice fallback send boundary", () => {
     expect(claim.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.send.mock.invocationCallOrder[0],
     );
-    expect(mocks.send).toHaveBeenCalledWith(expect.any(Object), {
-      maxRetries: 0,
-      timeout: 10000,
-    });
+    expect(mocks.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        purpose: "missed_call",
+        idempotencyKey: `missed-call:${CALL_SESSION_ID}`,
+      }),
+    );
   });
   it("does not consume a delivery claim if eligibility blocks texting", async () => {
     setRows("en");

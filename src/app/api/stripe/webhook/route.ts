@@ -102,6 +102,12 @@ async function processStripeEvent(
   switch (event.type) {
     case "checkout.session.completed": {
       const session = event.data.object as Stripe.Checkout.Session;
+      if (session.metadata?.review_sms_operation_id) {
+        const { synchronizeReviewSmsCheckout } =
+          await import("@/lib/stripe/reviewSms.server");
+        await synchronizeReviewSmsCheckout(session);
+        return null;
+      }
       const synced = await syncCheckoutSession(session);
       if (synced) {
         return finalizePaidCheckout(synced, "stripe_webhook");
@@ -110,6 +116,13 @@ async function processStripeEvent(
     }
 
     case "checkout.session.expired": {
+      const session = event.data.object as Stripe.Checkout.Session;
+      if (session.metadata?.review_sms_operation_id) {
+        const { synchronizeReviewSmsCheckout } =
+          await import("@/lib/stripe/reviewSms.server");
+        await synchronizeReviewSmsCheckout(session);
+        return null;
+      }
       await syncExpiredCheckoutSession(
         event.data.object as Stripe.Checkout.Session,
       );

@@ -8,7 +8,8 @@ import { getDashboardEntitledContext } from "@/lib/dashboard/context";
 import { requireWorkspacePageAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 export type ConversationWithContact = Conversation & {
-  contact: Pick<Contact, "id" | "name" | "phone_number" | "email">;
+  contact: Pick<Contact, "id" | "name" | "phone_number" | "email"> &
+    Partial<Pick<Contact, "provided_phone_number" | "source_channel">>;
   last_message_preview?: string;
 };
 
@@ -49,31 +50,35 @@ export default async function ConversationsPage({
         id,
         name,
         phone_number,
+        provided_phone_number,
+        source_channel,
         email
       )
-    `
+    `,
     )
     .eq("business_id", business.id)
     .order("last_message_at", { ascending: false });
 
   // Voice fragments are not standalone messages suitable for a list preview.
-  const conversationsWithPreviews: ConversationWithContact[] = await Promise.all(
-    (conversations ?? []).map(async (conv: ConversationWithContact) => {
-      if (conv.channel === "voice") return { ...conv, last_message_preview: "View call transcript" };
-      const { data: lastMessage } = await supabase
-        .from("messages")
-        .select("content")
-        .eq("conversation_id", conv.id)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .single();
+  const conversationsWithPreviews: ConversationWithContact[] =
+    await Promise.all(
+      (conversations ?? []).map(async (conv: ConversationWithContact) => {
+        if (conv.channel === "voice")
+          return { ...conv, last_message_preview: "View call transcript" };
+        const { data: lastMessage } = await supabase
+          .from("messages")
+          .select("content")
+          .eq("conversation_id", conv.id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .single();
 
-      return {
-        ...conv,
-        last_message_preview: lastMessage?.content ?? undefined,
-      };
-    })
-  );
+        return {
+          ...conv,
+          last_message_preview: lastMessage?.content ?? undefined,
+        };
+      }),
+    );
 
   return (
     <div className="h-[calc(100vh-4rem)]">

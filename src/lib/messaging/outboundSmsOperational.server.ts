@@ -15,7 +15,10 @@ export type OutboundSmsPurpose =
   | "ai_reply"
   | "mms_fallback"
   | "missed_call"
-  | "voice_followup";
+  | "voice_followup"
+  | "review_invitation"
+  | "review_reminder"
+  | "review_reply";
 
 export type OutboundSmsOperationalBlockReason = Extract<
   OperationalBlockReason,
@@ -31,6 +34,9 @@ const PURPOSE_SERVICES: Record<
   readonly OperationalService[]
 > = {
   manual_dashboard_send: ["texting"],
+  review_invitation: ["texting"],
+  review_reminder: ["texting"],
+  review_reply: ["texting"],
   missed_call: ["texting"],
   voice_followup: ["texting", "ai_replies"],
   ai_reply: ["texting", "ai_replies"],

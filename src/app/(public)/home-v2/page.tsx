@@ -1,3 +1,5 @@
+
+import { SETUP_FEE_CENTS } from "@/lib/stripe/config";
 import Link from "next/link";
 import Image from "next/image";
 import { notFound } from "next/navigation";
@@ -416,8 +418,8 @@ export default function HomeV2Page() {
               }
               subtitle={
                 chatOnlyPublicLaunchEnabled
-                  ? "No contracts. Chat Only has no setup fee; paid SMS activation includes a one-time $25 setup fee."
-                  : "No contracts. Paid SMS activation includes a one-time $25 setup fee."
+                  ? `No contracts. Chat Only has no setup fee; paid SMS activation includes a one-time $${SETUP_FEE_CENTS / 100} setup fee.`
+                  : `No contracts. Paid SMS activation includes a one-time $${SETUP_FEE_CENTS / 100} setup fee.`
               }
             />
             <div

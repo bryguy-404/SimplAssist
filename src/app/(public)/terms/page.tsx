@@ -3,6 +3,7 @@ import { LegalDocLayout } from "@/components/legal/LegalDocLayout";
 import { LegalSection } from "@/components/legal/legal-section";
 import { inlineLink } from "@/lib/theme-v2/theme";
 import { SUPPORT_EMAIL, SUPPORT_PATH } from "@/lib/support/constants";
+import { CUSTOMER_REVIEWS_PRICING_ENABLED, SETUP_FEE_CENTS } from "@/lib/stripe/config";
 
 const linkClass = `${inlineLink} underline-offset-2 hover:underline`;
 
@@ -112,10 +113,19 @@ export default function TermsPage() {
           and are non-refundable once registration has been submitted on your behalf.
         </p>
         <p className="mb-4">
-          The $25 setup fee is charged once per business. Upgrades show the amount due before
+          The ${SETUP_FEE_CENTS / 100} setup fee is charged for new SMS activation. Upgrades show the amount due before
           confirmation and take effect after payment succeeds. Scheduled downgrades take effect
           at renewal. Previously used messages and voice minutes are not reset by a plan change.
         </p>
+        {CUSTOMER_REVIEWS_PRICING_ENABLED && (
+          <p className="mb-4">
+            The activation fee includes one registration submission. It is refundable before
+            provider submission; afterward it covers the application attempt, including when
+            approval is declined. Any additional paid submission is quoted separately before
+            you accept it. SimplAssist covers corrections caused by its own mistakes.
+            An unchanged, applicable existing registration does not require another activation fee.
+          </p>
+        )}
         <p>
           Full Suite includes 2,500 SMS parts and 100 voice minutes per billing month. Long texts
           can use multiple parts. A mid-period upgrade receives a proportional voice allowance

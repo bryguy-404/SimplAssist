@@ -94,12 +94,11 @@ describe("findOrCreateContact", () => {
     expect(mocks.from).toHaveBeenCalledTimes(2);
   });
 
-  it("falls back to email only when the widget session is unknown", async () => {
-    const existing = contact({ session_id: "older-session" });
+  it("creates an isolated session even when the visitor supplies an existing customer's email", async () => {
+    const created = contact({ session_id: "session-2" });
     queueResults(
       { data: null, error: null },
-      { data: existing, error: null },
-      { data: existing, error: null }
+      { data: created, error: null }
     );
 
     await expect(
@@ -110,13 +109,21 @@ describe("findOrCreateContact", () => {
         "web_chat",
         "session-2"
       )
-    ).resolves.toEqual(existing);
+    ).resolves.toEqual(created);
 
     expect(chains[0].eq).toHaveBeenCalledWith("session_id", "session-2");
-    expect(chains[1].eq).toHaveBeenCalledWith(
-      "email",
-      "visitor@example.com"
-    );
+    expect(chains[1].insert).toHaveBeenCalledWith(expect.objectContaining({
+      session_id: "session-2", email: "visitor@example.com", business_id: BUSINESS_ID,
+    }));
+    for (const chain of chains) {
+      expect(chain.eq).not.toHaveBeenCalledWith("email", "visitor@example.com");
+    }
+  });
+
+  it("rejects a sessionless visitor before querying customer records", async () => {
+    await expect(findOrCreateContact(BUSINESS_ID, null, "visitor@example.com", "web_chat"))
+      .rejects.toThrow("widget session is required");
+    expect(mocks.from).not.toHaveBeenCalled();
   });
 
   it("converges parallel find-or-create callers on the contact that wins the unique insert", async () => {

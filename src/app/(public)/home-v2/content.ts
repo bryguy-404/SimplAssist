@@ -28,7 +28,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
+import { customerFeatures, SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
 import { FULL_SUITE_DESCRIPTION } from "@/lib/billing/fullSuitePresentation";
 
 /* ── Copied from /home ── */
@@ -93,19 +93,20 @@ export const steps = [
 export const plans = [
   {
     name: "SMS Only",
-    price: "$25",
+    price: `$${SUBSCRIPTION_PLANS.sms_only.price}`,
     description: "Missed-call texting for small teams that want fast coverage.",
     features: [
       "One local SimplAssist number",
       "Manual SMS inbox and replies",
       "Automatic missed-call text",
       "500 included SMS parts/month",
+      ...customerFeatures("sms_only"),
     ],
     highlighted: false,
   },
   {
     name: "SMS + Web Chat",
-    price: "$45",
+    price: `$${SUBSCRIPTION_PLANS.sms_and_chat.price}`,
     description: "Capture leads from calls and your website, then turn them into booked appointments.",
     features: [
       "Everything in SMS Only",
@@ -116,6 +117,7 @@ export const plans = [
       "Google Calendar connection",
       "AI appointment scheduling",
       "1,500 included SMS parts/month",
+      ...customerFeatures("sms_and_chat"),
     ],
     highlighted: true,
   },
@@ -130,7 +132,7 @@ export const plans = [
 
 export const chatOnlyPlan = {
   name: "Chat Only",
-  price: "$10",
+  price: `$${SUBSCRIPTION_PLANS.chat_only.price}`,
   description:
     "An AI website receptionist for teams that want web chat without texting.",
   features: [
@@ -143,6 +145,7 @@ export const chatOnlyPlan = {
     "AI appointment scheduling",
     "No phone number, SMS, MMS, or Telnyx activation",
     "No setup or SMS activation fee",
+    ...customerFeatures("chat_only"),
   ],
   highlighted: false,
 } as const;

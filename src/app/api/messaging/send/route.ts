@@ -1,241 +1,251 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { telnyx } from "@/lib/messaging/client";
+import { supabaseAdmin as db } from "@/lib/supabase/admin";
 import {
   getOutboundSendContext,
   smsBlockCode,
   smsBlockMessage,
 } from "@/lib/messaging/lookup";
 import {
-  preflightOutboundSms,
-  recordOutboundSmsUsage,
-} from "@/lib/billing/usage";
-import {
-  outboundSmsOperationalBlockMessage,
-  resolveOutboundSmsOperationalAccess,
-} from "@/lib/messaging/outboundSmsOperational.server";
-import { isOperationalControlsResolutionError } from "@/lib/account/operationalControls.server";
+  sendTenantSms,
+  TenantSmsSendError,
+} from "@/lib/messaging/tenantSmsSend.server";
 import {
   decideFeatureAccess,
-  isEntitlementResolutionError,
   resolveBusinessEntitlements,
 } from "@/lib/billing/entitlements";
-import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
+import {
+  requireFreshWorkspaceRouteAccess,
+  requireWorkspaceRouteAccess,
+} from "@/lib/customer/workspaceRouteResponse.server";
+import { customerWorkspaceEnabled } from "@/lib/billing/customerReviewsRollout.server";
+import { normalizePhone } from "@/lib/customers/domain";
 
-export async function POST(request: NextRequest) {
-  const workspaceGate = await requireWorkspaceRouteAccess();
-  if (!workspaceGate.ok) return workspaceGate.response;
-
+function normalizedPhone(value: string | null | undefined) {
   try {
-    const supabase = await createClient();
+    return normalizePhone(value ?? "");
+  } catch {
+    return null;
+  }
+}
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { to, message, businessId } = await request.json();
-
-    if (!to || !message || !businessId) {
+const UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+async function reviewReplyDestination(
+  businessId: string,
+  conversationId: string,
+) {
+  if (!customerWorkspaceEnabled(businessId)) return null;
+  const [access, hold] = await Promise.all([
+    db.rpc("has_review_sms_access", { p_business_id: businessId }),
+    db
+      .from("tenant_sms_human_holds")
+      .select("destination")
+      .eq("business_id", businessId)
+      .eq("conversation_id", conversationId)
+      .is("released_at", null)
+      .maybeSingle(),
+  ]);
+  if (access.error || hold.error)
+    throw new Error("SMS reply eligibility unavailable");
+  const destination = hold.data?.destination;
+  return access.data === true &&
+    typeof destination === "string" &&
+    /^\+[1-9]\d{7,14}$/.test(destination)
+    ? destination
+    : null;
+}
+export async function GET(request: NextRequest) {
+  const gate = await requireWorkspaceRouteAccess();
+  if (!gate.ok) return gate.response;
+  const id = request.nextUrl.searchParams.get("conversationId") ?? "";
+  if (!UUID.test(id)) return NextResponse.json({ reviewReplyAllowed: false });
+  try {
+    const destination = await reviewReplyDestination(
+      gate.access.business.id,
+      id,
+    );
+    return NextResponse.json(
+      {
+        reviewReplyAllowed: destination !== null,
+        destination,
+      },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  } catch {
+    return NextResponse.json(
+      { error: "Reply access unavailable" },
+      { status: 503 },
+    );
+  }
+}
+export async function POST(request: NextRequest) {
+  const gate = await requireFreshWorkspaceRouteAccess();
+  if (!gate.ok) return gate.response;
+  try {
+    const raw = await request.text();
+    if (raw.length > 20000)
+      return NextResponse.json({ error: "Message too long" }, { status: 400 });
+    const body = JSON.parse(raw) as Record<string, unknown>;
+    const { to, message, conversationId, requestId } = body;
+    const businessId = gate.access.business.id;
+    if (
+      typeof to !== "string" ||
+      !/^\+[1-9]\d{7,14}$/.test(to) ||
+      typeof message !== "string" ||
+      !message.trim() ||
+      message.length > 16000 ||
+      typeof conversationId !== "string" ||
+      !UUID.test(conversationId) ||
+      typeof requestId !== "string" ||
+      !UUID.test(requestId) ||
+      (body.businessId && body.businessId !== businessId)
+    )
       return NextResponse.json(
-        { error: "Missing required fields: to, message, businessId" },
-        { status: 400 }
+        { error: "Invalid message request" },
+        { status: 400 },
       );
-    }
-
-    const { data: business, error: businessLookupError } = await supabase
-      .from("businesses")
-      .select("id")
-      .eq("id", businessId)
-      .eq("owner_id", user.id)
+    const conversation = await db
+      .from("conversations")
+      .select(
+        "id,is_ai_handling,channel,contact:contacts(phone_number,provided_phone_number)",
+      )
+      .eq("id", conversationId)
+      .eq("business_id", businessId)
       .maybeSingle();
-
-    if (businessLookupError) {
-      console.error(
-        "[messaging/send] Business authorization lookup failed:",
-        businessLookupError
-      );
+    if (conversation.error) throw new Error("Conversation lookup failed");
+    const contact = conversation.data?.contact as unknown as {
+      phone_number: string | null;
+      provided_phone_number: string | null;
+    } | null;
+    if (
+      !conversation.data ||
+      conversation.data.channel !== "sms" ||
+      !contact ||
+      ![contact.phone_number, contact.provided_phone_number]
+        .map(normalizedPhone)
+        .includes(to)
+    )
       return NextResponse.json(
-        { error: "Unable to verify business access", retryable: true },
-        { status: 503 }
+        { error: "Conversation not found" },
+        { status: 404 },
       );
-    }
-
-    if (!business) {
+    if (conversation.data.is_ai_handling)
       return NextResponse.json(
-        { error: "Business not found or unauthorized" },
-        { status: 403 }
+        { error: "Switch this conversation to Human before replying." },
+        { status: 409 },
       );
-    }
-
-    let entitlements;
-    try {
-      entitlements = await resolveBusinessEntitlements(businessId);
-    } catch (error) {
-      if (isEntitlementResolutionError(error)) {
-        console.error("[messaging/send] Entitlement lookup failed:", error);
-        return NextResponse.json(
-          { error: "Unable to verify plan access", retryable: true },
-          { status: 503 }
-        );
-      }
-      throw error;
-    }
-
-    const access = decideFeatureAccess(entitlements, "manual_sms");
-    if (!access.allowed) {
+    const reviewDestination = await reviewReplyDestination(
+      businessId,
+      conversationId,
+    );
+    const review = reviewDestination !== null;
+    if (review && reviewDestination !== to)
+      return NextResponse.json(
+        { error: "Review reply destination changed" },
+        { status: 409 },
+      );
+    const access = decideFeatureAccess(
+      await resolveBusinessEntitlements(businessId),
+      "manual_sms",
+    );
+    if (!review && !access.allowed)
       return NextResponse.json(
         { error: "SMS sending is not available on the current plan" },
-        { status: 403 }
+        { status: 403 },
       );
-    }
-
-    const { data: phoneNumberRow, error: phoneLookupError } = await supabase
+    const phone = await db
       .from("phone_numbers")
       .select("phone_number")
       .eq("business_id", businessId)
       .eq("is_active", true)
       .maybeSingle();
-
-    if (phoneLookupError) {
-      console.error(
-        "[messaging/send] Active phone number lookup failed:",
-        phoneLookupError
-      );
+    if (phone.error) throw new Error("Sender lookup failed");
+    if (!phone.data)
       return NextResponse.json(
-        { error: "Unable to verify the sending number", retryable: true },
-        { status: 503 }
+        { error: "No active phone number found" },
+        { status: 404 },
       );
-    }
-
-    if (!phoneNumberRow) {
-      return NextResponse.json(
-        { error: "No active phone number found for this business" },
-        { status: 404 }
-      );
-    }
-
-    const sendContext = await getOutboundSendContext(
-      phoneNumberRow.phone_number
-    );
-
-    if (!sendContext.smsReady) {
+    const send = await getOutboundSendContext(phone.data.phone_number);
+    if (
+      !send.smsReady ||
+      !send.messagingProfileId ||
+      send.businessId !== businessId
+    )
       return NextResponse.json(
         {
-          error: smsBlockCode(sendContext.blockReason),
-          message: smsBlockMessage(sendContext.blockReason),
-          assignmentStatus: sendContext.assignmentStatus,
-          assignmentFailureReason: sendContext.assignmentFailureReason,
+          error: smsBlockCode(send.blockReason),
+          message: smsBlockMessage(send.blockReason),
         },
-        { status: 403 }
+        { status: 403 },
       );
-    }
-
-    if (!sendContext.messagingProfileId) {
-      return NextResponse.json(
-        { error: "Messaging profile not configured for this business" },
-        { status: 500 }
-      );
-    }
-
-    let usage: Awaited<ReturnType<typeof preflightOutboundSms>>;
-    try {
-      usage = await preflightOutboundSms({
-        businessId,
-        text: message,
-        purpose: "manual_dashboard_send",
-      });
-    } catch (error) {
-      if (isOperationalControlsResolutionError(error)) {
-        console.error(
-          "[messaging/send] Preflight operational-control lookup failed:",
-          error
-        );
-        return serviceStateUnavailableResponse();
-      }
-      throw error;
-    }
-    if (!usage.allowed) {
-      return NextResponse.json(
-        { error: usage.reason, message: usage.message },
-        { status: 403 }
-      );
-    }
-
-    let operationalAccess: Awaited<
-      ReturnType<typeof resolveOutboundSmsOperationalAccess>
-    >;
-    try {
-      operationalAccess = await resolveOutboundSmsOperationalAccess(
-        businessId,
-        "manual_dashboard_send"
-      );
-    } catch (error) {
-      if (isOperationalControlsResolutionError(error)) {
-        console.error(
-          "[messaging/send] Final operational-control lookup failed:",
-          error
-        );
-        return serviceStateUnavailableResponse();
-      }
-      throw error;
-    }
-    if (!operationalAccess.allowed) {
-      return NextResponse.json(
-        {
-          error: operationalAccess.reason,
-          message: outboundSmsOperationalBlockMessage(
-            operationalAccess.reason
-          ),
-        },
-        { status: 403 }
-      );
-    }
-
-    const result = await telnyx.messages.send({
+    const accepted = await sendTenantSms({
+      businessId,
+      from: phone.data.phone_number,
       to,
-      from: phoneNumberRow.phone_number,
       text: message,
-      messaging_profile_id: sendContext.messagingProfileId,
-      type: "SMS",
+      messagingProfileId: send.messagingProfileId,
+      purpose: review ? "review_reply" : "manual_dashboard_send",
+      idempotencyKey: `dashboard:${requestId}`,
+      conversationId,
     });
-
-    try {
-      await recordOutboundSmsUsage({
-        businessId,
-        text: message,
-        source: "manual_dashboard_send",
-        providerMessageId: result.data?.id ?? null,
-        idempotencyKey: result.data?.id
-          ? `outbound:manual:${result.data.id}`
-          : undefined,
-        metadata: { to, from: phoneNumberRow.phone_number },
+    // The server owns a retry-stable transcript key. Browser retries cannot
+    // produce a second provider send or a duplicate message bubble.
+    const key = `tenant-sms:${accepted.reservationId}`;
+    const saved = await db.from("messages").insert({
+      conversation_id: conversationId,
+      business_id: businessId,
+      role: "human_agent",
+      content: message,
+      channel: "sms",
+      provider_event_id: key,
+    });
+    const transcript = await db
+      .from("messages")
+      .select("*")
+      .eq("business_id", businessId)
+      .eq("provider_event_id", key)
+      .maybeSingle();
+    if (
+      (saved.error && saved.error.code !== "23505") ||
+      transcript.error ||
+      !transcript.data
+    )
+      return NextResponse.json({
+        success: true,
+        id: accepted.data.id,
+        transcriptPending: true,
+        message:
+          "The text was accepted, but its transcript is still being saved. Do not resend it.",
       });
-    } catch (error) {
-      // Telnyx has already accepted this message. Returning a retryable error
-      // would invite the dashboard client to send the same SMS twice.
-      console.error(
-        "[messaging/send] SMS sent but outbound usage persistence failed:",
-        error
-      );
-    }
-
-    return NextResponse.json({ success: true, id: result.data?.id });
+    await db
+      .from("conversations")
+      .update({ last_message_at: transcript.data.created_at })
+      .eq("id", conversationId)
+      .eq("business_id", businessId);
+    return NextResponse.json({
+      success: true,
+      id: accepted.data.id,
+      messageRecord: transcript.data,
+    });
   } catch (error) {
-    console.error("Error sending SMS:", error);
+    if (error instanceof TenantSmsSendError)
+      return NextResponse.json(
+        { error: error.reason, message: error.message, outcome: error.outcome },
+        { status: error.outcome === "uncertain" ? 409 : 403 },
+      );
+    if (error instanceof SyntaxError)
+      return NextResponse.json(
+        { error: "Invalid message request" },
+        { status: 400 },
+      );
+    console.error("[messaging/send] SMS request failed", error);
     return NextResponse.json(
-      { error: "Failed to send SMS" },
-      { status: 500 }
+      {
+        error: "service_state_unavailable",
+        message:
+          "SMS status is unavailable. Retry this same request to check its status.",
+      },
+      { status: 503 },
     );
   }
-}
-
-function serviceStateUnavailableResponse(): NextResponse {
-  return NextResponse.json(
-    { error: "service_state_unavailable", retryable: true },
-    { status: 503 }
-  );
 }

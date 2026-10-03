@@ -5,6 +5,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export type TelnyxRemoteMutationContext =
   | "release_worker"
+  | "review_sms_release"
   | "rejection_recovery";
 
 export type TelnyxRemoteMutationOperation =
@@ -171,7 +172,7 @@ function parseAuthorizationResponse(
     response.authorized !== true ||
     typeof response.business_id !== "string" ||
     typeof response.context !== "string" ||
-    !["release_worker", "rejection_recovery"].includes(response.context) ||
+    !["release_worker", "rejection_recovery", "review_sms_release"].includes(response.context) ||
     typeof response.operation !== "string" ||
     ![
       "release_phone_number",
@@ -207,7 +208,7 @@ async function authorizeTelnyxRemoteMutation(
   let rpcError: unknown = null;
   try {
     const result = await supabaseAdmin.rpc(
-      "authorize_telnyx_remote_mutation",
+      scope.context === "review_sms_release" ? "authorize_review_sms_remote_mutation" : "authorize_telnyx_remote_mutation",
       {
         p_business_id: scope.businessId,
         p_context: scope.context,

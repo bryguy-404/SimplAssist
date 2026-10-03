@@ -12,6 +12,7 @@ import { getWorkspaceAccess } from "@/lib/customer/workspaceAccess.server";
 import { workspacePageRedirectTarget } from "@/lib/customer/workspaceRouteResponse.server";
 import { AccountServiceStatusBanner } from "@/components/account/AccountServiceStatusBanner";
 import { getOnboardingStateForOwnerReadOnly } from "@/lib/onboarding/state";
+import { isEmailReviewsEnabledForBusiness } from "@/lib/reviews/config";
 
 export const metadata = PRIVATE_ROUTE_METADATA;
 
@@ -120,6 +121,7 @@ export default async function DashboardLayout({
         primaryGoal={business.primary_goal}
         canUseCalendar={canUseFeature(entitlements, "calendar")}
         canUseWidget={canUseFeature(entitlements, "web_chat")}
+        canUseReviews={entitlements.active && isEmailReviewsEnabledForBusiness(business.id)}
         isPartnerManagedBilling={isPartnerManagedBilling}
       />
       <main className="flex-1 bg-transparent px-4 pt-[4.75rem] pb-6 lg:pt-5 lg:pr-6 lg:pb-6 lg:pl-0 relative z-[1] min-w-0 lg:min-h-0 lg:overflow-y-auto">

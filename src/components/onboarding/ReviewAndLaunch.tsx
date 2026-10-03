@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useBrand } from "@/components/branding/BrandProvider";
 import { PlanSelectionOption } from "@/components/onboarding/PlanSelectionOption";
 import { getUsStateName } from '@/lib/usStates';
-import { SETUP_FEE_CENTS } from '@/lib/stripe/config';
+import { SETUP_FEE_CENTS, SUBSCRIPTION_PLANS } from '@/lib/stripe/config';
 import {
   availablePlanOrFallback,
   CUSTOMER_VISIBLE_PLAN_ORDER,
@@ -486,7 +486,7 @@ export default function ReviewAndLaunch({
             ) : isChatOnly ? (
               <div className={cn("rounded-[16px] p-3 text-xs", statusNeutral)}>
                 <p className="font-medium text-stone-800 dark:text-[#f5f5f5]">
-                  $10 due today
+                  ${SUBSCRIPTION_PLANS.chat_only.price} due today
                 </p>
                 <p className="mt-1 leading-relaxed">
                   Your website widget, conversation inbox, AI customization,
@@ -782,7 +782,7 @@ export function primaryLaunchButtonLabel(args: {
     return isPaidSubscription ? "Checking setup..." : "Opening checkout...";
   }
   if (isChatOnly && isPaidSubscription) return "Finish Chat Only setup";
-  if (isChatOnly) return "Pay $10 & launch web chat";
+  if (isChatOnly) return `Pay $${SUBSCRIPTION_PLANS.chat_only.price} & launch web chat`;
   if (!data.phoneNumber) return "Choose number to submit";
   if (isPartnerManaged) return "Submit SMS registration";
   return isPaidSubscription ? "Continue SMS setup" : "Pay & submit SMS registration";

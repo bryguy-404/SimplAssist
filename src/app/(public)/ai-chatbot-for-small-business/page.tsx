@@ -1,3 +1,5 @@
+
+import { SETUP_FEE_CENTS } from "@/lib/stripe/config";
 import Link from "next/link";
 import { CalendarCheck, Check, MessageCircle } from "lucide-react";
 import { FeatureFaqs, FeaturePage, FeatureSteps, featureHeading, featureMetadata, sectionHeading } from "@/components/marketing/feature-page";
@@ -16,7 +18,7 @@ function content() {
   return {
     chatOnly, plan,
     title: `AI Chatbot for Small Business — $${plan.price}/mo | SimplAssist`,
-    description: `An AI chatbot for your small business website. Answer questions, capture leads, and book with Google Calendar. ${chatOnly ? "$10/month with no setup fee." : "Included in SMS + Web Chat."}`,
+    description: `An AI chatbot for your small business website. Answer questions, capture leads, and book with Google Calendar. ${chatOnly ? `$${SUBSCRIPTION_PLANS.chat_only.price}/month with no setup fee.` : "Included in SMS + Web Chat."}`,
   };
 }
 
@@ -32,7 +34,7 @@ export default function WebsiteChatPage() {
     { question: "What does a chatbot do for a small business website?", answer: "It lets visitors ask questions in a chat window instead of waiting for an email or phone reply. SimplAssist uses your saved business information to explain services, capture contact details, and help visitors book an appointment when Google Calendar booking is connected and enabled." },
     { question: "How does SimplAssist learn about my business?", answer: "You provide your business profile, services, hours, FAQs, and instructions. You can customize the assistant's tone and answers. Keep that information current and test the chat with real customer questions before adding it to your website." },
     { question: "Can the chatbot book appointments in Google Calendar?", answer: "Yes. With Google Calendar connected and appointment booking enabled, SimplAssist can check availability and help a visitor book a suitable time during the conversation. Your calendar connection and booking settings control when appointments are available." },
-    { question: "How much does the website chatbot cost?", answer: chatOnly ? `Chat Only costs $${plan.price}/month and includes ${replies} completed AI replies each month, lead capture, a conversation inbox, AI customization, and Google Calendar booking. There is no setup fee. Phone answering and text messages are separate plan features.` : `Website chat is included in SMS + Web Chat for $${plan.price}/month. That plan also includes AI text conversations and ${plan.includedSmsParts.toLocaleString("en-US")} SMS parts per month. Paid SMS activation has a one-time $25 fee.` },
+    { question: "How much does the website chatbot cost?", answer: chatOnly ? `Chat Only costs $${plan.price}/month and includes ${replies} completed AI replies each month, lead capture, a conversation inbox, AI customization, and Google Calendar booking. There is no setup fee. Phone answering and text messages are separate plan features.` : `Website chat is included in SMS + Web Chat for $${plan.price}/month. That plan also includes AI text conversations and ${plan.includedSmsParts.toLocaleString("en-US")} SMS parts per month. Paid SMS activation has a one-time $${SETUP_FEE_CENTS / 100} fee.` },
     ...(chatOnly ? [{ question: "What counts toward the monthly AI reply allowance?", answer: `Each completed AI reply in website chat counts toward the ${replies} included monthly replies. A conversation can contain several replies, so the allowance is not the same as ${replies} visitors or conversations. You can review your usage in the dashboard.` }] : []),
     { question: "Is website chat the same as phone answering?", answer: "Website chat is a typed conversation in a widget on your site. SimplAssist Voice is a spoken conversation over the phone and is included with Full Suite. SMS plans also provide missed-call text back. Choose the channels your customers use." },
   ];
@@ -47,10 +49,10 @@ export default function WebsiteChatPage() {
           <p className={`mt-6 max-w-xl text-lg leading-8 ${body}`}>Give website visitors a helpful answer while you&apos;re busy serving customers. SimplAssist answers questions about your business, captures leads, and helps book appointments through Google Calendar.</p>
           <p className={`mt-5 text-xl font-bold ${ink}`}>${plan.price}/month{chatOnly ? ". No setup fee." : " with SMS + Web Chat."}</p>
           <div className="mt-7 flex flex-wrap gap-3">
-            <Link href="/signup" className={btnPrimary}>{chatOnly ? "Start with $10 Webchat" : "Get Started"}</Link>
+            <Link href="/signup" className={btnPrimary}>{chatOnly ? `Start with $${SUBSCRIPTION_PLANS.chat_only.price} Webchat` : "Get Started"}</Link>
             <a href="#try-webchat" className={btnSecondary}>Try the live chat</a>
           </div>
-          <p className={`mt-4 text-sm leading-6 ${body}`}>{chatOnly ? `${replies} completed AI replies per month. No phone number or texting setup required.` : "One-time $25 SMS activation fee. Texting requires carrier approval."}</p>
+          <p className={`mt-4 text-sm leading-6 ${body}`}>{chatOnly ? `${replies} completed AI replies per month. No phone number or texting setup required.` : `One-time $${SETUP_FEE_CENTS / 100} SMS activation fee. Texting requires carrier approval.`}</p>
         </div>
         <figure className={`${card} p-6 sm:p-8`}>
           <div className="mb-6 flex items-center gap-3 border-b border-stone-200 pb-5 dark:border-white/10">

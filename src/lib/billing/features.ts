@@ -42,7 +42,8 @@ type PlanCapabilityVector = Readonly<Record<FeatureKey, boolean>>;
  * requires a deliberate capability decision instead of inheriting access from
  * a numeric rank.
  *
- * Reserved future feature identifiers remain stable, but grant no access until
+ * Reviews are a shared package capability; their rollout and channel-specific
+ * admission checks still apply. Reserved future identifiers grant no access until
  * their implementations ship. Purchase eligibility cannot promise a capability
  * merely because its future plan has already been chosen.
  */
@@ -62,7 +63,7 @@ export const PLAN_CAPABILITY_MATRIX = {
     conversion_reporting: false,
     weekly_summary: false,
     lead_alerts: false,
-    review_requests: false,
+    review_requests: true,
     follow_up_automation: false,
     priority_support: false,
     ai_voice_answering: false,
@@ -82,7 +83,7 @@ export const PLAN_CAPABILITY_MATRIX = {
     conversion_reporting: false,
     weekly_summary: false,
     lead_alerts: false,
-    review_requests: false,
+    review_requests: true,
     follow_up_automation: false,
     priority_support: false,
     ai_voice_answering: false,
@@ -102,7 +103,7 @@ export const PLAN_CAPABILITY_MATRIX = {
     conversion_reporting: false,
     weekly_summary: false,
     lead_alerts: false,
-    review_requests: false,
+    review_requests: true,
     follow_up_automation: false,
     priority_support: false,
     ai_voice_answering: false,
@@ -122,7 +123,7 @@ export const PLAN_CAPABILITY_MATRIX = {
     conversion_reporting: false,
     weekly_summary: false,
     lead_alerts: false,
-    review_requests: false,
+    review_requests: true,
     follow_up_automation: false,
     priority_support: false,
     ai_voice_answering: true,
@@ -154,7 +155,7 @@ export const FEATURE_MINIMUM_PLAN = {
   conversion_reporting: "full",
   weekly_summary: "full",
   lead_alerts: "full",
-  review_requests: "full",
+  review_requests: "chat_only",
   follow_up_automation: "full",
   priority_support: "full",
   ai_voice_answering: "full",

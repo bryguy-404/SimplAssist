@@ -6,11 +6,19 @@ const mocks = vi.hoisted(() => ({
   retrieve: vi.fn(),
   prepareVoice: vi.fn(),
   upgrade: vi.fn(),
+  reviewSms: vi.fn(),
 }));
 
+vi.mock("./reviewSms.server", () => ({
+  reconcileReviewSmsSubscription: mocks.reviewSms,
+}));
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/billing/textingUpgradeStore.server", () => ({ getTextingUpgrade: mocks.upgrade }));
-vi.mock("./voiceSubscription.server", () => ({ prepareVoiceSubscription: mocks.prepareVoice }));
+vi.mock("@/lib/billing/textingUpgradeStore.server", () => ({
+  getTextingUpgrade: mocks.upgrade,
+}));
+vi.mock("./voiceSubscription.server", () => ({
+  prepareVoiceSubscription: mocks.prepareVoice,
+}));
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { rpc: mocks.rpc },
 }));
@@ -107,7 +115,12 @@ function chatOnlySubscription(
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.upgrade.mockResolvedValue(null);
-  mocks.prepareVoice.mockImplementation(async (subscription) => ({ subscription, revision: null, observedAt: null }));
+  mocks.reviewSms.mockResolvedValue(undefined);
+  mocks.prepareVoice.mockImplementation(async (subscription) => ({
+    subscription,
+    revision: null,
+    observedAt: null,
+  }));
   vi.stubEnv("STRIPE_PRICE_SMS_ONLY", "price_sms_only_test");
   vi.stubEnv("STRIPE_PRICE_SMS_AND_CHAT", "price_sms_chat_test");
   vi.stubEnv("STRIPE_PRICE_FULL", "price_full_test");
@@ -121,34 +134,88 @@ afterEach(() => {
 
 describe("syncStripeSubscription", () => {
   it("ignores a noncanonical commercial source without any legacy subscription write", async () => {
-    mocks.prepareVoice.mockResolvedValue({ subscription: subscription(), revision: null, observedAt: null, ignored: true });
+    mocks.prepareVoice.mockResolvedValue({
+      subscription: subscription(),
+      revision: null,
+      observedAt: null,
+      ignored: true,
+    });
     await expect(syncStripeSubscription(subscription())).resolves.toBeNull();
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
-  it.each([{ unit_amount: 6600 }, { currency: "cad" }, { recurring: { interval: "year", interval_count: 1, usage_type: "licensed" } }])("rejects mismatched commercial Full terms %#", async (overrides) => {
-    const fresh = subscription({ items: { data: [{ quantity: 1, price: {
-      id: "price_full_test", currency: "usd", unit_amount: 6500, type: "recurring",
-      recurring: { interval: "month", interval_count: 1, usage_type: "licensed" }, ...overrides,
-    }, current_period_start: 1_700_000_000, current_period_end: 1_702_592_000 }] } });
-    mocks.prepareVoice.mockResolvedValue({ subscription: fresh, revision: 1, observedAt: "2026-09-17T00:00:00Z" });
-    await expect(syncStripeSubscription(fresh)).rejects.toThrow("voice_billing_package_mismatch");
+  it.each([
+    { unit_amount: 6600 },
+    { currency: "cad" },
+    {
+      recurring: {
+        interval: "year",
+        interval_count: 1,
+        usage_type: "licensed",
+      },
+    },
+  ])("rejects mismatched commercial Full terms %#", async (overrides) => {
+    const fresh = subscription({
+      items: {
+        data: [
+          {
+            quantity: 1,
+            price: {
+              id: "price_full_test",
+              currency: "usd",
+              unit_amount: 6500,
+              type: "recurring",
+              recurring: {
+                interval: "month",
+                interval_count: 1,
+                usage_type: "licensed",
+              },
+              ...overrides,
+            },
+            current_period_start: 1_700_000_000,
+            current_period_end: 1_702_592_000,
+          },
+        ],
+      },
+    });
+    mocks.prepareVoice.mockResolvedValue({
+      subscription: fresh,
+      revision: 1,
+      observedAt: "2026-09-17T00:00:00Z",
+    });
+    await expect(syncStripeSubscription(fresh)).rejects.toThrow(
+      "voice_billing_package_mismatch",
+    );
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
   it("atomically applies commercial voice with the fresh state and reconciliation version", async () => {
     const fresh = subscription({ status: "past_due" });
-    mocks.prepareVoice.mockResolvedValue({ subscription: fresh, revision: 12, observedAt: "2026-09-17T00:00:00Z" });
+    mocks.prepareVoice.mockResolvedValue({
+      subscription: fresh,
+      revision: 12,
+      observedAt: "2026-09-17T00:00:00Z",
+    });
     mocks.rpc.mockResolvedValue({ data: true, error: null });
     await syncStripeSubscription(subscription());
-    expect(mocks.rpc).toHaveBeenCalledWith("sync_voice_stripe_subscription", expect.objectContaining({
-      p_revision: 12, p_effective_at: "2026-09-17T00:00:00Z", p_status: "past_due", p_stripe_subscription_id: SUBSCRIPTION_ID,
-    }));
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "sync_voice_stripe_subscription",
+      expect.objectContaining({
+        p_revision: 12,
+        p_effective_at: "2026-09-17T00:00:00Z",
+        p_status: "past_due",
+        p_stripe_subscription_id: SUBSCRIPTION_ID,
+      }),
+    );
     expect(mocks.rpc).toHaveBeenCalledTimes(1);
   });
 
   it("does not retry a stale voice version through the unguarded legacy writer", async () => {
-    mocks.prepareVoice.mockResolvedValue({ subscription: subscription(), revision: 11, observedAt: "2026-09-17T00:00:00Z" });
+    mocks.prepareVoice.mockResolvedValue({
+      subscription: subscription(),
+      revision: 11,
+      observedAt: "2026-09-17T00:00:00Z",
+    });
     mocks.rpc.mockResolvedValue({ data: false, error: null });
     await expect(syncStripeSubscription(subscription())).resolves.toBeNull();
     expect(mocks.rpc).toHaveBeenCalledTimes(1);
@@ -156,8 +223,12 @@ describe("syncStripeSubscription", () => {
   });
 
   it("propagates freshness failures so the signed billing event remains retryable", async () => {
-    mocks.prepareVoice.mockRejectedValue(new Error("voice_billing_reconciliation_unavailable"));
-    await expect(syncStripeSubscription(subscription())).rejects.toThrow("voice_billing_reconciliation_unavailable");
+    mocks.prepareVoice.mockRejectedValue(
+      new Error("voice_billing_reconciliation_unavailable"),
+    );
+    await expect(syncStripeSubscription(subscription())).rejects.toThrow(
+      "voice_billing_reconciliation_unavailable",
+    );
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
@@ -393,7 +464,7 @@ describe("syncStripeSubscription", () => {
           },
         ]),
       ),
-    ).rejects.toThrow("chat_only_stripe_price_invalid");
+    ).rejects.toThrow("subscription_items_unsupported");
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
@@ -402,7 +473,7 @@ describe("syncStripeSubscription", () => {
     chatSubscription.items.has_more = true;
 
     await expect(syncStripeSubscription(chatSubscription)).rejects.toThrow(
-      "chat_only_stripe_price_invalid",
+      "subscription_items_unsupported",
     );
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
@@ -879,5 +950,38 @@ describe("syncExpiredCheckoutSession", () => {
       /invalid single-flight binding/,
     );
     expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+});
+
+describe("review addon base-plan synchronization", () => {
+  it("synchronizes Chat from the approved base when addon is first and reconciles the separate grant", async () => {
+    vi.stubEnv("STRIPE_PRICE_REVIEW_SMS", "price_reviews_test");
+    mocks.rpc.mockResolvedValue({ data: true, error: null });
+    const addon = {
+      id: "si_reviews",
+      quantity: 1,
+      current_period_start: 1_700_000_000,
+      current_period_end: 1_702_592_000,
+      price: approvedChatOnlyPrice({
+        id: "price_reviews_test",
+        unit_amount: 2000,
+      }),
+    };
+    const event = chatOnlySubscription({ id: "si_chat" }, [addon]);
+    event.items.data.reverse();
+    await expect(syncStripeSubscription(event)).resolves.toMatchObject({
+      businessId: BUSINESS_ID,
+      plan: "chat_only",
+    });
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "sync_chat_only_subscription_from_attempt",
+      expect.objectContaining({
+        p_stripe_price_id: "price_chat_only_test",
+        p_business_id: BUSINESS_ID,
+      }),
+    );
+    expect(mocks.reviewSms).toHaveBeenCalledOnce();
+    expect(mocks.reviewSms.mock.calls[0][0].items.data[0].id).toBe("si_chat");
+    expect(event.items.data[0].id).toBe("si_reviews");
   });
 });

@@ -263,7 +263,7 @@ export async function archiveAndClearRejectedBrand(
   }
 }
 
-export async function registerBrand(businessId: string): Promise<void> {
+export async function registerBrand(businessId: string, options?: { beforePaidSubmit: () => Promise<void> }): Promise<void> {
   const { data: business, error: readError } = await supabaseAdmin
     .from("businesses")
     .select(
@@ -364,6 +364,7 @@ export async function registerBrand(businessId: string): Promise<void> {
     // webhook can land after paid launch's initial read; never let that stale
     // snapshot create another paid brand.
     await assertNoCarrierRejectionBeforeBrandCreate(businessId);
+    await options?.beforePaidSubmit();
 
     const response = await telnyx.messaging10dlc.brand.create(
       {

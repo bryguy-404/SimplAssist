@@ -1,0 +1,10 @@
+[build]
+builder = "NIXPACKS"
+buildCommand = "npx tsc --project tsconfig.review-worker.json --noEmit"
+
+[deploy]
+startCommand = "npx tsx scripts/review-worker.ts"
+healthcheckPath = "/health"
+healthcheckTimeout = 120
+restartPolicyType = "ALWAYS"
+numReplicas = 1

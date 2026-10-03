@@ -1,7 +1,8 @@
-import { reconcileBookingSummarySends } from '@/lib/booking/summarySend.server';
-import { reconcileBookingNotifications } from '@/lib/booking/notifications.server';
-import { isBookingConfirmationEnabled } from '@/lib/booking/draft';
-import { reconcileBookingDrafts } from '@/lib/booking/recovery.server';
+import { reconcileTenantSmsSends } from "@/lib/messaging/tenantSmsSend.server";
+import { reconcileBookingSummarySends } from "@/lib/booking/summarySend.server";
+import { reconcileBookingNotifications } from "@/lib/booking/notifications.server";
+import { isBookingConfirmationEnabled } from "@/lib/booking/draft";
+import { reconcileBookingDrafts } from "@/lib/booking/recovery.server";
 import { recoverVoiceActions } from "@/lib/voice/actionRecovery.server";
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
@@ -22,12 +23,17 @@ export async function POST(request: NextRequest) {
     return new NextResponse("Not found", { status: 404 });
   const deps = pilotRoutingDependencies();
   try {
+    await reconcileTenantSmsSends();
     await maintainVoicePilot(deps.db, deps.telnyx, (id) =>
       drainFallback(deps, id),
     );
     if (process.env.VOICE_ACTIONS_ROLLOUT === "true")
       await recoverVoiceActions();
-    if (isBookingConfirmationEnabled()) { await reconcileBookingDrafts(); await reconcileBookingNotifications(); await reconcileBookingSummarySends(); }
+    if (isBookingConfirmationEnabled()) {
+      await reconcileBookingDrafts();
+      await reconcileBookingNotifications();
+      await reconcileBookingSummarySends();
+    }
     return NextResponse.json(
       { ok: true },
       { headers: { "Cache-Control": "no-store" } },

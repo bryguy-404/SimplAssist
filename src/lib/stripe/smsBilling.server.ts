@@ -5,7 +5,7 @@ import { z } from "zod";
 import { stripe } from "./client";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { isPlanAvailable } from "@/lib/billing/planAvailability";
-import { SUBSCRIPTION_PLANS, planFromStripePriceId, stripePriceIdForPlan } from "./config";
+import { SETUP_FEE_CENTS, SUBSCRIPTION_PLANS, planFromStripePriceId, stripePriceIdForPlan } from "./config";
 import type { BillingChangeView, SmsPlan } from "./smsBilling";
 import { SmsBillingError } from "./smsBilling";
 export { SmsBillingError } from "./smsBilling";
@@ -136,7 +136,7 @@ export async function createSmsCheckout(args: { businessId: string; plan: SmsPla
     assertSmsPrice(await stripe.prices.retrieve(args.priceId), args.plan, args.priceId);
     if (op.setup_fee_price_id) {
       const fee = await stripe.prices.retrieve(op.setup_fee_price_id);
-      if (!fee.active || fee.currency !== "usd" || fee.unit_amount !== 2500 || fee.type !== "one_time") throw new SmsBillingError("sms_billing_price_unavailable", 503);
+      if (!fee.active || fee.currency !== "usd" || fee.unit_amount !== SETUP_FEE_CENTS || fee.type !== "one_time") throw new SmsBillingError("sms_billing_price_unavailable", 503);
     }
   }
   op = await rpcOperation("confirm_sms_billing_operation", { p_operation_id: op.id, p_owner_id: ownerId, p_source_fingerprint: op.source_fingerprint });

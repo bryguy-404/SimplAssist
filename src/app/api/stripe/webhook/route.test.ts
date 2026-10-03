@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   syncExpiredCheckoutSession: vi.fn(),
   syncStripeSubscription: vi.fn(),
   finalizePaidCheckout: vi.fn(),
+  synchronizeReviewSmsCheckout: vi.fn(),
 }));
 
 vi.mock("@/lib/stripe/client", () => ({
@@ -35,6 +36,9 @@ vi.mock("@/lib/stripe/subscriptionSync", () => ({
 }));
 vi.mock("@/lib/billing/finalizePaidCheckout.server", () => ({
   finalizePaidCheckout: mocks.finalizePaidCheckout,
+}));
+vi.mock("@/lib/stripe/reviewSms.server", () => ({
+  synchronizeReviewSmsCheckout: mocks.synchronizeReviewSmsCheckout,
 }));
 
 import { POST as stripeWebhook } from "./route";
@@ -72,6 +76,7 @@ function request(withSignature = true) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.synchronizeReviewSmsCheckout.mockReset().mockResolvedValue(true);
   vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_unit_only");
   vi.stubEnv("STRIPE_WEBHOOK_SECRET", "whsec_test_only");
   vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -112,6 +117,136 @@ afterEach(() => {
 });
 
 describe("POST /api/stripe/webhook", () => {
+  describe("review SMS activation Checkout events", () => {
+    const checkoutTypes = [
+      "checkout.session.completed",
+      "checkout.session.expired",
+    ] as const;
+    const session = {
+      id: "cs_test_review_activation",
+      mode: "payment",
+      customer: CUSTOMER_ID,
+      metadata: {
+        review_sms_operation_id: "operation_review_activation",
+        business_id: BUSINESS_ID,
+      },
+    };
+
+    it.each(checkoutTypes)(
+      "routes %s exclusively to the review activation synchronizer",
+      async (type) => {
+        mocks.constructEvent.mockReturnValue(event(type, session));
+
+        const response = await stripeWebhook(request());
+
+        expect(response.status).toBe(200);
+        await expect(response.json()).resolves.toEqual({ received: true });
+        expect(mocks.synchronizeReviewSmsCheckout).toHaveBeenCalledExactlyOnceWith(
+          session,
+        );
+        expect(mocks.syncCheckoutSession).not.toHaveBeenCalled();
+        expect(mocks.syncExpiredCheckoutSession).not.toHaveBeenCalled();
+        expect(mocks.finalizePaidCheckout).not.toHaveBeenCalled();
+        expect(mocks.update).toHaveBeenCalledWith({
+          processed_at: expect.any(String),
+          processing_error: null,
+        });
+      },
+    );
+
+    it.each(checkoutTypes)(
+      "does not reinterpret an unmatched review %s as a base purchase",
+      async (type) => {
+        mocks.constructEvent.mockReturnValue(event(type, session));
+        mocks.synchronizeReviewSmsCheckout.mockResolvedValueOnce(false);
+
+        const response = await stripeWebhook(request());
+
+        expect(response.status).toBe(200);
+        expect(mocks.synchronizeReviewSmsCheckout).toHaveBeenCalledOnce();
+        expect(mocks.syncCheckoutSession).not.toHaveBeenCalled();
+        expect(mocks.syncExpiredCheckoutSession).not.toHaveBeenCalled();
+        expect(mocks.finalizePaidCheckout).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(checkoutTypes)(
+      "keeps a failed review %s retryable without launching base services",
+      async (type) => {
+        mocks.constructEvent.mockReturnValue(event(type, session));
+        mocks.synchronizeReviewSmsCheckout.mockRejectedValueOnce(
+          new Error("review activation state unavailable"),
+        );
+
+        const response = await stripeWebhook(request());
+
+        expect(response.status).toBe(500);
+        await expect(response.json()).resolves.toEqual({
+          error: "Webhook handler failed",
+        });
+        expect(mocks.update).toHaveBeenCalledWith({
+          processing_error: "review activation state unavailable",
+        });
+        expect(mocks.update).not.toHaveBeenCalledWith(
+          expect.objectContaining({ processed_at: expect.any(String) }),
+        );
+        expect(mocks.is).toHaveBeenCalledWith("processed_at", null);
+        expect(mocks.syncCheckoutSession).not.toHaveBeenCalled();
+        expect(mocks.syncExpiredCheckoutSession).not.toHaveBeenCalled();
+        expect(mocks.finalizePaidCheckout).not.toHaveBeenCalled();
+      },
+    );
+
+    it("suppresses a duplicate review activation before billing reconciliation", async () => {
+      mocks.constructEvent.mockReturnValue(
+        event("checkout.session.completed", session),
+      );
+      mocks.insert.mockResolvedValueOnce({ error: { code: "23505" } });
+
+      const response = await stripeWebhook(request());
+
+      await expect(response.json()).resolves.toEqual({
+        received: true,
+        duplicate: true,
+      });
+      expect(mocks.synchronizeReviewSmsCheckout).not.toHaveBeenCalled();
+      expect(mocks.finalizePaidCheckout).not.toHaveBeenCalled();
+    });
+
+    it("reclaims and reconciles a previously failed review activation", async () => {
+      const reviewEvent = event("checkout.session.completed", session);
+      mocks.constructEvent.mockReturnValue(reviewEvent);
+      mocks.insert.mockResolvedValueOnce({ error: { code: "23505" } });
+      mocks.select.mockResolvedValueOnce({
+        data: [{ id: reviewEvent.id }],
+        error: null,
+      });
+
+      const response = await stripeWebhook(request());
+
+      expect(response.status).toBe(200);
+      expect(mocks.synchronizeReviewSmsCheckout).toHaveBeenCalledExactlyOnceWith(
+        session,
+      );
+      expect(mocks.not).toHaveBeenCalledWith("processing_error", "is", null);
+      expect(mocks.finalizePaidCheckout).not.toHaveBeenCalled();
+    });
+
+    it("rejects an opposite-mode review activation before claiming or synchronizing", async () => {
+      mocks.constructEvent.mockReturnValue(
+        event("checkout.session.completed", session, "evt_review_wrong_mode", {
+          livemode: true,
+        }),
+      );
+
+      const response = await stripeWebhook(request());
+
+      expect(response.status).toBe(400);
+      expect(mocks.insert).not.toHaveBeenCalled();
+      expect(mocks.synchronizeReviewSmsCheckout).not.toHaveBeenCalled();
+    });
+  });
+
   it("requires a Stripe signature before claiming an event", async () => {
     const response = await stripeWebhook(request(false));
 

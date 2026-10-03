@@ -18,7 +18,13 @@ import { CtaRace } from "@/lib/theme-v2/cta-race";
 import { FullSuiteWaitlistButton } from "@/components/waitlist/FullSuiteWaitlistButton";
 import { isChatOnlyPublicLaunchEnabled } from "@/lib/billing/chatOnlyPublicLaunch.server";
 import { isPlanAvailable } from "@/lib/billing/planAvailability";
-import { customerFeatures, SETUP_FEE_CENTS, SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
+import {
+  customerFeatures,
+  CUSTOMER_REVIEWS_PRICING_ENABLED,
+  REVIEW_EMAIL_ALLOWANCES,
+  SETUP_FEE_CENTS,
+  SUBSCRIPTION_PLANS,
+} from "@/lib/stripe/config";
 import { FULL_SUITE_DESCRIPTION, FULL_SUITE_HIGHLIGHTS, FULL_SUITE_USAGE_NOTE } from "@/lib/billing/fullSuitePresentation";
 import { OpenChatButton } from "./open-chat-button";
 import { HomepageChatWidget } from "./homepage-chat-widget";
@@ -138,6 +144,8 @@ const formattedPlanPrice = (planKey: keyof typeof SUBSCRIPTION_PLANS) =>
   `$${SUBSCRIPTION_PLANS[planKey].price}`;
 const formattedSmsParts = (planKey: keyof typeof SUBSCRIPTION_PLANS) =>
   SUBSCRIPTION_PLANS[planKey].includedSmsParts.toLocaleString("en-US");
+const formattedReviewEmails = (planKey: keyof typeof REVIEW_EMAIL_ALLOWANCES) =>
+  REVIEW_EMAIL_ALLOWANCES[planKey].toLocaleString("en-US");
 const formattedChatOnlyAiReplies =
   SUBSCRIPTION_PLANS.chat_only.includedAiReplies?.toLocaleString("en-US") ??
   "Not defined";
@@ -153,7 +161,9 @@ const chatOnlyPlan = {
   highlights: [
     "Website AI chat widget",
     `${formattedChatOnlyAiReplies} completed AI replies/month`,
-    "Web-chat lead capture + conversation inbox",
+    CUSTOMER_REVIEWS_PRICING_ENABLED
+      ? `Customer workspace + ${formattedReviewEmails("chat_only")} review emails/month`
+      : "Web-chat lead capture + conversation inbox",
     "AI customization + Google Calendar booking",
     "No phone, texting, or setup fee",
   ],
@@ -293,6 +303,38 @@ const comparisonGroups: ReadonlyArray<{
       },
     ],
   },
+  ...(CUSTOMER_REVIEWS_PRICING_ENABLED
+    ? [{
+        title: "Customers & reviews",
+        rows: [
+          {
+            feature: "Customer workspace, notes & tags",
+            values: { chat_only: true, sms_only: true, sms_and_chat: true, full: true },
+          },
+          {
+            feature: "Customer CSV import & export",
+            values: { chat_only: true, sms_only: true, sms_and_chat: true, full: true },
+          },
+          {
+            feature: "Review emails/billing month",
+            values: {
+              chat_only: formattedReviewEmails("chat_only"),
+              sms_only: formattedReviewEmails("sms_only"),
+              sms_and_chat: formattedReviewEmails("sms_and_chat"),
+              full: formattedReviewEmails("full"),
+            },
+          },
+          {
+            feature: "Scheduled Google review requests by email",
+            values: { chat_only: true, sms_only: true, sms_and_chat: true, full: true },
+          },
+          {
+            feature: "One optional email reminder",
+            values: { chat_only: true, sms_only: true, sms_and_chat: true, full: true },
+          },
+        ],
+      }]
+    : []),
   {
     title: "Channels",
     rows: [
@@ -999,11 +1041,14 @@ export default function HomePage() {
                 <span className={accentText}>business</span>.
               </>
             }
-            subtitle={
+            subtitle={[
+              CUSTOMER_REVIEWS_PRICING_ENABLED
+                ? "Every plan includes a Customers workspace and Google review requests by email."
+                : null,
               publicChatOnlyAvailable
                 ? `No contracts. Chat Only has no setup fee; paid SMS activation includes a one-time $${SETUP_FEE_CENTS / 100} setup fee.`
-                : `No contracts. Paid SMS activation includes a one-time $${SETUP_FEE_CENTS / 100} setup fee.`
-            }
+                : `No contracts. Paid SMS activation includes a one-time $${SETUP_FEE_CENTS / 100} setup fee.`,
+            ].filter(Boolean).join(" ")}
           />
 
           <div className="mx-auto grid max-w-[1160px] items-stretch gap-5 lg:grid-cols-3">

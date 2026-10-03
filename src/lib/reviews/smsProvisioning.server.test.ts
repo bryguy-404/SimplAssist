@@ -93,6 +93,8 @@ import {
   approveExistingReviewSmsUsecase,
   continueReviewSmsProvisioning,
   refreshReviewSmsProviderReadiness,
+  initializeIncludedReviewSmsSignup,
+  saveReviewSmsSetup,
 } from "./smsProvisioning.server";
 const businessId = "10000000-0000-4000-a100-000000000001",
   adminId = "00000000-0000-4000-a100-000000000002";
@@ -155,6 +157,59 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllEnvs());
 describe("review SMS provider authority", () => {
+  it("assigns the new Chat account a public consent URL before saving its hosted setup", async () => {
+    mocks.business.slug = "pending-new-chat";
+    mocks.business.telnyx_brand_id = null;
+    mocks.rpc.mockImplementation(async (name: string) => ({data:name === "review_sms_prepare_hosted_slug" ? "example-llc-unique" : true,error:null}));
+    await saveReviewSmsSetup(businessId,"owner",{phoneNumber:"+15745550111",consentMode:"hosted_keyword"});
+    expect(mocks.rpc).toHaveBeenCalledWith("review_sms_prepare_hosted_slug",{p_business:businessId,p_owner:"owner",p_base:"example-llc"});
+    expect(mocks.rpc).toHaveBeenCalledWith("review_sms_save_setup",expect.objectContaining({p_draft:expect.objectContaining({consentEvidenceUrl:expect.stringContaining("/c/example-llc-unique/review-texts")})}));
+  });
+  it("does not persist a pending consent URL when slug allocation fails", async () => {
+    mocks.business.slug = "pending-new-chat";
+    mocks.rpc.mockResolvedValue({data:null,error:{message:"unavailable"}});
+    await expect(saveReviewSmsSetup(businessId,"owner",{phoneNumber:"+15745550111",consentMode:"hosted_keyword"})).rejects.toMatchObject({code:"review_sms_setup_unavailable"});
+    expect(mocks.rpc).not.toHaveBeenCalledWith("review_sms_save_setup",expect.anything());
+  });
+  it("never invokes paid add-on provisioning for an included texting plan", async () => {
+    mocks.account.mockResolvedValue({state:"carrier_pending",billing_source:"included"});
+    await continueReviewSmsProvisioning(businessId);
+    expect(mocks.register).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+  it("initializes an opted-in signup from its own assigned number without buying resources", async () => {
+    mocks.business.review_sms_signup_enabled = true;
+    mocks.business.slug = "example-services";
+    await initializeIncludedReviewSmsSignup(businessId, "owner");
+    expect(mocks.rpc).toHaveBeenCalledWith("review_sms_initialize_signup", expect.objectContaining({p_business:businessId,p_owner:"owner",p_draft:expect.objectContaining({consentMode:"hosted_keyword",phoneNumber:"+15745550111"})}));
+    expect(mocks.register).not.toHaveBeenCalled();
+  });
+  it("does not initialize a legacy business that never opted in during signup", async () => {
+    await initializeIncludedReviewSmsSignup(businessId,"owner");
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+  it("activates included reviews only after exact mixed-purpose provider readiness", async () => {
+    mocks.business.review_sms_signup_enabled = true;
+    mocks.account.mockResolvedValue({state:"carrier_pending",billing_source:"included"});
+    mocks.campaign.mockResolvedValue({brandId:"brand",referenceId:businessId,usecase:"MIXED",subUsecases:["CUSTOMER_CARE","MARKETING"],embeddedLink:true,optinKeywords:"REVIEWS",campaignStatus:"MNO_PROVISIONED"});
+    await refreshReviewSmsProviderReadiness(businessId);
+    expect(mocks.rpc).toHaveBeenCalledWith("review_sms_activate_signup", expect.objectContaining({p_business:businessId,p_owner:"owner",p_campaign:"campaign",p_phone:"phone-id"}));
+    expect(mocks.register).not.toHaveBeenCalled();
+  });
+  it.each([{referenceId:"different-business"},{subUsecases:["CUSTOMER_CARE"]},{optinKeywords:"START"},{embeddedLink:false}])("does not grant automatic access for a mismatched registration %j", async (patch) => {
+    mocks.business.review_sms_signup_enabled=true;
+    mocks.account.mockResolvedValue({state:"carrier_pending",billing_source:"included"});
+    mocks.campaign.mockResolvedValue({brandId:"brand",referenceId:businessId,usecase:"MIXED",subUsecases:["CUSTOMER_CARE","MARKETING"],embeddedLink:true,optinKeywords:"REVIEWS",campaignStatus:"MNO_PROVISIONED",...patch});
+    await expect(refreshReviewSmsProviderReadiness(businessId)).rejects.toMatchObject({code:"review_sms_campaign_mismatch"});
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+  it("leaves an included application pending while its carrier approval is pending", async () => {
+    mocks.business.review_sms_signup_enabled=true;
+    mocks.account.mockResolvedValue({state:"carrier_pending",billing_source:"included"});
+    mocks.campaign.mockResolvedValue({brandId:"brand",referenceId:businessId,usecase:"MIXED",subUsecases:["CUSTOMER_CARE","MARKETING"],embeddedLink:true,optinKeywords:"REVIEWS",campaignStatus:"MNO_PENDING"});
+    await refreshReviewSmsProviderReadiness(businessId);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
   it("does not poll or assign carrier readiness when provisioning is stopped", async () => {
     vi.stubEnv("REVIEWS_SMS_PROVISIONING_ENABLED", "0");
     await refreshReviewSmsProviderReadiness(businessId);

@@ -18,6 +18,7 @@ import {
   refreshReviewSmsProviderReadiness,
   reviewSmsSetupOverview,
   saveReviewSmsSetup,
+  initializeIncludedReviewSmsSignup,
 } from "@/lib/reviews/smsProvisioning.server";
 import { stripe } from "@/lib/stripe/client";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -45,6 +46,7 @@ async function route(
   }
 }
 async function overview(businessId: string, ownerId: string) {
+  await initializeIncludedReviewSmsSignup(businessId, ownerId);
   return {
     ...(await reviewSmsOverview(businessId, ownerId)),
     setup: await reviewSmsSetupOverview(businessId),

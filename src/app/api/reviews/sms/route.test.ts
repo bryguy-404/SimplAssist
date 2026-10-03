@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   origin: vi.fn(),
   overview: vi.fn(),
   setupOverview: vi.fn(),
+  initializeSignup: vi.fn(),
   saveDraft: vi.fn(),
   checkout: vi.fn(),
   quote: vi.fn(),
@@ -46,6 +47,7 @@ vi.mock("@/lib/reviews/smsProvisioning.server", () => ({
   refreshReviewSmsProviderReadiness: mocks.refreshReadiness,
   reviewSmsSetupOverview: mocks.setupOverview,
   saveReviewSmsSetup: mocks.saveDraft,
+  initializeIncludedReviewSmsSignup: mocks.initializeSignup,
 }));
 vi.mock("@/lib/stripe/client", () => ({
   stripe: {

@@ -1,0 +1,30 @@
+BEGIN;
+CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
+SET LOCAL search_path=public,extensions;
+SELECT no_plan();
+INSERT INTO auth.users(id,email,email_confirmed_at) VALUES('00000000-0000-4000-a107-000000000001','signup-owner@example.test',now());
+INSERT INTO businesses(id,owner_id,name,business_type,slug,billing_mode,partner_plan,review_sms_signup_enabled,telnyx_brand_id,telnyx_campaign_id,telnyx_messaging_profile_id,campaign_status)
+VALUES('10000000-0000-4000-a107-000000000001','00000000-0000-4000-a107-000000000001','Signup Fixture','general','review-signup-107','comped','sms_only',true,'brand107','campaign107','profile107','approved');
+UPDATE review_email_control SET enabled=true,all_businesses_enabled=true;
+INSERT INTO phone_numbers(id,business_id,phone_number,telnyx_phone_number_id,is_active,telnyx_campaign_assignment_status,telnyx_campaign_assignment_campaign_id)
+VALUES('20000000-0000-4000-a107-000000000001','10000000-0000-4000-a107-000000000001','+15745550107','number107',true,'assigned','campaign107');
+SELECT ok(review_sms_initialize_signup('10000000-0000-4000-a107-000000000001','00000000-0000-4000-a107-000000000001','{"consentMode":"hosted_keyword"}'),'included signup initializes without activation purchase');
+SELECT is((SELECT state FROM review_sms_accounts WHERE business_id='10000000-0000-4000-a107-000000000001'),'carrier_pending','initialization alone never grants sending');
+SELECT is((SELECT billing_source FROM review_sms_accounts WHERE business_id='10000000-0000-4000-a107-000000000001'),'included','uses existing paid entitlement');
+SELECT ok(NOT has_review_sms_access('10000000-0000-4000-a107-000000000001'),'unapproved initialized account cannot send');
+SELECT ok(NOT review_sms_activate_signup('10000000-0000-4000-a107-000000000001','00000000-0000-4000-a107-000000000001','wrong','profile107','20000000-0000-4000-a107-000000000001','Provider approval verified for exact signup program',ARRAY['protected']),'mismatched campaign denied');
+SELECT ok(NOT review_sms_activate_signup('10000000-0000-4000-a107-000000000001','00000000-0000-4000-a107-000000000001','campaign107','profile107','20000000-0000-4000-a107-000000000001','Provider approval verified for exact signup program',ARRAY['profile107']),'protected sender denied');
+UPDATE phone_numbers SET telnyx_campaign_assignment_status='pending' WHERE id='20000000-0000-4000-a107-000000000001';
+SELECT ok(NOT review_sms_activate_signup('10000000-0000-4000-a107-000000000001','00000000-0000-4000-a107-000000000001','campaign107','profile107','20000000-0000-4000-a107-000000000001','Provider approval verified for exact signup program',ARRAY['protected']),'pending number assignment denied');
+UPDATE phone_numbers SET telnyx_campaign_assignment_status='assigned' WHERE id='20000000-0000-4000-a107-000000000001';
+SELECT ok(review_sms_activate_signup('10000000-0000-4000-a107-000000000001','00000000-0000-4000-a107-000000000001','campaign107','profile107','20000000-0000-4000-a107-000000000001','Provider approval verified for exact signup program',ARRAY['protected']),'verified matching signup activates');
+SELECT ok(has_review_sms_access('10000000-0000-4000-a107-000000000001'),'approved included account can use its plan');
+SELECT ok((SELECT activation_paid_at IS NULL AND stripe_item_id IS NULL AND NOT exclusive_resources FROM review_sms_accounts WHERE business_id='10000000-0000-4000-a107-000000000001'),'no duplicate charge or destructive ownership grant');
+SELECT ok(review_sms_initialize_signup('10000000-0000-4000-a107-000000000001','00000000-0000-4000-a107-000000000001','{}'),'initialization replay safe');
+SELECT is((SELECT state FROM review_sms_accounts WHERE business_id='10000000-0000-4000-a107-000000000001'),'active','replay does not rewind ready state');
+UPDATE review_sms_accounts SET state='cancel_pending',cancel_at=now()+interval '1 day' WHERE business_id='10000000-0000-4000-a107-000000000001';
+SELECT ok(NOT review_sms_activate_signup('10000000-0000-4000-a107-000000000001','00000000-0000-4000-a107-000000000001','campaign107','profile107','20000000-0000-4000-a107-000000000001','Provider approval verified for exact signup program',ARRAY['protected']),'stale readiness cannot resurrect cancellation');
+SELECT ok(NOT has_function_privilege('authenticated','review_sms_activate_signup(uuid,uuid,text,text,uuid,text,text[])','EXECUTE'),'customers cannot supply their own provider approval');
+SELECT ok(NOT has_function_privilege('anon','review_sms_initialize_signup(uuid,uuid,jsonb)','EXECUTE'),'anonymous caller cannot initialize billing state');
+SELECT * FROM finish();
+ROLLBACK;

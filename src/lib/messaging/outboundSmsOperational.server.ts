@@ -18,6 +18,7 @@ export type OutboundSmsPurpose =
   | "voice_followup"
   | "review_invitation"
   | "review_reminder"
+  | "review_consent_confirmation"
   | "review_reply";
 
 export type OutboundSmsOperationalBlockReason = Extract<
@@ -37,6 +38,7 @@ const PURPOSE_SERVICES: Record<
   review_invitation: ["texting"],
   review_reminder: ["texting"],
   review_reply: ["texting"],
+  review_consent_confirmation: ["texting"],
   missed_call: ["texting"],
   voice_followup: ["texting", "ai_replies"],
   ai_reply: ["texting", "ai_replies"],

@@ -43,6 +43,7 @@ export type DashboardBusiness = Pick<
   | "state"
   | "zip"
   | "opt_in_description"
+  | "review_sms_signup_enabled"
   | "privacy_terms_mode"
   | "privacy_url_override"
   | "terms_url_override"
@@ -120,6 +121,7 @@ const DASHBOARD_BUSINESS_SELECT = [
   "state",
   "zip",
   "opt_in_description",
+  "review_sms_signup_enabled",
   "privacy_terms_mode",
   "privacy_url_override",
   "terms_url_override",

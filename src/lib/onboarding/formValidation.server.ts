@@ -96,6 +96,7 @@ export const brandVerificationServerSchema = z.discriminatedUnion("has_ein", [
 export const smsUseCaseSchema = z
   .object({
     businessId: z.string().uuid(),
+    review_sms_signup_enabled: z.boolean().default(false),
     use_case_description: z.string().min(40),
     estimated_monthly_volume: z.enum([
       "under_1k",

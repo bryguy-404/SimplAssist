@@ -414,6 +414,7 @@ export default function OnboardingPage() {
               </div>
             )}
             <SmsUseCaseForm
+              reviewSmsAvailable={state.capabilities?.reviewSmsSignupEnabled === true}
               businessId={state.businessId}
               businessName={state.businessInfo.name || 'Your Business'}
               businessType={(state.businessInfo.business_type || 'general') as BusinessType}

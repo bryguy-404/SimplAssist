@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  ensureSignupKeywords: vi.fn(),
   list: vi.fn(),
   submit: vi.fn(),
   getCost: vi.fn(),
@@ -17,6 +18,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/lib/reviews/signupKeywords.server", () => ({ ensureSignupReviewSmsKeywords: mocks.ensureSignupKeywords }));
 vi.mock("@/lib/messaging/client", () => ({
   telnyx: {
     messaging10dlc: {
@@ -73,6 +75,7 @@ const SIGNUP_SAMPLE_PERSIST_FAILED_MESSAGE =
 
 const baseBusiness = {
   id: BUSINESS_ID,
+  review_sms_signup_enabled: false,
   name: "SimplAssist",
   email: "owner@example.com",
   phone_number: null,
@@ -1080,6 +1083,40 @@ describe("registerCampaign recover-before-create", () => {
       kind: "transient",
     });
     expect((caught as Error).message).not.toContain(providerDetail);
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+});
+
+describe("new opted-in review signup campaigns", () => {
+  it("files both approved purposes with separate opt-in, linked samples and guarded keyword setup", async () => {
+    business.review_sms_signup_enabled = true;
+    mocks.qualify.mockResolvedValue({ usecase: "MIXED" });
+    await registerCampaign(BUSINESS_ID);
+    const payload = submittedPayload();
+    expect(payload).toMatchObject({
+      usecase: "MIXED", subUsecases: ["CUSTOMER_CARE", "MARKETING"], embeddedLink: true,
+      optinKeywords: "REVIEWS", sample1: "Sample one", sample2: "Sample two", sample3: "Sample three",
+    });
+    expect(payload.sample4).toContain("honest Google review");
+    expect(payload.sample5).toContain("reminder");
+    expect(payload.messageFlow).toContain("/c/simplassist/review-texts");
+    expect(mocks.ensureSignupKeywords).toHaveBeenCalledWith(BUSINESS_ID, expect.objectContaining({ optinKeywords: "REVIEWS" }));
+    expect(mocks.getCost).toHaveBeenCalledWith({ usecase: "MIXED" });
+    expect(mocks.qualify).toHaveBeenCalledWith("MIXED", { brandId: BRAND_ID });
+  });
+
+  it("leaves an existing campaign untouched even if a marker is present", async () => {
+    business.review_sms_signup_enabled = true;
+    business.telnyx_campaign_id = CAMPAIGN_ID;
+    await registerCampaign(BUSINESS_ID);
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(mocks.ensureSignupKeywords).not.toHaveBeenCalled();
+  });
+
+  it("does not submit a paid campaign if ownership-safe keyword setup fails", async () => {
+    business.review_sms_signup_enabled = true;
+    mocks.ensureSignupKeywords.mockRejectedValueOnce(new Error("profile not exclusively owned"));
+    await expect(registerCampaign(BUSINESS_ID)).rejects.toThrow("profile not exclusively owned");
     expect(mocks.submit).not.toHaveBeenCalled();
   });
 });

@@ -1,3 +1,12 @@
+export type ReviewPermissionSummary = {
+  channel: "email" | "sms";
+  destination: string;
+  status: "granted" | "withdrawn" | "suppressed" | "keyword_required";
+  grantedAt: string;
+  revokedAt: string | null;
+  source: "customer_keyword" | "owner";
+  evidence: string;
+};
 export type ReviewSettings = {
   business_id: string;
   owner_id: string;

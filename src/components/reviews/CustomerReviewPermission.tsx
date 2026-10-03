@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useState, type FormEvent } from "react";
 import {
   body,
   btnSecondaryInline,
@@ -13,6 +13,12 @@ import {
 } from "@/lib/theme-v2/theme";
 import { requestError } from "@/components/customers/customerUi";
 import { REVIEW_TIMEZONES, reviewRequest } from "./reviewUi";
+import type { ReviewPermissionSummary } from "@/lib/reviews/types";
+type PermissionResponse = {
+  permissions: ReviewPermissionSummary[];
+  smsRequiresKeyword: boolean;
+  consentUrl: string | null;
+};
 
 /** Records the owner's evidence, never substitutes a phone number for consent. */
 export default function CustomerReviewPermission({
@@ -26,6 +32,54 @@ export default function CustomerReviewPermission({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [permissions, setPermissions] = useState<
+    ReviewPermissionSummary[] | null
+  >(null);
+  const [permissionError, setPermissionError] = useState<string | null>(null);
+  const [smsSetup, setSmsSetup] = useState<{
+    required: boolean;
+    url: string | null;
+  }>({ required: false, url: null });
+  const [channel, setChannel] = useState("email");
+  async function loadPermissions() {
+    try {
+      const result = await reviewRequest<PermissionResponse>(
+        `/api/reviews/permissions?contactId=${encodeURIComponent(customerId)}`,
+      );
+      setPermissions(result.permissions);
+      setSmsSetup({
+        required: Boolean(result.smsRequiresKeyword),
+        url: result.consentUrl ?? null,
+      });
+      setPermissionError(null);
+    } catch (cause) {
+      setPermissionError(requestError(cause));
+    }
+  }
+  useEffect(() => {
+    let current = true;
+    setPermissions(null);
+    setPermissionError(null);
+    setSmsSetup({ required: false, url: null });
+    reviewRequest<PermissionResponse>(
+      `/api/reviews/permissions?contactId=${encodeURIComponent(customerId)}`,
+    )
+      .then((result) => {
+        if (current) {
+          setPermissions(result.permissions);
+          setSmsSetup({
+            required: Boolean(result.smsRequiresKeyword),
+            url: result.consentUrl ?? null,
+          });
+        }
+      })
+      .catch((cause) => {
+        if (current) setPermissionError(requestError(cause));
+      });
+    return () => {
+      current = false;
+    };
+  }, [customerId]);
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) return;
@@ -52,6 +106,7 @@ export default function CustomerReviewPermission({
           ? "Permission evidence saved. Existing opt-outs remain in place. Future eligible service completions can use this permission when automation is enabled."
           : "Permission withdrawn for this channel. New automatic requests will not use it.",
       );
+      await loadPermissions();
     } catch (cause) {
       setError(requestError(cause));
     } finally {
@@ -69,6 +124,71 @@ export default function CustomerReviewPermission({
         after completed work. Saving contact information alone does not grant
         permission.
       </p>
+      {smsSetup.required ? (
+        <p className={`mt-3 text-xs ${body}`}>
+          Text review permission is saved automatically when the customer sends
+          REVIEWS from their own phone.{" "}
+          {smsSetup.url ? (
+            <a
+              href={smsSetup.url}
+              target="_blank"
+              rel="noreferrer"
+              className="underline"
+            >
+              Share your permission page
+            </a>
+          ) : null}{" "}
+          You can withdraw permission here.
+        </p>
+      ) : null}
+      {permissionError ? (
+        <p role="alert" className={`mt-3 text-xs ${statusDanger}`}>
+          Could not load existing permission. {permissionError}
+        </p>
+      ) : permissions === null ? (
+        <p className={`mt-3 text-xs ${body}`}>Loading current permission…</p>
+      ) : permissions.length ? (
+        <ul
+          className={`mt-3 space-y-3 text-xs ${body}`}
+          aria-label="Current review permissions"
+        >
+          {permissions.map((permission) => (
+            <li
+              key={permission.destination}
+              className="rounded-xl border border-current/10 p-3"
+            >
+              <p className={`font-semibold ${ink}`}>
+                {permission.channel === "sms"
+                  ? "Text reviews"
+                  : "Email reviews"}
+                :{" "}
+                {permission.status === "granted"
+                  ? "Permission recorded"
+                  : permission.status === "suppressed"
+                    ? "Opted out — sending blocked"
+                    : permission.status === "keyword_required"
+                      ? "Customer must text REVIEWS"
+                      : "Permission withdrawn"}
+              </p>
+              <p className="mt-1">{permission.destination}</p>
+              <p className="mt-1">
+                {permission.source === "customer_keyword"
+                  ? "Customer texted REVIEWS"
+                  : "Recorded by your business"}{" "}
+                ·{" "}
+                {new Date(
+                  permission.revokedAt ?? permission.grantedAt,
+                ).toLocaleDateString()}
+              </p>
+              <p className="mt-1">{permission.evidence}</p>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className={`mt-3 text-xs ${body}`}>
+          No review permission has been recorded for this customer yet.
+        </p>
+      )}
       <form onSubmit={save} className="mt-4 space-y-4">
         <fieldset disabled={busy} className="space-y-4 disabled:opacity-60">
           <div className="grid gap-3 sm:grid-cols-2">
@@ -79,6 +199,8 @@ export default function CustomerReviewPermission({
               <select
                 id={`${id}-channel`}
                 name="channel"
+                value={channel}
+                onChange={(event) => setChannel(event.target.value)}
                 className={inputField}
               >
                 <option value="email">Email review requests</option>
@@ -99,7 +221,9 @@ export default function CustomerReviewPermission({
                 <option value="" disabled>
                   Choose an update
                 </option>
-                <option value="granted">Customer gave permission</option>
+                {channel !== "sms" || !smsSetup.required ? (
+                  <option value="granted">Customer gave permission</option>
+                ) : null}
                 <option value="withdrawn">Customer withdrew permission</option>
               </select>
             </div>

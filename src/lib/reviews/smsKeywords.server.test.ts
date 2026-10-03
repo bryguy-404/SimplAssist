@@ -103,9 +103,17 @@ describe("review SMS runtime keywords", () => {
     });
     expect(fromCampaign).toEqual(program);
     expect(program.start.resp_text).toContain(
-      "Consent is not a condition of purchase",
+      "Text REVIEWS to subscribe",
     );
     expect(program.info.resp_text).toContain("owner@example.test");
+  });
+  it("keeps application-owned REVIEWS out of provider START and restores messaging without claiming review consent", () => {
+    const campaign = {optinKeywords:"REVIEWS",optinMessage:"Example: Review consent received",optoutKeywords:"STOP",optoutMessage:program.stop.resp_text,helpKeywords:"HELP",helpMessage:program.info.resp_text};
+    expect(() => keywordProgramFromCampaign(campaign)).toThrow("review_sms_keyword_copy_invalid");
+    const actual = keywordProgramFromCampaign(campaign, "Example Services");
+    expect(actual.start.keywords).toEqual(["START","UNSTOP"]);
+    expect(actual.start.resp_text).toContain("Text REVIEWS to subscribe");
+    expect(actual.start.resp_text).not.toContain("consent received");
   });
   it("refuses incomplete or unsupported approved keyword declarations", () => {
     expect(() => keywordProgramFromCampaign({})).toThrow(

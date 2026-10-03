@@ -695,6 +695,13 @@ export default function ReviewComposer({
                   : "review-request emails"}
                 . This is not a purchased or scraped list.
               </label>
+              {channel === "sms" ? (
+                <p className={`text-sm ${body}`}>
+                  For the hosted permission page, customers must text REVIEWS
+                  themselves first. This checkbox does not subscribe them. The
+                  preview excludes customers without the required permission.
+                </p>
+              ) : null}
             </fieldset>
             <div className="flex justify-end">
               <button

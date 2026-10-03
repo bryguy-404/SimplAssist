@@ -1,3 +1,4 @@
+import { isReviewSmsEnabled } from "@/lib/billing/reviewSmsRollout.server";
 import { smsUseCaseSchema } from "@/lib/onboarding/formValidation.server";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
@@ -45,6 +46,9 @@ const REGISTRATION_STATE_CHANGED_MESSAGE =
 
 type SmsUseCaseBusinessRow = {
   id: string;
+  review_sms_signup_enabled: boolean;
+  telnyx_campaign_id: string | null;
+  onboarding_completed_at: string | null;
   compliance_info_completed_at: string | null;
   slug: string;
   privacy_terms_mode: PrivacyTermsMode | null;
@@ -174,6 +178,9 @@ export async function POST(request: NextRequest) {
     .select(
       [
         "id",
+        "review_sms_signup_enabled",
+        "telnyx_campaign_id",
+        "onboarding_completed_at",
         "compliance_info_completed_at",
         "slug",
         "privacy_terms_mode",
@@ -204,6 +211,14 @@ export async function POST(request: NextRequest) {
       { error: "Business not found or unauthorized" },
       { status: 403 }
     );
+  }
+
+  if (data.review_sms_signup_enabled && !isReviewSmsEnabled(business.id)) {
+    return NextResponse.json({ error: "Review texting signup is not available for this business." }, { status: 409 });
+  }
+  if (data.review_sms_signup_enabled !== (business.review_sms_signup_enabled === true) &&
+      (business.telnyx_campaign_id || business.onboarding_completed_at)) {
+    return NextResponse.json({ error: "An existing texting registration cannot be changed through signup." }, { status: 409 });
   }
 
   // Rejected registrations are support-only. Stop stale form submissions
@@ -300,6 +315,7 @@ export async function POST(request: NextRequest) {
     isA2pRiskSelection
   );
   const editablePayload = {
+    review_sms_signup_enabled: data.review_sms_signup_enabled,
     use_case_description: data.use_case_description,
     estimated_monthly_volume: data.estimated_monthly_volume,
     sample_messages: trimmedSamples,

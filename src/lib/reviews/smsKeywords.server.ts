@@ -24,6 +24,12 @@ const requiredKeywords: Record<Operation, string[]> = {
   info: ["HELP", "INFO"],
 };
 
+export function reviewSmsRestoreMessage(businessName: string): string {
+  const name = businessName.replace(/[\r\n]+/g, " ").trim().slice(0, 70);
+  if (!name) throw new ReviewSmsError("review_sms_keyword_copy_invalid");
+  return `${name}: Messaging restored. Text REVIEWS to subscribe to review requests. Msg & data rates may apply. Reply HELP for help or STOP to opt out.`;
+}
+
 export function reviewSmsKeywordProgram(
   businessName: string,
   supportEmail: string,
@@ -45,7 +51,7 @@ export function reviewSmsKeywordProgram(
       country_code: "*",
       op: "start",
       keywords: [...requiredKeywords.start],
-      resp_text: `${name}: You opted in to review requests. Up to 2 messages per service. Msg & data rates may apply. Consent is not a condition of purchase. Reply HELP for help or STOP to opt out.`,
+      resp_text: reviewSmsRestoreMessage(name),
     },
     info: {
       country_code: "*",
@@ -65,7 +71,7 @@ export function keywordProgramFromCampaign(campaign: {
   optoutMessage?: string | null;
   helpKeywords?: string | null;
   helpMessage?: string | null;
-}): ReviewSmsKeywordProgram {
+}, businessName?: string): ReviewSmsKeywordProgram {
   const declarations = {
     start: [campaign.optinKeywords, campaign.optinMessage],
     stop: [campaign.optoutKeywords, campaign.optoutMessage],
@@ -76,10 +82,14 @@ export function keywordProgramFromCampaign(campaign: {
       const [words, text] = declarations[op];
       if (!words?.trim() || !text?.trim())
         throw new ReviewSmsError("review_sms_campaign_keywords_missing");
+      const declared = words.split(",").map(keyword).filter(Boolean);
+      const hostedReviews = op === "start" && declared.includes("REVIEWS");
+      if (hostedReviews && !businessName?.trim())
+        throw new ReviewSmsError("review_sms_keyword_copy_invalid");
       const keywords = Array.from(
         new Set([
           ...requiredKeywords[op],
-          ...words.split(",").map(keyword).filter(Boolean),
+          ...declared.filter((word) => !(op === "start" && word === "REVIEWS")),
         ]),
       );
       const supported =
@@ -88,7 +98,7 @@ export function keywordProgramFromCampaign(campaign: {
           : requiredKeywords[op];
       if (keywords.some((word) => !supported.includes(word)))
         throw new ReviewSmsError("review_sms_campaign_keywords_unsupported");
-      return [op, { op, keywords, country_code: "*", resp_text: text.trim() }];
+      return [op, { op, keywords, country_code: "*", resp_text: hostedReviews ? reviewSmsRestoreMessage(businessName!) : text.trim() }];
     }),
   ) as ReviewSmsKeywordProgram;
 }

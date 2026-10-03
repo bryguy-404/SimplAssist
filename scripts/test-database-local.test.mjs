@@ -18,9 +18,31 @@ import {
   localOnlyEnvironment,
   parseDockerContextName,
   resolveRealLocalDockerEndpoint,
+  withDisposableTestAttestation,
 } from "./test-database-local.mjs";
 
 const VERIFIED_DOCKER_ENDPOINT = "unix:///private/docker.sock";
+
+describe("disposable local test attestation", () => {
+  it("enables attestation for tests and clears it afterward", () => {
+    const steps = [];
+    withDisposableTestAttestation(value => steps.push(value), () => steps.push("tests"));
+    expect(steps).toEqual([true,"tests",false]);
+  });
+  it("clears attestation when pgTAP fails", () => {
+    const steps = [];
+    expect(() => withDisposableTestAttestation(value => steps.push(value), () => { throw new Error("pgTAP failed"); })).toThrow("pgTAP failed");
+    expect(steps).toEqual([true,false]);
+  });
+  it("never runs tests after failed attestation and still attempts cleanup", () => {
+    const steps = [];
+    expect(() => withDisposableTestAttestation(value => { steps.push(value); if(value) throw new Error("setup failed"); }, () => steps.push("tests"))).toThrow("setup failed");
+    expect(steps).toEqual([true,false]);
+  });
+  it("reports both a test failure and failed cleanup", () => {
+    expect(() => withDisposableTestAttestation(value => { if(!value) throw new Error("cleanup failed"); }, () => { throw new Error("tests failed"); })).toThrow(AggregateError);
+  });
+});
 
 describe("local database harness target isolation", () => {
   it("inspects only containers when the stopped stack retains a same-named backup volume", () => {

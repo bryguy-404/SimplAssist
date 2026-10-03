@@ -354,6 +354,7 @@ export interface Business {
   sample_messages: string[] | null;
   estimated_monthly_volume: string | null;
   opt_in_description: string | null;
+  review_sms_signup_enabled?: boolean;
   compliance_info_completed_at: string | null;
   pending_phone_number: string | null;
   pending_phone_number_area_code: string | null;

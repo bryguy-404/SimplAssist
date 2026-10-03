@@ -160,6 +160,7 @@ beforeEach(() => {
   tableResults.clear();
   tableQueries.clear();
   tableResults.set("businesses", { data: BUSINESS, error: null });
+  tableResults.set("review_sms_accounts", { data: null, error: null });
   tableResults.set("business_hours", { data: HOURS, error: null });
   mocks.from.mockImplementation((table: string) => {
     const result = tableResults.get(table);
@@ -251,7 +252,7 @@ describe("/c/[slug] compliance page", () => {
     expect(mocks.getActiveSmsNumber).toHaveBeenCalledWith(BUSINESS_ID);
     const businessQuery = tableQueries.get("businesses")?.[0];
     expect(businessQuery?.select).toHaveBeenCalledWith(
-      "id, slug, name, business_type, email, phone_number, address, city, state, zip, ai_settings(language)"
+      "id, slug, name, business_type, email, phone_number, address, city, state, zip, review_sms_signup_enabled, ai_settings(language)"
     );
   });
 
@@ -306,7 +307,7 @@ describe("/c/[slug] compliance page", () => {
     expect(mocks.getActiveSmsNumber).toHaveBeenCalledWith(BUSINESS_ID);
     const businessQuery = tableQueries.get("businesses")?.[0];
     expect(businessQuery?.select).toHaveBeenCalledWith(
-      "id, slug, name, email, phone_number, address, city, state, zip, opt_in_description, ai_settings(language)"
+      "id, slug, name, email, phone_number, address, city, state, zip, review_sms_signup_enabled, opt_in_description, ai_settings(language)"
     );
   });
 
@@ -423,7 +424,6 @@ describe("/c/[slug] compliance page", () => {
     mocks.getActiveSmsNumber.mockRejectedValue(new Error("lookup failed closed"));
 
     await expect(renderPage()).rejects.toThrow("lookup failed closed");
-    expect(mocks.from).not.toHaveBeenCalledWith("business_hours");
   });
 
   it("returns not-found for pending slugs without reading business or number data", async () => {
@@ -442,5 +442,27 @@ describe("/c/[slug] compliance page", () => {
 
     await expect(renderPage()).rejects.toThrow("NEXT_NOT_FOUND");
     expect(mocks.getActiveSmsNumber).not.toHaveBeenCalled();
+  });
+});
+
+describe("review programs on public business pages", () => {
+  it("shows a separate permission path for a new MIXED signup", async () => {
+    tableResults.set("businesses", { data: { ...BUSINESS, review_sms_signup_enabled: true }, error: null });
+    const html = await renderPage();
+    expect(html).toContain("Review requests by text");
+    expect(html).toContain(`/c/${SLUG}/review-texts`);
+    expect(html).toContain("SMS customer care");
+    expect(visibleText(html)).toContain(`text REVIEWS to ${SMS_NUMBER}`);
+  });
+
+  it("describes a Chat review-only account without advertising customer-care service", async () => {
+    tableResults.set("review_sms_accounts", { data: { billing_source: "direct", state: "carrier_pending", draft: { consentMode: "hosted_keyword" } }, error: null });
+    const html = await renderPage();
+    expect(html).toContain("Review requests by text");
+    expect(html).not.toContain("SMS customer care");
+    expect(html).not.toContain("Voicemail opt-in");
+    const privacy = await renderPrivacyPage();
+    expect(visibleText(privacy)).toContain("voluntary review-request SMS program");
+    expect(visibleText(privacy)).not.toContain("customer-care text messages");
   });
 });

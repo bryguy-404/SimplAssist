@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { reviewConsentUrl } from "@/lib/reviews/consentCopy";
+import { ensureSignupReviewSmsKeywords } from "@/lib/reviews/signupKeywords.server";
+import { reviewSignupDescription, reviewSignupSamples } from "./reviewSignup";
 import { normalizeHttpsGoalUrl } from "@/lib/goals/primaryGoal";
 import { telnyx } from "@/lib/messaging/client";
 import {
@@ -37,7 +40,6 @@ function appBaseUrl(): string {
 const HELP_KEYWORDS = "HELP,INFO";
 const OPTOUT_KEYWORDS = "STOP,END,UNSUBSCRIBE,CANCEL,QUIT";
 const OPTIN_KEYWORDS = "START,SUBSCRIBE,YES";
-const CAMPAIGN_USECASE = "CUSTOMER_CARE";
 const TELNYX_BRAND_CAMPAIGN_CAP = 5;
 const TELNYX_CAMPAIGN_SAMPLE_MAX_CHARACTERS = 255;
 const TELNYX_BRAND_CAMPAIGN_CAP_MESSAGE =
@@ -55,6 +57,7 @@ export type CampaignRegistrationErrorCode =
   | "campaign_signup_goal_url_invalid"
   | "campaign_signup_sample_too_long"
   | "campaign_signup_sample_persist_failed"
+  | "campaign_review_sample_too_long"
   | "telnyx_brand_campaign_cap_reached";
 
 export type CampaignRegistrationErrorKind = "transient" | "permanent";
@@ -982,7 +985,7 @@ export async function registerCampaign(businessId: string): Promise<void> {
   const { data: business, error: readError } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id, name, email, phone_number, telnyx_brand_id, telnyx_campaign_id, use_case_description, sample_messages, slug, privacy_terms_mode, privacy_url_override, terms_url_override, primary_goal, goal_url, brand_status, campaign_status, brand_rejection_reason, campaign_rejection_reason, ai_settings(language)"
+      "id, name, email, phone_number, telnyx_brand_id, telnyx_campaign_id, use_case_description, sample_messages, slug, privacy_terms_mode, privacy_url_override, terms_url_override, primary_goal, goal_url, brand_status, campaign_status, brand_rejection_reason, campaign_rejection_reason, review_sms_signup_enabled, ai_settings(language)"
     )
     .eq("id", businessId)
     .single<{
@@ -1004,6 +1007,7 @@ export async function registerCampaign(businessId: string): Promise<void> {
       campaign_status: string | null;
       brand_rejection_reason: string | null;
       campaign_rejection_reason: string | null;
+      review_sms_signup_enabled: boolean;
       ai_settings: { language: "en" | "es" | "both" } | null;
     }>();
 
@@ -1059,12 +1063,23 @@ export async function registerCampaign(businessId: string): Promise<void> {
     return;
   }
 
+  const reviewSignup = business.review_sms_signup_enabled === true;
+  const campaignUsecase = reviewSignup ? "MIXED" : "CUSTOMER_CARE";
   const campaignFiling = buildGoalAwareCampaignFiling({
     businessName: business.name,
     primaryGoal: business.primary_goal,
     goalUrl: business.goal_url,
     samples,
   });
+  if (reviewSignup) {
+    const reviewSamples = reviewSignupSamples(business.name, appBaseUrl());
+    if (reviewSamples.some((sample) => sample.length > TELNYX_CAMPAIGN_SAMPLE_MAX_CHARACTERS)) {
+      throw campaignRecoveryError("campaign_review_sample_too_long", "permanent", "The business name is too long for the review-text campaign samples. Shorten the displayed business name before submitting.");
+    }
+    campaignFiling.samples = [...campaignFiling.samples.slice(0, 3), ...reviewSamples];
+    campaignFiling.persistSamples = true;
+    campaignFiling.embeddedLink = true;
+  }
   const filingSamples = campaignFiling.samples;
 
   const webhookURL = `${appBaseUrl()}/api/messaging/registration/status`;
@@ -1101,6 +1116,7 @@ export async function registerCampaign(businessId: string): Promise<void> {
       smsEntryPoint,
       business,
       language: business.ai_settings?.language ?? "en",
+      ...(reviewSignup ? { reviewConsentPageUrl: reviewConsentUrl(business.slug, appBaseUrl()), termsUrl } : {}),
     });
     const currentSubmissionAuditSnapshot = {
       privacyPolicyLink: privacyUrl,
@@ -1116,6 +1132,14 @@ export async function registerCampaign(businessId: string): Promise<void> {
       helpMessage: complianceCopy.helpMessage,
     };
     submissionAuditSnapshot = currentSubmissionAuditSnapshot;
+
+    if (reviewSignup) {
+      await ensureSignupReviewSmsKeywords(businessId, {
+        optinKeywords: "REVIEWS", optinMessage: complianceCopy.optinMessage,
+        optoutKeywords: OPTOUT_KEYWORDS, optoutMessage: complianceCopy.optoutMessage,
+        helpKeywords: HELP_KEYWORDS, helpMessage: complianceCopy.helpMessage,
+      });
+    }
 
     // A paid Chat upgrade freezes customer-entered compliance details. Its
     // guarded RPC permits only this final generated filing copy while the
@@ -1197,22 +1221,22 @@ export async function registerCampaign(businessId: string): Promise<void> {
 
     const [cost, qualification] = await Promise.all([
       telnyx.messaging10dlc.campaign.usecase.getCost({
-        usecase: CAMPAIGN_USECASE,
+        usecase: campaignUsecase,
       }),
       telnyx.messaging10dlc.campaignBuilder.brand.qualifyByUsecase(
-        CAMPAIGN_USECASE,
+        campaignUsecase,
         { brandId: business.telnyx_brand_id }
       ),
     ]);
 
-    if (qualification.usecase && qualification.usecase !== CAMPAIGN_USECASE) {
+    if (qualification.usecase && qualification.usecase !== campaignUsecase) {
       throw new Error(
         `[registration:campaign] Brand ${business.telnyx_brand_id} qualification returned unexpected usecase ${qualification.usecase}`
       );
     }
 
     console.log(
-      `[registration:campaign] ${CAMPAIGN_USECASE} cost for business ${businessId}: monthly=${cost.monthlyCost} upfront=${cost.upFrontCost}`
+      `[registration:campaign] ${campaignUsecase} cost for business ${businessId}: monthly=${cost.monthlyCost} upfront=${cost.upFrontCost}`
     );
 
     await appendRegistrationEvent({
@@ -1221,7 +1245,7 @@ export async function registerCampaign(businessId: string): Promise<void> {
       resourceType: "campaign",
       status: "ok",
       rawPayload: {
-        usecase: CAMPAIGN_USECASE,
+        usecase: campaignUsecase,
         cost,
         qualification,
       },
@@ -1236,8 +1260,9 @@ export async function registerCampaign(businessId: string): Promise<void> {
     const response = await telnyx.messaging10dlc.campaignBuilder.submit(
       {
         brandId: business.telnyx_brand_id,
-        description: business.use_case_description,
-        usecase: CAMPAIGN_USECASE,
+        description: reviewSignup ? reviewSignupDescription(business.use_case_description) : business.use_case_description,
+        usecase: campaignUsecase,
+        ...(reviewSignup ? { subUsecases: ["CUSTOMER_CARE", "MARKETING"] } : {}),
         sample1: filingSamples[0],
         sample2: filingSamples[1],
         sample3: filingSamples[2],
@@ -1245,7 +1270,7 @@ export async function registerCampaign(businessId: string): Promise<void> {
         sample5: filingSamples[4],
         messageFlow: complianceCopy.messageFlow,
         subscriberOptin: true,
-        optinKeywords: OPTIN_KEYWORDS,
+        optinKeywords: reviewSignup ? "REVIEWS" : OPTIN_KEYWORDS,
         optinMessage: complianceCopy.optinMessage,
         subscriberOptout: true,
         optoutKeywords: OPTOUT_KEYWORDS,
@@ -1317,7 +1342,7 @@ export async function registerCampaign(businessId: string): Promise<void> {
         resourceType: "campaign",
         status: "error",
         rawPayload: {
-          usecase: CAMPAIGN_USECASE,
+          usecase: campaignUsecase,
           error: serializeError(err),
         },
       });

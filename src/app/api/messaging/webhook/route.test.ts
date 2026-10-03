@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   unwrap: vi.fn(),
   processTenantSmsInbound: vi.fn(),
+  processReviewTextConsent: vi.fn(),
   reconcileTenantSmsReceipt: vi.fn(),
   send: vi.fn(),
   claimMessagingWebhookEvent: vi.fn(),
@@ -36,6 +37,9 @@ vi.mock("@/lib/messaging/tenantSmsSend.server", () => ({
   sendTenantSms: mocks.send,
   processTenantSmsInbound: mocks.processTenantSmsInbound,
   reconcileTenantSmsReceipt: mocks.reconcileTenantSmsReceipt,
+}));
+vi.mock("@/lib/reviews/consent.server", () => ({
+  processReviewTextConsent: mocks.processReviewTextConsent,
 }));
 vi.mock("@/lib/messaging/client", () => ({
   telnyx: {
@@ -204,6 +208,7 @@ function request(body = '{"data":"signed payload"}') {
 beforeEach(() => {
   vi.clearAllMocks();
   tableQueues.clear();
+  mocks.processReviewTextConsent.mockResolvedValue(false);
   mocks.processTenantSmsInbound.mockResolvedValue({
     reviewHeld: false,
     keyword: null,
@@ -1603,6 +1608,60 @@ describe("POST /api/messaging/webhook", () => {
 });
 
 describe("shared review reply suppression boundary", () => {
+  it("consumes verified REVIEWS before AI or human reply routing", async () => {
+    const event = inboundEvent({ text: "REVIEWS" });
+    mocks.unwrap.mockResolvedValue({
+      data: {
+        ...event.data,
+        occurred_at: "2026-10-03T13:00:00Z",
+        payload: {
+          ...event.data.payload,
+          id: "provider-message",
+          messaging_profile_id: "profile-1",
+        },
+      },
+    });
+    mocks.processReviewTextConsent.mockResolvedValue(true);
+    expect((await messagingWebhook(request())).status).toBe(200);
+    expect(mocks.processReviewTextConsent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "REVIEWS",
+        providerMessageId: "provider-message",
+        occurredAt: "2026-10-03T13:00:00Z",
+      }),
+    );
+    expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.completeMessagingWebhookEvent).toHaveBeenCalledOnce();
+  });
+  it("never supplies a mismatched provider profile as consent evidence", async () => {
+    const event = inboundEvent({ text: "REVIEWS" });
+    mocks.unwrap.mockResolvedValue({
+      data: {
+        ...event.data,
+        occurred_at: "2026-10-03T13:00:00Z",
+        payload: {
+          ...event.data.payload,
+          id: "provider-message",
+          messaging_profile_id: "wrong-profile",
+        },
+      },
+    });
+    mocks.processReviewTextConsent.mockResolvedValue(true);
+    expect((await messagingWebhook(request())).status).toBe(200);
+    expect(mocks.processReviewTextConsent).toHaveBeenCalledWith(
+      expect.objectContaining({ providerMessageId: undefined }),
+    );
+  });
+  it("retries persistence failure without acknowledging or generating another reply", async () => {
+    mocks.processReviewTextConsent.mockRejectedValue(
+      new Error("consent persistence unavailable"),
+    );
+    expect((await messagingWebhook(request())).status).toBe(500);
+    expect(mocks.completeMessagingWebhookEvent).not.toHaveBeenCalled();
+    expect(mocks.releaseMessagingWebhookClaim).toHaveBeenCalledOnce();
+    expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+  });
   it.each(["stop", "start", "help"] as const)(
     "persists inbound %s without generating an automated response",
     async (keyword) => {

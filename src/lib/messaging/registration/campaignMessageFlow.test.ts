@@ -141,3 +141,21 @@ describe("buildCampaignMessageFlow", () => {
     }
   });
 });
+
+describe("separate review opt-in for a new MIXED campaign", () => {
+  it.each(["en", "es"] as const)("keeps customer care and REVIEWS consent separate inside the provider limit (%s)", (language) => {
+    const copy = buildCampaignMessageFlow({
+      ...BASE_ARGS,
+      language,
+      reviewConsentPageUrl: "https://app.example.test/c/northstar-home-care/review-texts",
+      termsUrl: "https://app.example.test/c/northstar-home-care/terms",
+    });
+    expect(copy.messageFlow).toContain("text REVIEWS to +13175550123");
+    expect(copy.messageFlow).toContain("Customer-care permission and START do not authorize review requests");
+    expect(copy.messageFlow).toContain(copy.voicemailGreeting);
+    expect(copy.messageFlow).toContain(copy.confirmationSms);
+    expect(copy.messageFlow).toContain("up to 2 review messages per completed service");
+    expect(copy.optinMessage).toContain("agreed to automated review-request texts");
+    expect(copy.messageFlowCharacterCount).toBeLessThanOrEqual(2048);
+  });
+});

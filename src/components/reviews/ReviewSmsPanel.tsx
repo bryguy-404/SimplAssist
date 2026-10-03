@@ -111,8 +111,7 @@ function SmsSetupForm({
     const form = new FormData(event.currentTarget);
     const draft: Record<string, string> = {
       phoneNumber: phone,
-      consentDescription: String(form.get("consentDescription") || "").trim(),
-      consentEvidenceUrl: String(form.get("consentEvidenceUrl") || "").trim(),
+      consentMode: "hosted_keyword",
     };
     for (const key of [
       ...LEGAL_FIELDS.map(([name]) => name),
@@ -240,48 +239,15 @@ function SmsSetupForm({
             )}
           </div>
         </div>
-        <div>
-          <label htmlFor={`${id}-consent`} className={fieldLabel}>
-            How do customers agree to review-request texts?
-          </label>
-          <textarea
-            id={`${id}-consent`}
-            name="consentDescription"
-            required
-            minLength={20}
-            maxLength={1500}
-            rows={4}
-            defaultValue={String(
-              overview.account?.draft.consentDescription || "",
-            )}
-            placeholder="Describe the actual opt-in wording and when customers agree."
-            className={inputField}
-          />
-          <p className={`mt-1 text-xs ${body}`}>
-            Having a customer’s phone number does not establish permission to
-            send automated review requests.
+        <div className={`${tile} p-4`}>
+          <p className={`font-semibold ${ink}`}>Customer permission page included</p>
+          <p className={`mt-2 text-sm ${body}`}>
+            We create a page for your business that explains review texts.
+            Customers opt in by texting REVIEWS from their own phone to your
+            business number. We save that permission automatically. Adding or
+            importing a phone number does not sign anyone up.
           </p>
-        </div>
-        <div>
-          <label htmlFor={`${id}-evidence`} className={fieldLabel}>
-            Consent evidence URL
-          </label>
-          <input
-            id={`${id}-evidence`}
-            name="consentEvidenceUrl"
-            type="url"
-            required
-            pattern="https://.*"
-            defaultValue={String(
-              overview.account?.draft.consentEvidenceUrl || "",
-            )}
-            placeholder="https://yourbusiness.com/text-permission"
-            className={inputField}
-          />
-          <p className={`mt-1 text-xs ${body}`}>
-            Link to the public form, terms, or documented script showing the
-            permission process you actually use.
-          </p>
+          {fields.consentUrl && overview.account ? <a href={String(fields.consentUrl)} target="_blank" rel="noreferrer" className="mt-3 inline-block text-sm underline">View your permission page</a> : <p className={`mt-2 text-xs ${body}`}>Your page will be available after you save these details.</p>}
         </div>
       </fieldset>
       {included ? (
@@ -510,6 +476,13 @@ export default function ReviewSmsPanel({
                 </p>
               ) : null}
             </div>
+            {overview.setup?.fields.consentUrl && (account || overview.setup?.fields.reviewSignupEnabled) ? (
+              <div className={`${tile} p-4`}>
+                <p className={`font-semibold ${ink}`}>Collect permission for review texts</p>
+                <p className={`mt-2 text-sm ${body}`}>Share this page on your website or after a completed job. Customers text REVIEWS to your business number to opt in. Permission is saved in Customers; sending a review request is a separate step.</p>
+                <a href={String(overview.setup.fields.consentUrl)} target="_blank" rel="noreferrer" className="mt-3 inline-block break-all text-sm underline">{String(overview.setup.fields.consentUrl)}</a>
+              </div>
+            ) : null}
             {account ? (
               <div>
                 <p className={`flex items-center gap-2 font-semibold ${ink}`}>
@@ -585,9 +558,9 @@ export default function ReviewSmsPanel({
                   </>
                 ) : (
                   <p className={`rounded-2xl p-3 text-sm ${statusWarning}`}>
-                    Your approval details are saved. Existing texting approval
-                    must cover review requests before this feature is enabled.
-                    Contact support to complete the review.
+                    Your current registration does not include review requests.
+                    Contact support to update an existing texting registration.
+                    New accounts can include review texts during texting setup.
                   </p>
                 )}
               </div>
@@ -602,8 +575,7 @@ export default function ReviewSmsPanel({
             {state === "carrier_pending" ? (
               <p className={`text-sm ${body}`}>
                 Your business registration is being reviewed. Email reviews
-                remain available. The monthly review-texting add-on starts only
-                after approval and successful payment.
+                remain available. {direct ? "The monthly review-texting add-on starts only after approval and successful payment." : "Review texts activate automatically after approval and number assignment, using your plan’s existing SMS allowance."}
               </p>
             ) : null}
             {state === "ready_unpaid" ? (

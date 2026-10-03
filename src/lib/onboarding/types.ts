@@ -138,6 +138,7 @@ export interface OnboardingBrandVerification {
   estimated_monthly_volume?: string;
   sample_messages?: string[];
   opt_in_description?: string;
+  review_sms_signup_enabled?: boolean;
 }
 
 export interface OnboardingRegistrationSnapshot {
@@ -211,6 +212,7 @@ export interface OnboardingState {
   businessId: string;
   capabilities?: {
     richerWebsiteScanEnabled: boolean;
+    reviewSmsSignupEnabled?: boolean;
   };
   primaryGoal: PrimaryGoal | null;
   goalUrl: string | null;

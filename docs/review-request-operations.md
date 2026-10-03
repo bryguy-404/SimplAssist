@@ -26,6 +26,12 @@ and verify a disposable environment before enabling any production business.
   campaign explicitly containing the MARKETING sub-usecase. CUSTOMER_CARE alone
   is insufficient. New Chat review registrations remain MARKETING campaigns.
   See [Telnyx's mixed-use guidance](https://support.telnyx.com/en/articles/3679260-frequently-asked-questions-about-10dlc).
+- New texting registrations can explicitly include reviews during signup.
+  Migrations 105–111 provide the mixed-purpose filing, hosted REVIEWS opt-in,
+  automatic included-account initialization and exact provider readiness checks.
+  These accounts do not require an administrator to repeat the approval step.
+  A stored customer keyword event is required for hosted-program review sends;
+  an imported phone number or owner checkbox cannot grant that permission.
 - Business review pause, operational suspension, payment failure, permission
   revocation and destination suppression are checked again at final admission.
 
@@ -67,6 +73,12 @@ The `review_delivery` provider tag correlates callbacks received before the send
 response. Webhooks and unsubscribe POSTs remain live while workers are disabled.
 
 ## Railway worker
+
+The review worker calls the web application's authenticated internal routes.
+Provider credentials, Stripe Price IDs, rollout/provisioning/sending/release
+flags and protected Telnyx identifiers belong on the **web service**, where
+those routes execute. The scheduler needs the canonical application URL and
+matching worker token. Setting provider flags only on the scheduler has no effect.
 
 Deploy the dedicated worker using `railway.review-worker.toml`. It starts
 `scripts/review-worker.ts`; no public request or contact-import path sends mail.

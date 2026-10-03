@@ -142,11 +142,13 @@ SELECT ok(
   -- 091 keeps the original evidence checks in a private delegate, with a
   -- narrowly verified paid-conversion wrapper. Inspect the evidence body in
   -- either schema version rather than requiring its old physical name.
+  -- 108 qualifies review-owned resources but preserves pending-plan evidence;
+  -- that query's table alias may change without changing its authority.
   AND pg_get_functiondef(COALESCE(
     to_regprocedure('public.infer_business_plan_family_before_chat_upgrade(uuid)'),
     'public.infer_business_plan_family(uuid)'::regprocedure
   )) LIKE ALL (ARRAY[
-    '%subscription.pending_plan%',
+    '%.pending_plan%',
     '%partner_client_provisioning_jobs%',
     '%telnyx_voice_application_id%',
     '%business_plan_family_evidence_conflict%'

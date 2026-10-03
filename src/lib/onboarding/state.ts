@@ -1,4 +1,5 @@
 import "server-only";
+import { isReviewSmsEnabled } from "@/lib/billing/reviewSmsRollout.server";
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
@@ -113,6 +114,7 @@ type BusinessRow = {
   sample_messages: string[] | null;
   estimated_monthly_volume: string | null;
   opt_in_description: string | null;
+  review_sms_signup_enabled: boolean;
   compliance_info_completed_at: string | null;
   pending_phone_number: string | null;
   pending_phone_number_area_code: string | null;
@@ -272,6 +274,7 @@ async function getOnboardingStateForOwnerInternal(
         "sample_messages",
         "estimated_monthly_volume",
         "opt_in_description",
+        "review_sms_signup_enabled",
         "compliance_info_completed_at",
         "pending_phone_number",
         "pending_phone_number_area_code",
@@ -385,6 +388,7 @@ async function getOnboardingContextForBusinessId(
         "sample_messages",
         "estimated_monthly_volume",
         "opt_in_description",
+        "review_sms_signup_enabled",
         "compliance_info_completed_at",
         "pending_phone_number",
         "pending_phone_number_area_code",
@@ -748,6 +752,7 @@ async function getOnboardingContextForBusiness(
   const state: OnboardingState = {
     businessId: business.id,
     capabilities: {
+      reviewSmsSignupEnabled: isReviewSmsEnabled(business.id) && !business.telnyx_campaign_id && !business.onboarding_completed_at,
       richerWebsiteScanEnabled:
         isRicherWebsiteScanEnabledForBusiness(business.id),
     },
@@ -926,6 +931,7 @@ function normalizeBrandVerification(
     estimated_monthly_volume: business.estimated_monthly_volume ?? "",
     sample_messages: business.sample_messages ?? [],
     opt_in_description: business.opt_in_description ?? "",
+    review_sms_signup_enabled: business.review_sms_signup_enabled === true,
   };
 }
 

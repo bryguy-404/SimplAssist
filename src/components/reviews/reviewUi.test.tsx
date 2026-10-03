@@ -10,6 +10,10 @@ import { reviewReason, reviewRequest, reviewSchedule } from "./reviewUi";
 
 afterEach(() => vi.unstubAllGlobals());
 describe("honest review status and safe preview", () => {
+  it("explains that hosted review texts require the customer's own keyword", () => {
+    for (const code of ["review_sms_keyword_permission_required", "sms_review_keyword_permission_required"])
+      expect(reviewReason(code)).toContain("text REVIEWS from their phone");
+  });
   it("explains revoked permission and uses channel-neutral suppression language", () => {
     expect(reviewReason("permission_revoked")).toContain(
       "Record renewed permission",

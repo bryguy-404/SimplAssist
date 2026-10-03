@@ -57,11 +57,13 @@ import {
 } from "@/lib/billing/usage";
 import { buildAiConversationSourceKey } from "@/lib/metrics/sourceKeys.server";
 import { recordBusinessMetricEventBestEffort } from "@/lib/metrics/recording.server";
+import { processReviewTextConsent } from "@/lib/reviews/consent.server";
 
 const MMS_FALLBACK_MESSAGE =
   "I can't process images yet — please describe what you need in text and I'll help.";
 
 interface TelnyxMessagePayload {
+  id?: string;
   from?: { phone_number?: string };
   to?: Array<{ phone_number?: string }>;
   text?: string;
@@ -103,7 +105,12 @@ export async function POST(request: NextRequest) {
 
   const eventData = (
     event as {
-      data?: { id?: string; event_type?: string; payload?: unknown };
+      data?: {
+        id?: string;
+        event_type?: string;
+        occurred_at?: string;
+        payload?: unknown;
+      };
     }
   ).data;
   const eventType = eventData?.event_type;
@@ -258,6 +265,26 @@ export async function POST(request: NextRequest) {
       text,
       conversationId: conversation.id,
     });
+    if (
+      await processReviewTextConsent({
+        businessId,
+        messagingProfileId: inboundProfile.data.telnyx_messaging_profile_id,
+        from,
+        to,
+        text,
+        conversationId: conversation.id,
+        sourceMessageId: inboundMessage.id,
+        providerMessageId:
+          payload.messaging_profile_id ===
+          inboundProfile.data.telnyx_messaging_profile_id
+            ? payload.id
+            : undefined,
+        occurredAt: eventData?.occurred_at,
+      })
+    ) {
+      await completeMessagingWebhookEvent(eventKey, ownedClaimToken);
+      return new NextResponse("OK", { status: 200 });
+    }
     if (inboundState.reviewHeld || inboundState.keyword) {
       // Telnyx's configured profile handles STOP/START/HELP confirmations.
       // These controls must never enter AI processing or create a second reply.

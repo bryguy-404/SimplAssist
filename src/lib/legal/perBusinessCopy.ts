@@ -23,6 +23,7 @@ import {
   MOBILE_INFORMATION_SHARING_DISCLOSURE,
 } from "@/lib/messaging/complianceCopy";
 import type { Language } from "@/types/database";
+import { reviewConsentDescription } from "@/lib/reviews/consentCopy";
 
 export interface LegalSection {
   title: string;
@@ -54,6 +55,9 @@ export interface LegalTemplateBusiness {
   zip: string | null;
   opt_in_description: string | null;
   language?: Language | null;
+  review_sms_signup_enabled?: boolean;
+  review_sms_only?: boolean;
+  review_consent_url?: string;
 }
 
 const LAST_UPDATED = "2026-07-22";
@@ -94,6 +98,25 @@ function legalOptInDescription(b: LegalTemplateBusiness): string {
   }).legalOptInDescription;
 }
 
+function addReviewProgram(doc: LegalDoc, b: LegalTemplateBusiness): LegalDoc {
+  if (!b.review_sms_signup_enabled && !b.review_sms_only) return doc;
+  const consent = reviewConsentDescription(b.name, smsNumber(b), b.review_consent_url ?? "our review-text permission page");
+  const reviewPurpose = `Our review-text program sends an automated request for an honest Google review and at most one reminder after completed work. You may leave any rating or decline to review. It does not include offers or unrelated advertising.`;
+  const stop = `Reply STOP to stop texts. Reply HELP for help or contact ${contactEmail(b)}. START restores messaging availability but does not restore review-text permission; after START, read the permission page and text REVIEWS again to subscribe to review requests.`;
+  const sections = doc.sections.map((section) => {
+    if (b.review_sms_only && /^(1\.|3\.|4\.)/.test(section.title)) {
+      return { ...section, paragraphs: section.title.startsWith("1.")
+        ? [`${b.name} operates this voluntary review-request SMS program. These disclosures explain the service and how your mobile number and consent records are used. SimplAssist provides the technology and Telnyx provides messaging delivery.`]
+        : section.title.startsWith("3.") ? [reviewPurpose, "We use your phone number, message history, delivery information, and consent records to run this program. We do not sell your information."]
+        : [consent, stop, MOBILE_INFORMATION_SHARING_DISCLOSURE] };
+    }
+    if (section.title.startsWith("3.")) return { ...section, paragraphs: [...section.paragraphs, reviewPurpose] };
+    if (section.title.startsWith("4.")) return { ...section, paragraphs: [...section.paragraphs, consent, stop] };
+    return section;
+  });
+  return { ...doc, lastUpdated: "2026-10-03", sections };
+}
+
 export function buildPrivacyContent(b: LegalTemplateBusiness): LegalDoc {
   const name = b.name;
   const email = contactEmail(b);
@@ -104,7 +127,7 @@ export function buildPrivacyContent(b: LegalTemplateBusiness): LegalDoc {
   // from the live shared model and currently active SMS number on every render.
   const optIn = legalOptInDescription(b);
 
-  return {
+  return addReviewProgram({
     lastUpdated: LAST_UPDATED,
     sections: [
       {
@@ -171,7 +194,7 @@ export function buildPrivacyContent(b: LegalTemplateBusiness): LegalDoc {
         ],
       },
     ],
-  };
+  }, b);
 }
 
 export function buildTermsContent(b: LegalTemplateBusiness): LegalDoc {
@@ -179,7 +202,7 @@ export function buildTermsContent(b: LegalTemplateBusiness): LegalDoc {
   const email = contactEmail(b);
   const phone = phoneClause(b);
 
-  return {
+  return addReviewProgram({
     lastUpdated: LAST_UPDATED,
     sections: [
       {
@@ -241,7 +264,7 @@ export function buildTermsContent(b: LegalTemplateBusiness): LegalDoc {
         ],
       },
     ],
-  };
+  }, b);
 }
 
 /**

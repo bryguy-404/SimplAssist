@@ -14,6 +14,8 @@ import { getActiveSmsNumberForBusiness } from "@/lib/messaging/phoneNumberLookup
 import type { Language } from "@/types/database";
 import { formatPhoneNumber } from "@/lib/utils";
 import { isPendingSlug } from "@/lib/util/slug.shared";
+import { loadReviewLegalProgram } from "@/lib/legal/reviewProgram.server";
+import { reviewConsentDescription } from "@/lib/reviews/consentCopy";
 
 /**
  * Per-business public landing page (Phase 6).
@@ -37,7 +39,7 @@ type PageProps = { params: Promise<{ slug: string }> };
 export const dynamic = "force-dynamic";
 
 const PUBLIC_PROJECTION =
-  "id, slug, name, business_type, email, phone_number, address, city, state, zip, ai_settings(language)";
+  "id, slug, name, business_type, email, phone_number, address, city, state, zip, review_sms_signup_enabled, ai_settings(language)";
 
 const DAY_NAMES = [
   "Sunday",
@@ -61,6 +63,7 @@ type PublicBusiness = {
   state: string | null;
   zip: string | null;
   ai_settings: { language: Language } | null;
+  review_sms_signup_enabled?: boolean;
 };
 
 type Hours = {
@@ -76,6 +79,7 @@ async function loadBusiness(
   business: PublicBusiness;
   hours: Hours[];
   smsPhoneNumber: string | null;
+  reviewProgram: Awaited<ReturnType<typeof loadReviewLegalProgram>>;
 } | null> {
   if (isPendingSlug(slug)) return null;
 
@@ -88,18 +92,17 @@ async function loadBusiness(
   if (error || !business) return null;
 
   const publicBusiness = business as unknown as PublicBusiness;
-  const smsPhoneNumber = await getActiveSmsNumberForBusiness(
-    publicBusiness.id
-  );
-
-  const { data: hours } = await supabaseAdmin
-    .from("business_hours")
-    .select("day_of_week, open_time, close_time, is_closed")
-    .eq("business_id", publicBusiness.id)
-    .order("day_of_week");
+  const [smsPhoneNumber, reviewProgram, { data: hours }] = await Promise.all([
+    getActiveSmsNumberForBusiness(publicBusiness.id),
+    loadReviewLegalProgram(publicBusiness),
+    supabaseAdmin.from("business_hours")
+      .select("day_of_week, open_time, close_time, is_closed")
+      .eq("business_id", publicBusiness.id).order("day_of_week"),
+  ]);
 
   return {
     business: publicBusiness,
+    reviewProgram,
     hours: (hours ?? []) as Hours[],
     smsPhoneNumber,
   };
@@ -143,10 +146,10 @@ export default async function BusinessLandingPage({ params }: PageProps) {
   const { slug } = await params;
   const loaded = await loadBusiness(slug);
   if (!loaded) notFound();
-  const { business, hours, smsPhoneNumber } = loaded;
+  const { business, hours, smsPhoneNumber, reviewProgram } = loaded;
   const address = formatAddress(business);
   const privacyHref = `/c/${business.slug}/privacy`;
-  const smsCopy = smsPhoneNumber
+  const smsCopy = smsPhoneNumber && !reviewProgram.review_sms_only
     ? buildSmsComplianceCopy({
         business,
         smsPhoneNumber,
@@ -186,6 +189,16 @@ export default async function BusinessLandingPage({ params }: PageProps) {
         >
           {business.name}
         </h1>
+
+        {(reviewProgram.review_sms_only || reviewProgram.review_sms_signup_enabled) && (
+          <section className={`mt-8 p-5 ${tile}`} aria-labelledby="review-texts-heading">
+            <h2 id="review-texts-heading" className={`text-lg font-semibold ${ink}`}>Review requests by text</h2>
+            <p className={`mt-3 text-sm ${body}`}>
+              {reviewConsentDescription(business.name, smsPhoneNumber ?? 'your assigned business number once approved', reviewProgram.review_consent_url)}
+            </p>
+            <Link href={`/c/${business.slug}/review-texts`} className={`${inlineLink} mt-3 inline-block`}>Read the review-text disclosure and subscribe</Link>
+          </section>
+        )}
 
         {smsPhoneNumber && smsCopy && (
           <section

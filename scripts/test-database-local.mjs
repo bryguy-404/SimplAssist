@@ -140,10 +140,20 @@ function main() {
   let testFailure = null;
   let cleanlinessFailure = null;
   try {
-    runLocalCliStreaming(
-      ["test", "db", DATABASE_TESTS, "--local"],
-      { PGOPTIONS: "-c simplassist.disposable_test_database=on" },
-      dockerEndpoint
+    withDisposableTestAttestation(
+      (enabled) => runLocalPsql(
+        resetInspection.Id,
+        enabled
+          ? "ALTER ROLE postgres IN DATABASE postgres SET simplassist.disposable_test_database = 'on'"
+          : "ALTER ROLE postgres IN DATABASE postgres RESET simplassist.disposable_test_database",
+        "supabase_admin",
+        dockerEndpoint
+      ),
+      () => runLocalCliStreaming(
+        ["test", "db", DATABASE_TESTS, "--local"],
+        {},
+        dockerEndpoint
+      )
     );
   } catch (error) {
     testFailure = toError(error);
@@ -163,6 +173,28 @@ function main() {
 
   const finalFailure = combineHarnessFailures(testFailure, cleanlinessFailure);
   if (finalFailure) throw finalFailure;
+}
+
+/** The pinned CLI runs psql inside Docker and does not forward host
+ * PGOPTIONS. After all container/catalog checks, attest only the postgres
+ * role in this disposable database and remove it even when pgTAP fails. */
+export function withDisposableTestAttestation(setAttestation, runTests) {
+  let failure = null;
+  try {
+    setAttestation(true);
+    runTests();
+  } catch (error) {
+    failure = toError(error);
+  }
+  try {
+    setAttestation(false);
+  } catch (error) {
+    const cleanupFailure = toError(error);
+    failure = failure
+      ? new AggregateError([failure, cleanupFailure], "Local tests failed and their disposable attestation could not be cleared")
+      : cleanupFailure;
+  }
+  if (failure) throw failure;
 }
 
 function replayFreshLocalDatabase(dockerEndpoint) {

@@ -27,12 +27,14 @@ import type { OnboardingRiskReviewSnapshot } from '@/lib/onboarding/types';
 import { primaryCtaInlineClass, secondaryCtaClass } from '@/lib/glass';
 import { statusDanger, statusWarning } from '@/lib/theme-v2/theme';
 import { cn } from '@/lib/utils';
+import { withReviewSignupTemplate } from '@/lib/messaging/registration/reviewSignup';
 
 const PLACEHOLDER_PATTERN = /\[.+?\]/;
 const STOP_PATTERN = /\bstop\b/i;
 
 const smsUseCaseSchema = z
   .object({
+    review_sms_signup_enabled: z.boolean(),
     use_case_description: z
       .string()
       .min(40, 'Describe the use case in at least 40 characters'),
@@ -90,6 +92,7 @@ const smsUseCaseSchema = z
 export type SmsUseCaseData = z.infer<typeof smsUseCaseSchema>;
 
 interface SmsUseCaseInitialData {
+  review_sms_signup_enabled?: boolean;
   use_case_description?: string;
   estimated_monthly_volume?: string;
   sample_messages?: string[];
@@ -97,6 +100,7 @@ interface SmsUseCaseInitialData {
 }
 
 interface SmsUseCaseFormProps {
+  reviewSmsAvailable?: boolean;
   businessId: string;
   businessName: string;
   businessType: BusinessType;
@@ -142,6 +146,7 @@ export default function SmsUseCaseForm({
   onNext,
   onBack,
   saveRequest = fetch,
+  reviewSmsAvailable = false,
 }: SmsUseCaseFormProps) {
   const brand = useBrand();
   const [saving, setSaving] = useState(false);
@@ -156,7 +161,7 @@ export default function SmsUseCaseForm({
         }
       : null
   );
-  const template = useMemo(
+  const careTemplate = useMemo(
     () =>
       buildCustomerCareTemplateCopy({
         businessName,
@@ -167,6 +172,10 @@ export default function SmsUseCaseForm({
       }),
     [businessName, businessType, businessTypeOther, language, services]
   );
+  const [includeReviews, setIncludeReviews] = useState(initialData?.review_sms_signup_enabled === true);
+  const template = includeReviews
+    ? withReviewSignupTemplate(careTemplate, businessName)
+    : careTemplate;
   const initialSampleMessages =
     initialData?.sample_messages && initialData.sample_messages.length >= 3
       ? initialData.sample_messages.map((value) => ({ value }))
@@ -182,6 +191,7 @@ export default function SmsUseCaseForm({
   } = useForm<SmsUseCaseData>({
     resolver: zodResolver(smsUseCaseSchema),
     defaultValues: {
+      review_sms_signup_enabled: initialData?.review_sms_signup_enabled === true,
       use_case_description: initialData?.use_case_description || template.useCaseDescription,
       estimated_monthly_volume:
         (initialData?.estimated_monthly_volume as SmsUseCaseData['estimated_monthly_volume']) ||
@@ -217,6 +227,15 @@ export default function SmsUseCaseForm({
     replaceSamples(template.sampleMessages.map((value) => ({ value })));
   }
 
+  function changeReviewScope(enabled: boolean) {
+    setIncludeReviews(enabled);
+    setValue('review_sms_signup_enabled', enabled);
+    const next = enabled ? withReviewSignupTemplate(careTemplate, businessName) : careTemplate;
+    setValue('use_case_description', next.useCaseDescription, { shouldValidate: true });
+    setValue('opt_in_description', next.optInDescription, { shouldValidate: true });
+    replaceSamples(next.sampleMessages.map((value) => ({ value })));
+  }
+
   const onSubmit = async (data: SmsUseCaseData) => {
     setSaving(true);
     setSubmitError('');
@@ -228,6 +247,7 @@ export default function SmsUseCaseForm({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           businessId,
+          review_sms_signup_enabled: data.review_sms_signup_enabled,
           use_case_description: data.use_case_description,
           estimated_monthly_volume: data.estimated_monthly_volume,
           sample_messages: data.sample_messages.map((message) => message.value.trim()),
@@ -269,14 +289,27 @@ export default function SmsUseCaseForm({
       <div>
         <h2 className="text-xl font-semibold text-stone-900 dark:text-[#f5f5f5]">How your business will use SMS</h2>
         <p className="mt-1 text-sm text-stone-500 dark:text-[#bdbdbf]">
-          Carriers review these examples before activating texting. Keep them limited to customer care, missed-call follow-up, and service coordination.
+          Carriers review these examples before activating texting. Describe customer care, missed-call follow-up, service coordination{includeReviews ? ', and separately authorized review requests' : ''}.
         </p>
       </div>
+
+      {reviewSmsAvailable && (
+        <div className="rounded-[18px] border border-[#e3dacc] p-4 dark:border-white/[0.12]">
+          <label className="flex items-start gap-3 text-sm font-medium">
+            <input type="checkbox" checked={includeReviews} onChange={(event) => changeReviewScope(event.target.checked)} className="mt-1" />
+            Include Google review requests in my texting registration
+          </label>
+          <p className="mt-2 text-sm text-stone-500 dark:text-[#bdbdbf]">
+            Review texting is included with your texting plan, within its message allowance. We provide a permission page customers can use to text REVIEWS to your number. This gives separate permission for one review request and one reminder per completed service. A phone call, chat, or imported number does not give that permission. Carrier approval is required.
+          </p>
+          <p className="mt-2 text-xs text-stone-500">Changing this choice restores the recommended examples below.</p>
+        </div>
+      )}
 
       <div className="rounded-[18px] border border-[var(--brand-accent-soft-border)] bg-[var(--brand-accent-soft)] px-4 py-3 text-sm text-[var(--brand-accent)] dark:border-white/[0.10] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.12)] dark:text-[var(--brand-accent-dark)]">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <span>
-            We prefilled this step with carrier-safe Customer Care wording to improve approval chances. Review it and edit anything that does not match {businessName || 'your business'}.
+            We prefilled this step with {includeReviews ? 'customer care and review-request' : 'Customer Care'} wording. Review it and edit anything that does not match {businessName || 'your business'}.
           </span>
           {textDiffersFromTemplate && (
             <button
@@ -376,7 +409,7 @@ export default function SmsUseCaseForm({
       <div className="space-y-3">
         <h3 className={SECTION_HEADER_CLASS}>Opt-in description</h3>
         <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">
-          Tell carriers how customers agree to receive customer-care texts from your business.
+          Tell carriers how customers agree to receive customer-care texts{includeReviews ? ' and give separate permission for review requests' : ''} from your business.
         </p>
         <textarea
           {...register('opt_in_description')}

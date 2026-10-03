@@ -64,7 +64,7 @@ they do not automatically create a direct Stripe subscription.
 
 ## Release sequence
 
-1. Apply migrations 095–104 in a disposable environment and run the guarded
+1. Apply migrations 095–111 in a disposable environment and run the guarded
    database suite, unit tests, type checking, and customer/review browser flows.
 2. Configure the verified review email sender, signed webhook, link secret and
    dedicated Railway worker described in [review-request-operations.md](./review-request-operations.md).
@@ -110,6 +110,41 @@ test-mode billing contracts with fresh disposable resources and a read-only
 local database schema preflight. It does not certify hosted Checkout completion,
 application webhook/entitlement synchronization, or carrier delivery. Never pass
 production credentials or a remote database to it.
+
+The opt-in `scripts/review-stripe-webhook-e2e.test.ts` harness additionally uses
+hosted Stripe TEST Checkout, Stripe CLI's signed forwarding, the actual webhook
+route, and a disposable local database. It verifies failed-payment recovery,
+duplicate events, recurring entitlement, and cancellation. Provider approval is
+simulated only in that isolated database; this does not certify carrier delivery.
+
+## New-account review texting
+
+Chat customers save business verification details and choose a dedicated local
+number in Reviews. The app creates their stable public consent URL, collects the
+$49 activation payment, and registers the review program. After provider approval
+and number assignment, the owner reviews the prorated $20/month quote and activates
+it. A failed payment cannot enable sending. These resources remain associated
+with the Chat subscription without granting the base SMS/voice plan.
+
+New SMS, SMS + Chat, and Full customers can choose review texts on the SMS-use-case
+step. Their application declares both customer care and review marketing, including
+review links. The worker initializes their included review account and enables
+it only after it verifies the exact approved campaign, profile keywords and assigned
+number. This uses the existing plan allowance and does not buy another number or
+charge the Chat add-on. Existing filings are not silently reclassified.
+
+Each participating business receives `/c/<business-slug>/review-texts`. Customers
+read the disclosure and send `REVIEWS` from their phone to that business's assigned
+number. The signed inbound webhook records versioned consent, sends an idempotent
+confirmation, and consumes the keyword before normal AI replies. Customers see
+STOP/HELP information and linked privacy/terms. Sending START alone restores
+messaging but does not subscribe to reviews.
+
+Owners see the permission record in Customers and can withdraw permission.
+For this hosted program, importing a phone or checking an owner attestation cannot
+replace customer-originated permission. Preview, campaign confirmation and the
+final sending reservation enforce it. A review request still requires completed
+work and an owner-created campaign or explicitly enabled completion automation.
 
 ## Deliberately limited first release
 

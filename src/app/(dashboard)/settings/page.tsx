@@ -143,6 +143,8 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
           slug={business.slug}
           business={{
             name: business.name,
+            review_sms_signup_enabled: business.review_sms_signup_enabled,
+            review_consent_url: `/c/${business.slug}/review-texts`,
             phone_number: business.phone_number,
             sms_phone_number: phoneNumberRow?.phone_number ?? null,
             email: business.email,

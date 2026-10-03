@@ -264,6 +264,7 @@ function smsFeatureForPurpose(purpose: OutboundSmsPurpose): FeatureKey {
     case "review_invitation":
     case "review_reminder":
     case "review_reply":
+    case "review_consent_confirmation":
     case "manual_dashboard_send":
       return "manual_sms";
     case "missed_call":

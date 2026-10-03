@@ -1,81 +1,86 @@
 # Customers and Reviews release status — October 3, 2026
 
 Customers and email reviews are released for new paid accounts across all plans.
-Existing non-pilot accounts remain excluded; their subscriptions and carrier
-resources are unchanged. Review texting is not publicly enabled yet.
+The new-account texting release adds self-service registration, customer keyword
+permission, automatic approval reconciliation, and verified Chat add-on billing.
+Existing excluded accounts keep their subscriptions and carrier resources.
 
-## Pricing and rollout
+## Packages
 
-- New monthly prices: Chat Only $15, SMS Only $29, SMS + Web Chat $49, Full Suite
-  $79. New SMS setup is $49; Chat Only has no setup fee.
-- Stripe has the $20/month review-text add-on and $49 activation Prices ready.
-  The $35 Chat-plus-review-text package is not available for activation while
-  its feature, sending and paid-provisioning controls remain off.
-- Existing plan Prices are retained under the explicit legacy mappings. The
-  existing live subscription was verified unchanged; creating new Prices did
-  not migrate it.
-- Application wildcard admission and database general admission are enabled
-  with matching existing-account exclusions. Newly created businesses do not
-  need to be added to a pilot allowlist.
-- Owners still provide their Google review link and recipient permission.
-  Verified account email supplies the initial Reply-To. Importing contacts does
-  not send messages; reminders and completion automation default to off.
-- Migrations 095–104 are applied. Migration 103/104 contents were checked against
-  the committed source, and Point Guard University remains outside the rollout.
+- Chat Only: $15/month, including customer organization and email review requests.
+- Chat with review texting: $35/month after approval and successful add-on
+  activation, plus a $49 one-time carrier setup fee. The $20 add-on includes
+  250 SMS parts per full billing month; its first period is prorated.
+- SMS Only: $29/month; SMS + Web Chat: $49/month; Full Suite: $79/month.
+  Review texts use these plans' existing SMS allowance after approval.
+- New base texting setup is $49. Adding reviews during that setup does not buy
+  another number or add the Chat review-texting subscription.
+- Existing Price mappings and subscriptions are retained. No existing customer
+  subscription is automatically repriced by this release.
+
+## New-account setup
+
+Chat owners complete their business details and number selection in Reviews.
+The app generates their stable hosted permission page, collects the activation
+fee and submits their actual review program. Following provider approval and
+number assignment, the owner sees and accepts the recurring quote.
+
+New higher-tier customers can explicitly include review texts during texting
+signup. The application covers customer care and review marketing. The worker
+initializes and activates included review accounts after verifying their exact
+approved campaign, assigned number and profile keywords; no Reviews page visit
+or duplicate provider purchase is necessary.
+
+Customers read the business's hosted disclosure and text REVIEWS themselves.
+The signed inbound webhook records consent and confirms it without triggering
+an AI response. Owners see the permission record in Customers. Imports, purchases,
+START and an owner checkbox do not grant hosted-program review permission.
+Preview, campaign confirmation and final sending reservation enforce it.
+
+All new paid accounts receive the Customers and email-review screens. Each owner
+still enters their Google review link and chooses customers with permission.
+Importing contacts sends nothing. Reminders and completion automation default
+to off. Verified account email supplies the initial Reply-To.
 
 ## Verification
 
-- 96 disposable database suites / 3,963 assertions passed.
-- Shared focused application run: 465 tests across 30 files passed; the final
-  keyword/provisioning ownership regressions also passed.
-- Additional SMS API and Stripe-webhook coverage: 86 tests across two files
-  passed, including activation/expiration routing, authorization and retries.
-- Full TypeScript checking, focused lint and a production build with the new
-  pricing flag passed. The production release passed its health check.
-- Pricing copy now explains Customers and email reviews alongside the new
-  amounts. The comparison uses the shared per-plan allowances and passed 14
-  focused tests, lint and TypeScript checking.
-- Real Stripe TEST API verified eight provider contracts: activation Checkout,
-  activation payment/refund, the $15 base, prorated $20 add-on, duplicate retries,
-  failed payment/recovery, $35 renewal and cancellation followed by $15 renewal.
-  All disposable Stripe resources were cleaned up with zero cleanup failures.
-- These checks do not claim a complete hosted Checkout → application webhook →
-  database-entitlement integration, or actual carrier delivery.
+- Application checks: 2,248 tests across 120 files passed.
+- Database checks: 103 suites and 4,072 assertions passed after a guarded fresh
+  local migration replay. Test-only database attestation was removed afterward.
+- TypeScript, scoped lint and a production build passed.
+- Real Stripe TEST checks: 13 application integration cases and eight provider
+  contract cases passed, with zero cleanup errors. These cover hosted Checkout,
+  signed webhooks, failed payment/recovery, duplicates, cancellation, prorating,
+  $35 renewal and returning to the $15 base after cancellation.
+- The integrated test found and fixed a Chat billing-family conflict caused by
+  review-only phone resources. Exact paid resource ownership preserves Chat's
+  base plan without granting SMS/voice base-plan access.
+- Migrations 105–111 add the new signup, consent, billing-resource binding,
+  permission enforcement, stable URL and automatic initialization behavior.
 
-## Scheduled owner email verification
+The owner's scheduled email arrived at 9 AM. Delivery, its Google-review redirect,
+click tracking and unsubscribe were verified. The test business was paused again;
+general email sending remains enabled. No second customer account was changed.
 
-The two earlier owner-preview emails were delivered exactly once. A normal
-customer-style email remains scheduled solely to the owner's test contact for
-October 3, 2026 at 9 AM Eastern, with real signed review/unsubscribe links and no
-reminder. It was verified pending with zero attempts after rollout.
+## Live verification boundary
 
-Do not follow its Google link before delivery: doing so stops the pending
-request. The 9:05 AM follow-up verifies delivery, redirect/click and unsubscribe,
-then pauses only the pilot business. It must preserve the global email rollout
-and dispatch controls. Private operational identifiers remain outside this
-committed report.
+Automatic provider-resource cleanup remains disabled. Production's shared
+resource protection manifest and live cleanup validation are incomplete, and
+older generic release runs exist. Do not enable the global remote-release switch
+as part of review signup rollout. Review subscription cancellation and paid-term
+access controls are tested; provider number/campaign cleanup needs operator
+follow-up until its separate production release validation is complete.
 
-## Review texting still requires approval
+Stripe checks use real TEST mode. Carrier approval is simulated only in disposable
+local tests. No real carrier application, live add-on purchase or customer SMS was
+performed for this release. A new business still needs its own carrier approval
+and customer permission before sending. Live delivery and STOP/HELP behavior can
+be checked once that business has an approved sender.
 
-The live SimplAssist campaign is approved for CUSTOMER_CARE, has no MARKETING
-sub-usecase, and does not declare embedded links. It cannot grant review-text
-access. Its existing campaign, sender and profile were inspected without mutation.
+The existing SimplAssist CUSTOMER_CARE campaign is not treated as approval for
+review marketing. Its sender and profile were not reassigned. Point Guard
+University remains outside the rollout.
 
-SMS readiness now verifies embedded-link approval and actual STOP/START/HELP
-rules. New review-owned profiles receive guarded, retry-safe keyword provisioning;
-existing profiles are read-only and unsupported aliases fail closed. HELP/INFO
-cannot fall through to AI replies, and STOP ALL is handled consistently.
-
-The remaining pilot steps are to obtain the owner's test number and actual
-review-text opt-in method/evidence, prepare a new appropriate campaign using the
-existing brand, obtain carrier approval, then coordinate the number assignment
-and run live delivery, replies, HELP, STOP/START and click/reminder-stop checks.
-Keep current texting working while replacement approval is pending. No carrier
-application, sender reassignment, customer charge or review SMS was performed.
-
-Normal higher-tier signup still files customer-care campaigns. Review texting
-must remain disabled until mixed-purpose signup/disclosures and per-business
-review approval are completed; new plan purchase alone does not authorize it.
-
-See [the release guide](./customer-reviews-release.md) and
-[operations](./review-request-operations.md) for controls and recovery.
+See [billing evidence](./review-sms-billing-verification-2026-10-03.md),
+[release procedures](./customer-reviews-release.md) and
+[operations](./review-request-operations.md) for configuration and recovery.

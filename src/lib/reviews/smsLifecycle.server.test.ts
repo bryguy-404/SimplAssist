@@ -11,6 +11,9 @@ const mocks = vi.hoisted(() => ({
   reconcile: vi.fn(),
   classify: vi.fn(),
   update: vi.fn(),
+  initialize: vi.fn(),
+  continueProvisioning: vi.fn(),
+  refreshReadiness: vi.fn(),
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/admin", () => ({
@@ -31,8 +34,9 @@ vi.mock("@/lib/supabase/admin", () => ({
   },
 }));
 vi.mock("./smsProvisioning.server", () => ({
-  continueReviewSmsProvisioning: vi.fn(),
-  refreshReviewSmsProviderReadiness: vi.fn(),
+  continueReviewSmsProvisioning: mocks.continueProvisioning,
+  refreshReviewSmsProviderReadiness: mocks.refreshReadiness,
+  initializeIncludedReviewSmsSignup: mocks.initialize,
 }));
 vi.mock("@/lib/messaging/telnyxDestructive", () => ({
   deactivateTelnyxCampaign: mocks.deactivate,
@@ -62,6 +66,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("REVIEWS_SMS_RELEASE_ENABLED", "1");
   vi.stubEnv("TELNYX_REMOTE_RELEASE_ENABLED", "1");
+  vi.stubEnv("REVIEWS_SMS_ENABLED", "0");
+  vi.stubEnv("REVIEWS_SMS_PILOT_BUSINESS_IDS", "*");
+  vi.stubEnv("CUSTOMER_REVIEWS_EXCLUDED_BUSINESS_IDS", "");
   mocks.rpc.mockImplementation(async (name: string) => ({
     data: name === "review_sms_claim_release" ? [action] : true,
     error: null,
@@ -83,6 +90,60 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllEnvs());
 describe("review-only resource release", () => {
+  it("initializes an opted-in signup and reconciles approval without a dashboard visit", async () => {
+    const id = "10000000-0000-4000-8000-000000000001";
+    vi.stubEnv("REVIEWS_SMS_ENABLED", "1");
+    vi.stubEnv("REVIEWS_SMS_RELEASE_ENABLED", "0");
+    mocks.rpc.mockImplementation(async (name: string) => ({
+      data: name === "review_sms_signup_candidates" ? [{business_id: id, owner_id: "owner"}] : true,
+      error: null,
+    }));
+    mocks.initialize.mockImplementation(async () => {
+      mocks.accounts.mockResolvedValue({data: [{business_id: id, state: "carrier_pending", billing_source: "included"}], error: null});
+    });
+    expect(await runReviewSmsLifecycle()).toEqual({checked: 1, released: 0});
+    expect(mocks.initialize).toHaveBeenCalledWith(id, "owner");
+    expect(mocks.rpc).toHaveBeenCalledWith("review_sms_signup_candidates", {
+      p_allowed_businesses: null, p_excluded_businesses: [], p_limit: 5,
+    });
+    expect(mocks.continueProvisioning).toHaveBeenCalledWith(id);
+    expect(mocks.refreshReadiness).toHaveBeenCalledWith(id);
+    expect(mocks.retrieve).not.toHaveBeenCalled();
+  });
+  it("keeps rollout exclusions at the initialization boundary and continues after a raced candidate", async () => {
+    const excluded = "10000000-0000-4000-8000-000000000001";
+    const raced = "10000000-0000-4000-8000-000000000002";
+    const ready = "10000000-0000-4000-8000-000000000003";
+    vi.stubEnv("REVIEWS_SMS_ENABLED", "1");
+    vi.stubEnv("REVIEWS_SMS_RELEASE_ENABLED", "0");
+    vi.stubEnv("CUSTOMER_REVIEWS_EXCLUDED_BUSINESS_IDS", excluded);
+    mocks.rpc.mockResolvedValue({data: [excluded, raced, ready].map(business_id => ({business_id, owner_id: "owner"})), error: null});
+    mocks.initialize.mockImplementation(async (id: string) => { if (id === raced) throw new Error("Ownership changed"); });
+    await runReviewSmsLifecycle();
+    expect(mocks.initialize.mock.calls).toEqual([[raced, "owner"], [ready, "owner"]]);
+    expect(mocks.rpc).toHaveBeenCalledWith("review_sms_signup_candidates", {
+      p_allowed_businesses: null, p_excluded_businesses: [excluded], p_limit: 5,
+    });
+  });
+  it("does not scan new signups when SMS rollout is disabled", async () => {
+    vi.stubEnv("REVIEWS_SMS_RELEASE_ENABLED", "0");
+    await runReviewSmsLifecycle();
+    expect(mocks.rpc).not.toHaveBeenCalledWith("review_sms_signup_candidates", expect.anything());
+    expect(mocks.initialize).not.toHaveBeenCalled();
+  });
+  it("keeps existing release cleanup available when candidate reads fail", async () => {
+    vi.stubEnv("REVIEWS_SMS_ENABLED", "1");
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.rpc.mockImplementation(async (name: string) => name === "review_sms_signup_candidates"
+      ? {data: null, error: {message: "unavailable"}}
+      : {data: name === "review_sms_claim_release" ? [action] : true, error: null});
+    mocks.deactivate.mockResolvedValue("skipped");
+    await runReviewSmsLifecycle();
+    expect(mocks.rpc).toHaveBeenCalledWith("review_sms_claim_release");
+    expect(mocks.deactivate).toHaveBeenCalled();
+    expect(warning).toHaveBeenCalledOnce();
+    warning.mockRestore();
+  });
   it("never completes an action when the provider boundary skips", async () => {
     mocks.deactivate.mockResolvedValue("skipped");
     expect((await runReviewSmsLifecycle()).released).toBe(0);

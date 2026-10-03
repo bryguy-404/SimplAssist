@@ -31,6 +31,8 @@ import {
 } from "@/lib/messaging/registration/statusMapper";
 import { resolveLegalUrls } from "@/lib/messaging/registration/legalUrls";
 import { reviewOrigin } from "./domain";
+import { generateSlug } from "@/lib/util/slug.shared";
+import { reviewConsentUrl, reviewConsentDescription, reviewConsentConfirmation } from "./consentCopy";
 import {
   ensureReviewSmsKeywords,
   inspectReviewSmsKeywords,
@@ -42,11 +44,12 @@ const e164 = z.string().regex(/^\+1[2-9]\d{9}$/);
 const draftSchema = z
   .object({
     phoneNumber: e164,
-    consentDescription: z.string().trim().min(20).max(1500),
+    consentMode: z.enum(["hosted_keyword", "custom"]).default("custom"),
+    consentDescription: z.string().trim().min(20).max(1500).optional(),
     consentEvidenceUrl: z
       .string()
       .url()
-      .refine((v) => new URL(v).protocol === "https:"),
+      .refine((v) => new URL(v).protocol === "https:").optional(),
     legalBusinessName: z.string().trim().min(1).max(120).optional(),
     entityType: z
       .enum([
@@ -145,6 +148,8 @@ export async function reviewSmsSetupOverview(businessId: string) {
     hasEin: Boolean(b.ein && b.has_ein),
     identityLocked: Boolean(b.telnyx_brand_id),
     phoneNumber: phone?.phone_number ?? "",
+    reviewSignupEnabled: b.review_sms_signup_enabled === true,
+    consentUrl: b.slug ? reviewConsentUrl(b.slug, reviewOrigin()) : "",
   };
   const missing: string[] = [];
   for (const [key, column] of Object.entries(identityFields)) {
@@ -153,6 +158,50 @@ export async function reviewSmsSetupOverview(businessId: string) {
       fields[key] = typeof b[column] === "string" ? b[column] : "";
   }
   return { fields, missing };
+}
+
+/** The owner chose review texts in normal signup. This creates no provider
+ * resource and charges nothing; the existing paid plan supplies the SMS pool. */
+export async function initializeIncludedReviewSmsSignup(businessId: string, ownerId: string) {
+  if (!isReviewSmsEnabled(businessId)) return;
+  const b = await business(businessId);
+  if (b.owner_id !== ownerId) throw new ReviewSmsError("review_sms_forbidden", 403);
+  if (b.review_sms_signup_enabled !== true || !b.slug) return;
+  const {data: phone, error} = await supabaseAdmin.from("phone_numbers").select("phone_number").eq("business_id", businessId).eq("is_active", true).maybeSingle();
+  if (error) throw new ReviewSmsError("review_sms_number_conflict");
+  if (!phone) return;
+  const url = reviewConsentUrl(b.slug, reviewOrigin());
+  const {error: initError} = await supabaseAdmin.rpc("review_sms_initialize_signup", {
+    p_business: businessId, p_owner: ownerId,
+    p_draft: {phoneNumber: phone.phone_number, consentMode: "hosted_keyword", consentEvidenceUrl: url, consentDescription: reviewConsentDescription(b.name, phone.phone_number, url)},
+  });
+  if (initError) throw new ReviewSmsError("review_sms_state_unavailable", 503);
+}
+
+async function refreshIncludedSignupReviewSms(businessId: string) {
+  const a = await readReviewSmsAccount(businessId), b = await business(businessId);
+  if (!a || a.billing_source !== "included" || b.review_sms_signup_enabled !== true || !["draft","carrier_pending"].includes(a.state) || !b.telnyx_campaign_id || !b.telnyx_messaging_profile_id) return;
+  const c = await telnyx.messaging10dlc.campaign.retrieve(b.telnyx_campaign_id, {maxRetries: 0, timeout: 10000});
+  if (c.brandId !== b.telnyx_brand_id || c.referenceId !== businessId || c.usecase !== "MIXED" || !c.subUsecases?.includes("MARKETING") || !c.subUsecases?.includes("CUSTOMER_CARE") || c.embeddedLink !== true || !c.optinKeywords?.split(",").map(x => x.trim().toUpperCase()).includes("REVIEWS"))
+    throw new ReviewSmsError("review_sms_campaign_mismatch");
+  const status = mapCampaignStatus(c).dbStatus;
+  if (status === "rejected") { await updateAccount(a, {state:"support_required",last_error:"review_sms_carrier_rejected"}); return; }
+  if (status !== "approved") return;
+  if (!(await inspectReviewSmsKeywords(b.telnyx_messaging_profile_id, keywordProgramFromCampaign(c, b.name))).ready)
+    throw new ReviewSmsError("review_sms_keywords_not_ready");
+  const {error: statusError} = await supabaseAdmin.from("businesses")
+    .update({campaign_status:"approved"}).eq("id",businessId)
+    .eq("owner_id",b.owner_id).eq("telnyx_campaign_id",b.telnyx_campaign_id);
+  if (statusError) throw new ReviewSmsError("review_sms_state_unavailable",503);
+  await ensureCampaignAssignmentForBusiness(businessId, {force:true,reason:"review_sms_signup_ready"});
+  if (!(await getSmsReadinessForBusiness(businessId)).smsReady) return;
+  const {data: phone, error} = await supabaseAdmin.from("phone_numbers").select("id").eq("business_id",businessId).eq("is_active",true).single();
+  if (error || !phone) throw new ReviewSmsError("review_sms_number_conflict");
+  const {data: activated, error: activateError} = await supabaseAdmin.rpc("review_sms_activate_signup", {
+    p_business:businessId,p_owner:b.owner_id,p_campaign:b.telnyx_campaign_id,p_profile:b.telnyx_messaging_profile_id,p_phone:phone.id,
+    p_evidence:`provider:${b.telnyx_campaign_id}:MIXED:CUSTOMER_CARE,MARKETING:REVIEWS:${businessId}`,p_forbidden_profiles:forbiddenProfiles(),
+  });
+  if (activateError || activated !== true) throw new ReviewSmsError("review_sms_carrier_approval_required");
 }
 export async function saveReviewSmsSetup(
   businessId: string,
@@ -170,6 +219,9 @@ export async function saveReviewSmsSetup(
   const b = await business(businessId);
   if (b.owner_id !== ownerId || b.deleted_at || b.operations_suspended_at)
     throw new ReviewSmsError("review_sms_forbidden", 403);
+  if (draft.consentMode === "custom" && (!draft.consentDescription || !draft.consentEvidenceUrl)) {
+    throw new ReviewSmsError("review_sms_setup_invalid", 400);
+  }
   const { data: activeNumber, error: numberError } = await supabaseAdmin
     .from("phone_numbers")
     .select("phone_number")
@@ -196,6 +248,19 @@ export async function saveReviewSmsSetup(
     if (!saved[column])
       throw new ReviewSmsError(`review_sms_setup_missing_${column}`, 400);
   if (!saved.has_ein) throw new ReviewSmsError("review_sms_ein_required", 400);
+  if (draft.consentMode === "hosted_keyword") {
+    // Chat signup has no carrier-registration step to replace its placeholder
+    // slug. Allocate once under the owner lock, including concurrent saves.
+    const base = generateSlug(saved.legal_business_name || saved.name);
+    const { data: slug, error: slugError } = await supabaseAdmin.rpc("review_sms_prepare_hosted_slug", {
+      p_business: businessId, p_owner: ownerId,
+      p_base: base.startsWith("pending-") ? `biz-${base}`.slice(0, 60) : base,
+    });
+    if (slugError || typeof slug !== "string" || !slug || slug.startsWith("pending-"))
+      throw new ReviewSmsError("review_sms_setup_unavailable", 503);
+    draft.consentEvidenceUrl = reviewConsentUrl(slug, reviewOrigin());
+    draft.consentDescription = reviewConsentDescription(b.name, draft.phoneNumber, draft.consentEvidenceUrl);
+  }
   patch.compliance_info_completed_at =
     b.compliance_info_completed_at ?? new Date().toISOString();
   // Persist the identity and non-secret draft under one owner/business lock.
@@ -205,6 +270,7 @@ export async function saveReviewSmsSetup(
     p_patch: patch,
     p_draft: {
       phoneNumber: draft.phoneNumber,
+      consentMode: draft.consentMode,
       consentDescription: draft.consentDescription,
       consentEvidenceUrl: draft.consentEvidenceUrl,
     },
@@ -366,7 +432,7 @@ export async function inspectExistingReviewSmsKeywordReadiness(
     throw new ReviewSmsError("review_sms_campaign_mismatch");
   return inspectReviewSmsKeywords(
     b.telnyx_messaging_profile_id,
-    keywordProgramFromCampaign(campaign),
+    keywordProgramFromCampaign(campaign, b.name),
   );
 }
 
@@ -376,6 +442,10 @@ export async function continueReviewSmsProvisioning(businessId: string) {
     process.env.REVIEWS_SMS_PROVISIONING_ENABLED !== "1"
   )
     return;
+  // Included plans use their normal signup registration and never buy a
+  // second brand, campaign or number through the Chat add-on provisioner.
+  const current = await readReviewSmsAccount(businessId);
+  if (!current || current.billing_source !== "direct") return;
   const { account: a } = await validateReviewSmsSetup(businessId);
   if (a.state !== "carrier_pending") return;
   const { data: claim, error } = await supabaseAdmin.rpc(
@@ -392,6 +462,7 @@ export async function continueReviewSmsProvisioning(businessId: string) {
     // A brand may take time to verify. Never spend the sole campaign application
     // while brand identity is still pending or its provider response is unclear.
     const brandBusiness = await business(businessId);
+    await updateAccount(a, {brand_id: brandBusiness.telnyx_brand_id});
     const brand = await telnyx.messaging10dlc.brand.retrieve(
       brandBusiness.telnyx_brand_id,
       { maxRetries: 0, timeout: 10000 },
@@ -402,11 +473,13 @@ export async function continueReviewSmsProvisioning(businessId: string) {
     if (brandStatus !== "approved") return;
     await assertClaim(a, claim);
     await createMessagingProfile(businessId);
+    await updateAccount(a, {messaging_profile_id: (await business(businessId)).telnyx_messaging_profile_id});
     // The routing application keeps unentitled voice calls on the existing
     // fail-closed path; creating it never grants AI voice answering.
     await assertClaim(a, claim);
     await createVoiceApplication(businessId);
     const resourceBusiness = await business(businessId);
+    await updateAccount(a, {messaging_profile_id: resourceBusiness.telnyx_messaging_profile_id, voice_application_id: resourceBusiness.telnyx_voice_application_id});
     await assertTenantResourceScope(
       businessId,
       resourceBusiness.telnyx_messaging_profile_id,
@@ -472,6 +545,10 @@ export async function continueReviewSmsProvisioning(businessId: string) {
         },
       });
     }
+    const {data: boundPhone, error: boundPhoneError} = await supabaseAdmin.from("phone_numbers").select("id,phone_number").eq("business_id",businessId).eq("is_active",true).single();
+    if (boundPhoneError || !boundPhone || boundPhone.phone_number !== a.draft.phoneNumber)
+      throw new ReviewSmsError("review_sms_number_conflict");
+    await updateAccount(a, {phone_number_id: boundPhone.id});
     await assertClaim(a, claim);
     await submitReviewSmsCampaign(a, claim);
     await assertClaim(a, claim);
@@ -539,8 +616,8 @@ async function submitReviewSmsCampaign(a: ReviewSmsAccount, claim: string) {
       sample3: `${label}: Thank you for your feedback. Our team will help with your question. Reply STOP to opt out.`,
       messageFlow: `${a.draft.consentDescription} Evidence: ${a.draft.consentEvidenceUrl}. Customers consent to review requests from ${label} using ${phone}. Up to 2 messages per completed service; message and data rates may apply. Consent is not required to purchase. Reply STOP to opt out or HELP for help. Privacy: ${links.privacyUrl}. Terms: ${links.termsUrl}.`,
       subscriberOptin: true,
-      optinKeywords: keywords.start.keywords.join(","),
-      optinMessage: keywords.start.resp_text,
+      optinKeywords: a.draft.consentMode === "hosted_keyword" ? "REVIEWS" : keywords.start.keywords.join(","),
+      optinMessage: a.draft.consentMode === "hosted_keyword" ? reviewConsentConfirmation(label) : keywords.start.resp_text,
       subscriberOptout: true,
       optoutKeywords: keywords.stop.keywords.join(","),
       optoutMessage: keywords.stop.resp_text,
@@ -596,6 +673,10 @@ export async function refreshReviewSmsProviderReadiness(businessId: string) {
   )
     return;
   const a = await readReviewSmsAccount(businessId);
+  if (a?.billing_source === "included") {
+    await refreshIncludedSignupReviewSms(businessId);
+    return;
+  }
   if (
     !a ||
     !a.campaign_id ||
@@ -629,7 +710,7 @@ export async function refreshReviewSmsProviderReadiness(businessId: string) {
     !(
       await inspectReviewSmsKeywords(
         b.telnyx_messaging_profile_id,
-        keywordProgramFromCampaign(campaign),
+        keywordProgramFromCampaign(campaign, b.name),
       )
     ).ready
   )
@@ -715,7 +796,7 @@ export async function approveExistingReviewSmsUsecase(
     !(
       await inspectReviewSmsKeywords(
         b.telnyx_messaging_profile_id,
-        keywordProgramFromCampaign(c),
+        keywordProgramFromCampaign(c, b.name),
       )
     ).ready
   )

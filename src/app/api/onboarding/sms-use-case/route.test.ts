@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("server-only", () => ({}));
+
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
   adminFrom: vi.fn(),
@@ -116,7 +118,7 @@ function userClient(businessRow: Record<string, unknown>) {
   };
 }
 
-function request() {
+function request(overrides: Record<string, unknown> = {}) {
   return new NextRequest("http://localhost/api/onboarding/sms-use-case", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -134,6 +136,7 @@ function request() {
         "Customers opt in by contacting the business for help through its website or phone number.",
       a2p_risk_checklist_answer: "none",
       a2p_risk_checklist_selections: [],
+      ...overrides,
     }),
   });
 }
@@ -289,6 +292,33 @@ describe("POST /api/onboarding/sms-use-case rejection lock", () => {
       expect(adminChains[0].is).toHaveBeenCalledWith("campaign_status", null);
       expect(adminChains[1].eq).toHaveBeenCalledWith("owner_id", USER_ID);
       expect(adminChains[1].is).toHaveBeenCalledWith("deleted_at", null);
+    },
+  );
+});
+
+describe("new review-text signup scope", () => {
+  it("rejects opting in while the review texting rollout is off", async () => {
+    const response = await POST(request({ review_sms_signup_enabled: true }));
+    expect(response.status).toBe(409);
+    expect(mocks.screenA2pRiskForBusiness).not.toHaveBeenCalled();
+    expect(adminChains).toHaveLength(0);
+  });
+
+  it("saves the explicit owner choice when the rollout permits the business", async () => {
+    vi.stubEnv("REVIEWS_SMS_ENABLED", "1");
+    vi.stubEnv("REVIEWS_SMS_PILOT_BUSINESS_IDS", "*");
+    const response = await POST(request({ review_sms_signup_enabled: true }));
+    expect(response.status).toBe(200);
+    expect(adminChains.some((chain) => chain.update.mock.calls.some(([value]) => value.review_sms_signup_enabled === true))).toBe(true);
+  });
+
+  it.each([{ telnyx_campaign_id: "existing-campaign" }, { onboarding_completed_at: "2026-01-01T00:00:00Z" }])(
+    "does not migrate an existing account through signup: %j", async (state) => {
+      vi.stubEnv("REVIEWS_SMS_ENABLED", "1");
+      vi.stubEnv("REVIEWS_SMS_PILOT_BUSINESS_IDS", "*");
+      mocks.createClient.mockResolvedValue(userClient(business(state)));
+      expect((await POST(request({ review_sms_signup_enabled: true }))).status).toBe(409);
+      expect(mocks.screenA2pRiskForBusiness).not.toHaveBeenCalled();
     },
   );
 });

@@ -2,6 +2,7 @@ import "server-only";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
   continueReviewSmsProvisioning,
+  initializeIncludedReviewSmsSignup,
   refreshReviewSmsProviderReadiness,
 } from "./smsProvisioning.server";
 import {
@@ -17,6 +18,38 @@ import {
 } from "@/lib/stripe/reviewSms.server";
 import { stripe } from "@/lib/stripe/client";
 import { classifySubscriptionItems } from "@/lib/stripe/subscriptionItems";
+import {
+  isReviewSmsEnabled,
+  reviewSmsSignupScope,
+} from "@/lib/billing/reviewSmsRollout.server";
+
+async function initializeNewSignupAccounts() {
+  const scope = reviewSmsSignupScope();
+  if (!scope) return;
+  const { data, error } = await supabaseAdmin.rpc("review_sms_signup_candidates", {
+    p_allowed_businesses: scope.businessIds,
+    p_excluded_businesses: scope.excludedBusinessIds,
+    p_limit: 5,
+  });
+  if (error) throw new ReviewSmsError("review_sms_state_unavailable", 503);
+  for (const candidate of (data ?? []) as {
+    business_id: string;
+    owner_id: string;
+  }[]) {
+    // Recheck the rollout at the mutation boundary; SQL rechecks ownership,
+    // billing and the owner's explicit choice under the account lock.
+    if (!isReviewSmsEnabled(candidate.business_id)) continue;
+    try {
+      await initializeIncludedReviewSmsSignup(
+        candidate.business_id,
+        candidate.owner_id,
+      );
+    } catch {
+      // One raced ownership/payment change must not prevent later accounts
+      // from being initialized, or block existing-account release cleanup.
+    }
+  }
+}
 
 async function refreshDirectBilling(account: {
   business_id: string;
@@ -54,6 +87,13 @@ async function refreshDirectBilling(account: {
 /** Runs independently of the outbound-send switches, so cancellation cannot
  * leave a chargeable number/campaign behind just because sending is paused. */
 export async function runReviewSmsLifecycle() {
+  try {
+    await initializeNewSignupAccounts();
+  } catch {
+    // Initialization is retried next tick. Existing reconciliation and resource
+    // cleanup remain independent of a failure in the new-signup scan.
+    console.warn("[review-sms] Signup initialization unavailable; will retry.");
+  }
   const { data: accounts, error } = await supabaseAdmin
     .from("review_sms_accounts")
     .select(

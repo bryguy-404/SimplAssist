@@ -178,6 +178,7 @@ describe("dashboard request context", () => {
         "state",
         "zip",
         "opt_in_description",
+  "review_sms_signup_enabled",
         "privacy_terms_mode",
         "privacy_url_override",
         "terms_url_override",

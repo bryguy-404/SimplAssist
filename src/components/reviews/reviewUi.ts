@@ -21,6 +21,10 @@ const REASONS: Record<string, string> = {
   suppressed: "Review requests are blocked for this contact method",
   permission_revoked:
     "Permission was revoked. Record renewed permission before requesting another review.",
+  review_sms_keyword_permission_required:
+    "This customer needs to text REVIEWS from their phone using your permission page before you can send review requests.",
+  sms_review_keyword_permission_required:
+    "This customer needs to text REVIEWS from their phone using your permission page before you can send review requests.",
   customer_changed: "Contact details changed",
   contact_changed: "Contact details changed",
   email_allowance_reached: "Email allowance reached",

@@ -5,6 +5,7 @@ import {
 } from "@/lib/messaging/complianceCopy";
 import { isE164PhoneNumber, normalizeE164Input } from "@/lib/phone/e164";
 import type { Language } from "@/types/database";
+import { reviewConsentConfirmation, reviewConsentDescription } from "@/lib/reviews/consentCopy";
 
 export const TELNYX_CAMPAIGN_MESSAGE_FLOW_MAX_CHARACTERS = 2_048;
 
@@ -49,12 +50,16 @@ export function buildCampaignMessageFlow({
   smsEntryPoint,
   privacyUrl,
   language,
+  reviewConsentPageUrl,
+  termsUrl,
 }: {
   business: SmsComplianceBusiness;
   smsPhoneNumber: string;
   smsEntryPoint: string;
   privacyUrl: string;
   language?: Language | null;
+  reviewConsentPageUrl?: string;
+  termsUrl?: string;
 }): CampaignMessageFlowCopy {
   const normalizedSmsPhoneNumber = normalizeE164Input(smsPhoneNumber);
   if (!isE164PhoneNumber(normalizedSmsPhoneNumber)) {
@@ -66,13 +71,30 @@ export function buildCampaignMessageFlow({
     });
   }
 
-  const copy = buildSmsComplianceCopy({
+  const careCopy = buildSmsComplianceCopy({
     business,
     smsPhoneNumber: normalizedSmsPhoneNumber,
     smsEntryPoint,
     privacyUrl,
     language,
   });
+  // A MIXED filing has distinct opt-in paths. Keep the exact customer-care
+  // voicemail script while describing review permission separately.
+  const copy = reviewConsentPageUrl
+    ? {
+        ...careCopy,
+        messageFlow: [
+          `Customer care: customers initiate a question or service request by texting ${normalizedSmsPhoneNumber}, published at ${smsEntryPoint}.`,
+          `Voicemail: callers hear “${careCopy.voicemailGreeting}” and then leave a message. A call or live conversation alone is not consent.`,
+          `Customer-care confirmation: “${careCopy.confirmationSms}”`,
+          reviewConsentDescription(business.name, normalizedSmsPhoneNumber, reviewConsentPageUrl),
+          `Review confirmation: “${reviewConsentConfirmation(business.name)}”`,
+          `Customer-care permission and START do not authorize review requests. Review replies go to the business team.`,
+          `Privacy: ${privacyUrl}. Terms: ${termsUrl ?? `${smsEntryPoint}/terms`}.`,
+        ].join(" "),
+        optinMessage: reviewConsentConfirmation(business.name),
+      }
+    : careCopy;
   const messageFlowCharacterCount = copy.messageFlow.length;
 
   if (

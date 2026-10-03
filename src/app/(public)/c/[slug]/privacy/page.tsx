@@ -1,3 +1,4 @@
+import { loadReviewLegalProgram } from "@/lib/legal/reviewProgram.server";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { LegalDocLayout } from "@/components/legal/LegalDocLayout";
@@ -29,7 +30,7 @@ type PageProps = { params: Promise<{ slug: string }> };
 export const dynamic = "force-dynamic";
 
 const PUBLIC_PROJECTION =
-  "id, slug, name, email, phone_number, address, city, state, zip, opt_in_description, ai_settings(language)";
+  "id, slug, name, email, phone_number, address, city, state, zip, review_sms_signup_enabled, opt_in_description, ai_settings(language)";
 
 type PublicLegalBusiness = LegalTemplateBusiness & {
   id: string;
@@ -52,10 +53,14 @@ async function loadBusiness(
 
   const business = data as unknown as PublicLegalBusiness;
 
-  const smsPhoneNumber = await getActiveSmsNumberForBusiness(business.id);
+  const [smsPhoneNumber, reviewProgram] = await Promise.all([
+    getActiveSmsNumberForBusiness(business.id),
+    loadReviewLegalProgram(business),
+  ]);
 
   return {
     ...business,
+    ...reviewProgram,
     language: business.ai_settings?.language,
     sms_phone_number: smsPhoneNumber,
   };

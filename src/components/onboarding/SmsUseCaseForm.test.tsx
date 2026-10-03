@@ -30,6 +30,19 @@ const PARTNER_REQUEST_BRAND: RequestBrand = {
 };
 
 describe("SmsUseCaseForm visible brand copy", () => {
+  it("offers a separate, unchecked review-text choice only when signup is enabled", () => {
+    const render = (available: boolean) => renderToStaticMarkup(
+      <BrandProvider requestBrand={PARTNER_REQUEST_BRAND}>
+        <SmsUseCaseForm businessId="22222222-2222-4222-8222-222222222222" businessName="Northstar" businessType="general" language="en" reviewSmsAvailable={available} onNext={vi.fn()} onBack={vi.fn()} />
+      </BrandProvider>,
+    );
+    expect(render(false)).not.toContain("Include Google review requests");
+    const enabled = render(true);
+    expect(enabled).toContain("Include Google review requests");
+    expect(enabled).toContain("phone call, chat, or imported number does not give that permission");
+    expect(enabled).not.toMatch(/type="checkbox"[^>]*checked=""/);
+  });
+
   it("uses the request brand for ordinary risk-review presentation", () => {
     const markup = renderToStaticMarkup(
       <BrandProvider requestBrand={PARTNER_REQUEST_BRAND}>

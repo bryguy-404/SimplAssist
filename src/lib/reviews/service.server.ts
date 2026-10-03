@@ -54,7 +54,6 @@ type PreviewSnapshot = {
   reminderEnabled: boolean;
   scheduledAt: string;
   googleReviewUrl: string;
-  postalAddress: string;
   businessName: string;
   from: string;
   replyTo: string;
@@ -132,10 +131,7 @@ export async function reviewOverview(businessId: string, ownerId: string) {
       enabled: control && isEmailReviewsEnabledForBusiness(businessId),
       paid: period?.allowed ?? false,
       paused: settings.paused,
-      ready:
-        !!settings.google_review_url &&
-        !!settings.postal_address &&
-        !!settings.reply_to_verified_at,
+      ready: !!settings.google_review_url && !!settings.reply_to_verified_at,
       sendingEnabled: isReviewEmailSendingEnabled(),
     },
     usage: {
@@ -164,12 +160,6 @@ export async function updateReviewSettings(
     if (!url) throw new ReviewError("invalid_review_google_url");
     patch.google_review_url = url;
   }
-  if (input.postalAddress !== undefined)
-    patch.postal_address = textInput(
-      input.postalAddress,
-      500,
-      "postal_address",
-    );
   if (input.timezone !== undefined)
     patch.timezone = validateReviewTimezone(input.timezone);
   for (const [camel, snake] of [
@@ -285,7 +275,7 @@ export async function createReviewPreview(
   const s = overview.settings;
   if (!overview.eligibility.enabled || !overview.eligibility.paid || s.paused)
     throw new ReviewError("review_sending_unavailable", 409);
-  if (!s.google_review_url || (channel === "email" && !s.postal_address))
+  if (!s.google_review_url || (channel === "email" && !s.reply_to_verified_at))
     throw new ReviewError("review_setup_incomplete", 409);
   let smsSender: string | undefined, smsMessagingProfileId: string | undefined;
   if (channel === "sms") {
@@ -452,7 +442,6 @@ export async function createReviewPreview(
     reminderEnabled,
     scheduledAt: at.toISOString(),
     googleReviewUrl: s.google_review_url,
-    postalAddress: s.postal_address ?? "",
     businessName: businessResult.data!.name,
     from: brand.from,
     replyTo: s.reply_to,
@@ -497,7 +486,6 @@ export async function createReviewPreview(
           customer: first.name,
           enrollmentId: first.enrollmentId,
           businessId,
-          postalAddress: snapshot.postalAddress,
         })
     : null;
   const usage =
@@ -595,7 +583,6 @@ export async function confirmReviewCampaign(
       customer: r.name,
       enrollmentId: r.enrollmentId,
       businessId,
-      postalAddress: s.postalAddress,
     };
     return {
       id: randomUUID(),
@@ -750,8 +737,8 @@ export async function queueReviewTest(businessId: string, ownerId: string) {
       to: [email],
       replyTo: s.reply_to,
       subject: `[Test] ${renderReviewTemplate(s.subject, business!.name, "Sample customer")}`,
-      text: `${body}\n\n[Your Google review link appears here]\n\n${business!.name} · ${s.postal_address ?? "Postal address required before sending"}\nThis is a preview sent only to your verified account email.`,
-      html: `<p>${escapeHtml(body)}</p><p>[Your Google review link appears here]</p><p>${escapeHtml(business!.name)} · ${escapeHtml(s.postal_address ?? "Postal address required before sending")}</p><p>This is a preview sent only to your verified account email.</p>`,
+      text: `${body}\n\n[Your Google review link appears here]\n\n${business!.name}\nThis is a preview sent only to your verified account email.`,
+      html: `<p>${escapeHtml(body)}</p><p>[Your Google review link appears here]</p><p>${escapeHtml(business!.name)}</p><p>This is a preview sent only to your verified account email.</p>`,
     },
   });
   return { queued: true, to: email };

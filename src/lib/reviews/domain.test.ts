@@ -73,7 +73,7 @@ describe("review links and sender safety", () => {
       validateGoogleReviewUrl("https://user:pass@g.page/review"),
     ).toBeNull();
   });
-  it("renders escaped business/customer text and includes postal and one-click headers", () => {
+  it("renders escaped business/customer text and keeps the review and one-click opt-out links", () => {
     const mail = buildReviewEmail({
       from: "SimplAssist <reviews@example.com>",
       to: "a@example.com",
@@ -84,11 +84,17 @@ describe("review links and sender safety", () => {
       customer: "<img>",
       enrollmentId: id,
       businessId: id,
-      postalAddress: "123 Main Street",
     });
     expect(mail.html).toContain("&lt;img&gt;");
     expect(mail.html).not.toContain("<img>");
-    expect(mail.text).toContain("123 Main Street");
+    expect(mail.html).toContain("<p>&lt;Business&gt;</p>");
+    expect(mail.text).toContain(
+      "\n\n<Business>\nUnsubscribe from review requests:",
+    );
+    expect(mail.text).toContain("https://simplassist.com/r/");
+    expect(mail.headers["List-Unsubscribe"]).toContain(
+      "https://simplassist.com/reviews/unsubscribe/",
+    );
     expect(mail.headers["List-Unsubscribe-Post"]).toBe(
       "List-Unsubscribe=One-Click",
     );

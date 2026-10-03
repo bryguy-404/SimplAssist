@@ -30,8 +30,7 @@ const REASONS: Record<string, string> = {
   schedule_stale: "Choose a new send time",
   invalid_review_google_url:
     "Use your business’s Google review link, beginning with https://.",
-  review_setup_incomplete:
-    "Save your Google review link and business postal address first.",
+  review_setup_incomplete: "Save your Google review link first.",
   review_preview_expired:
     "This preview expired. Create a fresh preview before sending.",
   review_email_rate_limit:

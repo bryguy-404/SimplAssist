@@ -44,8 +44,19 @@ Changing it invalidates existing public links and previews; retain it across
 normal deployments. `NEXT_PUBLIC_APP_URL` is the canonical origin (default
 `https://simplassist.com`). Public requests cannot supply redirect destinations.
 Local development permits loopback HTTP only outside production. A Google
-review destination and business postal address are required for customer email.
-All recipients see the same neutral review request; there is no star-rating gate.
+review destination and verified Reply-To are required for customer email.
+Reviews no longer collects or requires a postal address. Generated initial,
+reminder and owner-test footers include the business name without a mailing
+address. Customer emails retain their review and unsubscribe links. Existing
+nullable address data is retained but is not copied into new previews or emails.
+Previously rendered outbox messages remain frozen; inspect pending work before
+deploying a footer change. All recipients see the same neutral review request;
+there is no star-rating gate.
+
+This footer behavior is a product decision, not a determination that the messages
+are exempt from applicable email law or Resend's policies. Low volume alone does
+not determine that classification. Sending controls and permission requirements
+are unchanged.
 
 Register Resend's signed events at `/api/webhooks/reviews-email` and configure
 `REVIEWS_RESEND_WEBHOOK_SECRET` from that endpoint's signing secret. Subscribe

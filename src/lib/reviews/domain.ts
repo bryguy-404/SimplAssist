@@ -158,7 +158,6 @@ export function buildReviewEmail(args: {
   customer: string;
   enrollmentId: string;
   businessId: string;
-  postalAddress: string;
 }) {
   const review = `${reviewOrigin()}/r/${signReviewToken(args.enrollmentId, "review")}`;
   const unsubscribe = `${reviewOrigin()}/reviews/unsubscribe/${signReviewToken(args.enrollmentId, "unsubscribe")}`;
@@ -173,8 +172,8 @@ export function buildReviewEmail(args: {
     to: [args.to],
     replyTo: args.replyTo,
     subject,
-    text: `${body}\n\nLeave an honest Google review: ${review}\n\n${args.business} · ${args.postalAddress}\nUnsubscribe from review requests: ${unsubscribe}`,
-    html: `<p>${escapeHtml(body).replaceAll("\n", "<br>")}</p><p><a href="${review}">Leave an honest Google review</a></p><p>${escapeHtml(args.business)} · ${escapeHtml(args.postalAddress)}</p><p><a href="${unsubscribe}">Unsubscribe from review requests</a></p>`,
+    text: `${body}\n\nLeave an honest Google review: ${review}\n\n${args.business}\nUnsubscribe from review requests: ${unsubscribe}`,
+    html: `<p>${escapeHtml(body).replaceAll("\n", "<br>")}</p><p><a href="${review}">Leave an honest Google review</a></p><p>${escapeHtml(args.business)}</p><p><a href="${unsubscribe}">Unsubscribe from review requests</a></p>`,
     headers: {
       "List-Unsubscribe": `<${unsubscribe}>`,
       "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",

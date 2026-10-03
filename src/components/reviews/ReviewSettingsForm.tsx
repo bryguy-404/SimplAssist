@@ -49,7 +49,6 @@ export default function ReviewSettingsForm({
           method: "PATCH",
           body: JSON.stringify({
             googleReviewUrl: value("googleReviewUrl"),
-            postalAddress: value("postalAddress"),
             timezone: value("timezone"),
             replyTo: value("replyTo"),
             notificationEmail: value("notificationEmail"),
@@ -122,23 +121,6 @@ export default function ReviewSettingsForm({
               Paste the review link from your Google Business Profile’s “Ask for
               reviews” option. Every customer receives the same opportunity to
               leave an honest review.
-            </p>
-          </div>
-          <div>
-            <label htmlFor={`${id}-address`} className={fieldLabel}>
-              Business postal address
-            </label>
-            <textarea
-              id={`${id}-address`}
-              name="postalAddress"
-              required
-              rows={2}
-              maxLength={500}
-              defaultValue={settings.postal_address || ""}
-              className={inputField}
-            />
-            <p className={`mt-2 text-xs ${body}`}>
-              Appears in the footer of your review emails.
             </p>
           </div>
           <div>
@@ -243,7 +225,7 @@ export default function ReviewSettingsForm({
             <p className={`mt-2 text-xs ${body}`}>
               Available placeholders: <code>{"{{customer_name}}"}</code> and{" "}
               <code>{"{{business_name}}"}</code>. The Google review button,
-              business address, and unsubscribe link are added automatically.
+              business name, and unsubscribe link are added automatically.
             </p>
           </div>
           <label className={`flex items-start gap-3 text-sm ${body}`}>

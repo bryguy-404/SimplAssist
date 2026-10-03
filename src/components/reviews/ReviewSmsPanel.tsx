@@ -631,9 +631,8 @@ export default function ReviewSmsPanel({
             {state === "cancel_pending" && account?.cancel_at ? (
               <p className={`rounded-2xl p-3 text-sm ${statusWarning}`}>
                 Review texting ends {reviewTime(account.cancel_at)}. Complete
-                any number transfer before then. Resources used only for review
-                texting are released when the paid term ends; your base plan
-                remains active.
+                any number transfer before then; your base plan remains active.
+                Contact support about your review number.
               </p>
             ) : null}
             {account?.activation_paid_at &&
@@ -713,8 +712,8 @@ export default function ReviewSmsPanel({
             </p>
             <p className={`rounded-2xl p-3 text-sm ${statusWarning}`}>
               If you want to keep your review number, complete its transfer
-              before the paid term ends. The number and registration used only
-              for review texting are released at that time.
+              before the paid term ends. Contact support about your review
+              number.
             </p>
             {error ? (
               <p

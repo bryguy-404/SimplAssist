@@ -1,5 +1,10 @@
 # Customers and Reviews implementation — October 3, 2026
 
+**October 3, 2026 release update:** The later
+[production release status](./customer-reviews-release-status-2026-10-03.md) supersedes the
+historical production-unchanged status below. This report records the completed
+local implementation and verification before that pilot release.
+
 The approved feature is implemented in the local workspace. Production remains
 unchanged: no deployment, live message, phone purchase, carrier application,
 Stripe price creation or subscription change was performed during implementation.

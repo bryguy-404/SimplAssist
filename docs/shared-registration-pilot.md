@@ -1,6 +1,6 @@
 # Shared legal registration pilot
 
-Status: implementation and local verification complete; **production enrollment and final release validation are pending**. No new live brand, campaign, number, subscription, or customer message was created by this verification.
+Status: **implemented, pushed to main, migrated, and deployed with enrollment disabled**. The fresh Bryan Develops account and real carrier pilot remain pending. No new live brand, campaign, number, subscription, or customer message was created by this verification.
 
 ## Scope and baseline
 
@@ -112,8 +112,24 @@ Closing either account scrubs its local identity and retires its membership whil
 - Existing guarded Stripe TEST provider-contract checks (8) and signed application-webhook conversion checks (9) passed with zero cleanup errors. These do not prove a new live shared-brand carrier filing or delivery.
 - No production enrollment, paid carrier creation, customer send, or live carrier approval is claimed by this evidence.
 
-## Release validation — pending final release
+## Production release — October 5, 2026
 
 Production preflight on October 5 confirmed migration history through 115; the dry-run includes only 116 and 117, without seeds or vault changes. The shared admission, paid-start, and business allowlist variables are unset (disabled). Generic resource release remains `disabled`; review SMS release remains `0`. SimplAssist retains its active Full subscription, October 22 renewal, 83 contacts, original phone/resource bindings, and the verified Telnyx brand with two campaigns. No target enrollment exists yet.
 
-Record the final clean database/application suite, deployment/version, environment controls, authenticated browser checks, and read-only production verification here. After the fresh target exists, separately record its approved membership and the owner-authorized live pilot results without sensitive identity data.
+Application revision: `7cc690a0fae2a842c01978de49c9f57643a0dffe`, in five implementation commits (`c96f6bf`, `8320ecf`, `ece54dc`, `9f25ed1`, `7cc690a`). The clean Git archive hash is `f4e9f42e4eac9f37549ffcf95aec01c4e37adbb4550d62bf2487ec9bb2cc3dc3`. Unrelated pre-existing working files were excluded.
+
+Migrations 116 and 117 are applied to production project `inmgpkurctttsofpywuz`. Remote migration history confirms both; no seeds, roles, or vault configuration were changed. New tables/RPCs reject anonymous access (`42501`), and the existing SimplAssist SMS eligibility helper returns true.
+
+Railway web deployment `c176226a-e03d-445b-a28b-c1fd7f7465ca` and voice deployment `936326c8-e5e4-492c-ab3a-0ea052823039` reached **SUCCESS**, with running instances and successful health checks. Voice was updated because its answer prompt also needs to respect the private-address preference. Existing build/start/health/replica settings were preserved for every service. Booking-alert and review workers retain their original deployments; the scan worker followed its existing GitHub auto-deployment configuration.
+
+Live checks confirmed `/api/health` returns 200, anonymous admin access returns 404, and anonymous review-SMS access returns 401. The synthetic preview is blocked by the production guard and contains no fixture content (Next.js renders a streamed not-found response with noindex). The signed-in SimplAssist Reviews history and settings loaded successfully, retained the Google link and allowance/renewal details, and kept sending paused. No form save, preview email, or SMS was triggered by the browser checks.
+
+### Owner-approved address correction
+
+Live preflight found that SimplAssist's saved street field contained only a city description while its verified Telnyx brand held the full registered address. The owner explicitly approved keeping **both accounts' full addresses private**. A guarded, single-row update set SimplAssist's public visibility to `city_state` and copied the existing verified carrier street address privately at the same commit. EIN, legal name, city, state, ZIP, brand identity, owner, and current row revision were checked before the update.
+
+This is the sole intentional change to the existing account's address settings. Fresh HTTP reads of its hosted contact, privacy, terms, and review-text pages contain neither the private street nor ZIP; the browser shows `South Bend, IN` on the contact page. Before/after fingerprints confirm that subscription, renewal, phone/resource bindings, and all 83 contacts remained unchanged. Telnyx still reports the verified existing brand with its two original campaigns.
+
+### Remaining live pilot
+
+All shared start controls remain unset/disabled, canonical registration and membership tables remain empty, and generic resource release remains disabled. The owner must next create the fresh Bryan Develops $15 Chat account through normal signup. Then inspect and approve those exact two memberships, verify Bryan's own review/contact details and public pages, and enable the normal $25 application flow. The $20 monthly add-on remains dependent on real carrier approval, verified assignment, and owner-confirmed activation. No live carrier submission or $35 → $49 carrier transition has been declared tested.

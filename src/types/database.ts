@@ -332,6 +332,8 @@ export interface Business {
   city: string | null;
   state: string | null;
   zip: string | null;
+  public_address_visibility?: "full" | "city_state";
+  shared_registration_id?: string | null;
   timezone: string;
   sms_consent_agreed: boolean;
   sms_consent_agreed_at: string | null;

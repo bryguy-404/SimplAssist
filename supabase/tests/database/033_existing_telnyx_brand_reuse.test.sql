@@ -37,11 +37,11 @@ SELECT ok(
     WHERE class_row.relname = 'businesses_normalized_ein_unique'
       AND index_row.indisunique
       AND pg_get_expr(index_row.indpred, index_row.indrelid)
-        = '(ein IS NOT NULL)'
+        = '((ein IS NOT NULL) AND (shared_registration_id IS NULL))'
       AND pg_get_indexdef(index_row.indexrelid)
         LIKE '%replace(ein, ''-''::text, ''''::text)%'
   ),
-  'normalized non-null EINs have a unique partial expression index'
+  'ordinary non-null EINs have a unique partial expression index; shared claims require explicit membership'
 );
 
 SELECT ok(

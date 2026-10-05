@@ -1,7 +1,9 @@
 "use client";
 
 import { useId, useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import { CheckCircle2, Mail } from "lucide-react";
+import { useToast } from "@/components/ui/Toast";
 import type { ReviewOverview } from "@/lib/reviews/types";
 import {
   body,
@@ -30,6 +32,8 @@ export default function ReviewSettingsForm({
   onSaved: (value: ReviewOverview) => void;
 }) {
   const id = useId();
+  const router = useRouter();
+  const { showToast } = useToast();
   const settings = overview.settings;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,11 +65,13 @@ export default function ReviewSettingsForm({
         },
       );
       onSaved(next);
-      setNotice(
-        next.settings.pending_reply_to
-          ? "Settings saved. Check the new Reply-To inbox to verify that address."
-          : "Review settings saved.",
-      );
+      const message = next.settings.pending_reply_to
+        ? "Settings saved. Check the new Reply-To inbox to verify that address."
+        : "Review settings saved.";
+      setNotice(message);
+      showToast(message, "success");
+      // Refresh the router cache so returning to Dashboard reflects saved setup.
+      router.refresh();
     } catch (cause) {
       setError(requestError(cause));
     } finally {

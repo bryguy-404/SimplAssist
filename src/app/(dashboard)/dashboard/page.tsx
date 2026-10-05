@@ -1,7 +1,9 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import UpgradePrompt from '@/components/dashboard/UpgradePrompt';
+import ReviewSetupPrompt from '@/components/dashboard/ReviewSetupPrompt';
 import { getDashboardUpgradePrompt } from '@/lib/dashboard/upgradePrompt.server';
+import { getDashboardReviewSetup } from '@/lib/dashboard/reviewSetup.server';
 import DashboardOverview from '@/components/dashboard/DashboardOverview';
 import BookingAlertNudge from '@/components/owner-booking-alerts/BookingAlertNudge';
 import { card } from '@/lib/theme-v2/theme';
@@ -38,7 +40,7 @@ export default async function DashboardPage() {
   if (entitlementResult.status === 'subscription_missing') redirect('/onboarding');
   const { entitlements } = entitlementResult;
   const smsEnabled = planRequiresSmsProvisioning(entitlements.plan);
-  const [dashboardData, smsReadiness, upgradePrompt] = await Promise.all([
+  const [dashboardData, smsReadiness, upgradePrompt, reviewSetup] = await Promise.all([
     Promise.all([
       supabase.from('conversations').select('*', { count: 'exact', head: true }).eq('business_id', business.id),
       supabase.from('conversations').select('*', { count: 'exact', head: true }).eq('business_id', business.id).eq('status', 'active'),
@@ -87,6 +89,7 @@ export default async function DashboardPage() {
           messagingProfileId: null,
         }),
     getDashboardUpgradePrompt(business.id, user.id),
+    getDashboardReviewSetup(context, entitlements),
   ]);
 
   const [
@@ -192,6 +195,8 @@ export default async function DashboardPage() {
 
       {/* The invitation checks alert eligibility, enrollment, and dismissal for either goal. */}
       {signupMode || (canUseCalendar && calendarToken && aiSettings?.booking_enabled && aiSettings.booking_mode === 'schedule_direct') ? <BookingAlertNudge key={business.id} /> : null}
+
+      {reviewSetup ? <ReviewSetupPrompt step={reviewSetup} /> : null}
 
       {upgradePrompt ? <UpgradePrompt key={`${business.id}:${upgradePrompt.offerKey}:${upgradePrompt.revision}`} prompt={upgradePrompt} /> : null}
 

@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FormEvent, ReactElement } from "react";
 import type { ReviewOverview } from "@/lib/reviews/types";
 
-const harness = vi.hoisted(() => ({ states: [] as unknown[], cursor: 0 }));
+const harness = vi.hoisted(() => ({ states: [] as unknown[], cursor: 0, refresh: vi.fn(), showToast: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: harness.refresh }) }));
+vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ showToast: harness.showToast }) }));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
   useId: () => "review-settings",
@@ -56,6 +58,7 @@ const overview: ReviewOverview = {
 };
 
 beforeEach(() => {
+  vi.clearAllMocks();
   harness.states = [];
   harness.cursor = 0;
 });
@@ -134,6 +137,8 @@ describe("review email settings without a mailing address", () => {
       automationChannel: "email",
     });
     expect(onSaved).toHaveBeenCalledWith(overview);
+    expect(harness.refresh).toHaveBeenCalledOnce();
+    expect(harness.showToast).toHaveBeenCalledWith("Review settings saved.", "success");
     harness.cursor = 0;
     expect(renderToStaticMarkup(ReviewSettingsForm(props))).toContain(
       "Review settings saved.",

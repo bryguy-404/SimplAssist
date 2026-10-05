@@ -5,6 +5,7 @@ import type { PrimaryGoal } from "@/types/database";
 const mocks = vi.hoisted(() => ({
   redirect: vi.fn(),
   getDashboardUpgradePrompt: vi.fn(async () => null),
+  getDashboardReviewSetup: vi.fn<() => Promise<"add_link" | "finish_setup" | null>>(async () => null),
   requireWorkspacePageAccess: vi.fn(async () => undefined),
   getDashboardBusinessContext: vi.fn(),
   getDashboardPageEntitlements: vi.fn(),
@@ -26,6 +27,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/dashboard/upgradePrompt.server", () => ({ getDashboardUpgradePrompt: mocks.getDashboardUpgradePrompt }));
+vi.mock("@/lib/dashboard/reviewSetup.server", () => ({ getDashboardReviewSetup: mocks.getDashboardReviewSetup }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
   requireWorkspacePageAccess: mocks.requireWorkspacePageAccess,
@@ -101,6 +103,7 @@ interface DashboardOverviewProps {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.getDashboardReviewSetup.mockResolvedValue(null);
   mocks.redirect.mockImplementation((path: string) => {
     throw new Error(`redirect:${path}`);
   });
@@ -329,6 +332,18 @@ async function renderedDashboardOverviewProps() {
 }
 
 describe("DashboardPage query scheduling", () => {
+  it("links incomplete review setup to Settings and removes the invitation when ready", async () => {
+    configureResolvedDashboardWithSavedGuardrails();
+    mocks.getDashboardReviewSetup.mockResolvedValue("add_link");
+    const incomplete = renderToStaticMarkup(await DashboardPage());
+    expect(incomplete).toContain("Start collecting Google reviews");
+    expect(incomplete).toContain('href="/reviews?tab=settings"');
+    expect(incomplete).toContain("Add your review link");
+
+    mocks.getDashboardReviewSetup.mockResolvedValue(null);
+    expect(renderToStaticMarkup(await DashboardPage())).not.toContain("review-setup-title");
+  });
+
   it("redirects a direct pre-checkout business before child page reads", async () => {
     configureResolvedDashboardWithSavedGuardrails({ primaryGoal: "book" });
     mocks.getDashboardPageEntitlements.mockResolvedValue({

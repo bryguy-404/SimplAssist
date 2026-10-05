@@ -28,7 +28,7 @@ describe("Customers and Reviews package release", () => {
     expect(
       Object.values(catalog.SUBSCRIPTION_PLANS).map((plan) => plan.price),
     ).toEqual([15, 29, 49, 79]);
-    expect(catalog.SETUP_FEE_CENTS).toBe(4900);
+    expect(catalog.SETUP_FEE_CENTS).toBe(2500);
     expect(catalog.REVIEW_EMAIL_ALLOWANCES).toEqual({
       chat_only: 500,
       sms_only: 500,

@@ -332,14 +332,14 @@ describe("review SMS commercial boundaries", () => {
     ).rejects.toThrow("review_sms_recovery_required");
     expect(mocks.update).not.toHaveBeenCalled();
   });
-  it("does not sell a new activation at the future $25 price", async () => {
+  it("does not sell a new activation at the superseded $49 price", async () => {
     account.activation_paid_at = null;
     account.state = "draft";
     mocks.price.mockResolvedValue({
       id: "price_activation",
       active: true,
       currency: "usd",
-      unit_amount: 2500,
+      unit_amount: 4900,
       type: "one_time",
     });
     await expect(
@@ -455,7 +455,7 @@ describe("review SMS payment and cancellation recovery", () => {
       id: "price_activation",
       active: true,
       currency: "usd",
-      unit_amount: 4900,
+      unit_amount: 2500,
       type: "one_time",
     });
     mocks.checkout.mockResolvedValue({
@@ -465,7 +465,7 @@ describe("review SMS payment and cancellation recovery", () => {
       customer: "cus_review",
       client_reference_id: bid,
       metadata: activationMetadata(),
-      amount_total: 4900, currency: "usd",
+      amount_total: 2500, currency: "usd",
       status: "open",
       url: "https://checkout.stripe.com/c/pay/test",
     });
@@ -643,7 +643,7 @@ function paidActivation(amount = 4900) {
     price: { id: activationPayload(amount).feeId, unit_amount: amount, currency: "usd", type: "one_time" } }] });
   return session;
 }
-describe("activation price history compatibility", () => {
+describe("activation price history and replacement", () => {
   it.each([2500,4900])("verifies and replays an original %i receipt after the current price changes", async amount => {
     const session = paidActivation(amount);
     expect(await synchronizeReviewSmsCheckout(session)).toBe(true);
@@ -661,5 +661,35 @@ describe("activation price history compatibility", () => {
     mocks.checkoutLines.mockResolvedValue({ has_more:false,data:[{quantity:1,amount_total:4900,price:{id:"price_other",unit_amount:4900,currency:"usd",type:"one_time"}}] });
     await expect(synchronizeReviewSmsCheckout(session)).rejects.toThrow("review_sms_activation_receipt_unverified");
     expect(updates).toHaveLength(0);
+  });
+  it("reconciles a completed old checkout instead of creating a replacement charge", async () => {
+    paidActivation(); operation!.state="confirmed"; account.activation_paid_at=null;
+    mocks.price.mockResolvedValue({active:true,currency:"usd",unit_amount:2500,type:"one_time"});
+    expect(await createReviewSmsActivationCheckout(bid,owner,"https://simplassist.com")).toEqual({paid:true});
+    expect(mocks.checkout).not.toHaveBeenCalled();expect(mocks.checkoutExpire).not.toHaveBeenCalled();
+  });
+  it("completion racing expiration retains the old payment", async () => {
+    const complete=paidActivation(); operation!.state="confirmed"; account.activation_paid_at=null;
+    mocks.price.mockResolvedValue({active:true,currency:"usd",unit_amount:2500,type:"one_time"});
+    mocks.checkoutGet.mockResolvedValueOnce({...complete,status:"open",payment_status:"unpaid"}).mockResolvedValue(complete);
+    mocks.checkoutExpire.mockRejectedValue(new Error("already complete"));
+    expect(await createReviewSmsActivationCheckout(bid,owner,"https://simplassist.com")).toEqual({paid:true});
+    expect(mocks.checkout).not.toHaveBeenCalled();
+  });
+  it("never replaces an old checkout whose expiration is unverified", async () => {
+    const complete=paidActivation(); operation!.state="confirmed"; account.activation_paid_at=null;
+    mocks.price.mockResolvedValue({active:true,currency:"usd",unit_amount:2500,type:"one_time"});
+    mocks.checkoutGet.mockResolvedValue({...complete,status:"open",payment_status:"unpaid"});
+    mocks.checkoutExpire.mockRejectedValue(new Error("network"));
+    await expect(createReviewSmsActivationCheckout(bid,owner,"https://simplassist.com")).rejects.toThrow("review_sms_recovery_required");
+    expect(mocks.checkout).not.toHaveBeenCalled();
+    expect(updates.some(u=>u.patch.state==="expired")).toBe(false);
+  });
+  it("does not replay an unknown historical operation after Stripe's idempotency window", async () => {
+    paidActivation(); operation!.state="unknown"; operation!.checkout_session_id=null;
+    operation!.created_at=new Date(now-24*3600_000).toISOString(); account.activation_paid_at=null;
+    mocks.price.mockResolvedValue({active:true,currency:"usd",unit_amount:2500,type:"one_time"});
+    await expect(createReviewSmsActivationCheckout(bid,owner,"https://simplassist.com")).rejects.toThrow("review_sms_recovery_required");
+    expect(mocks.checkout).not.toHaveBeenCalled();
   });
 });

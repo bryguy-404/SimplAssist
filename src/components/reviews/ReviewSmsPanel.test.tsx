@@ -29,7 +29,7 @@ const overview: ReviewSmsOverview = {
   account: null,
   canSend: false,
   eligibleSource: "direct",
-  price: { monthlyCents: 2000, activationCents: 4900, includedParts: 250 },
+  price: { monthlyCents: 2000, activationCents: 2500, includedParts: 250 },
 };
 function render(value: ReviewSmsOverview, extraStates: unknown[] = []) {
   harness.states = [value, ...extraStates];
@@ -47,7 +47,7 @@ describe("review texting pricing and lifecycle presentation", () => {
       "Review texting is not available for this account yet",
     );
     expect(html).not.toContain("Save approval details");
-    expect(html).not.toContain("Pay $49.00");
+    expect(html).not.toContain("Pay $25.00");
     expect(html).not.toContain("Review activation price");
   });
   it("quotes the add-on without replacing a grandfathered base price", () => {
@@ -73,7 +73,7 @@ describe("review texting pricing and lifecycle presentation", () => {
       "SimplAssist covers corrections caused by its own mistakes",
     );
     expect(html).toMatch(
-      /<button[^>]*disabled=""[^>]*>Pay \$49.00 and request approval<\/button>/,
+      /<button[^>]*disabled=""[^>]*>Pay \$25.00 and request approval<\/button>/,
     );
     expect(html).not.toContain("Text is now available when creating");
   });
@@ -84,10 +84,10 @@ describe("review texting pricing and lifecycle presentation", () => {
     } as unknown as ReviewSmsAccount;
     expect(
       render({ ...overview, eligibleSource: "included", account }),
-    ).not.toContain("Pay $49.00");
+    ).not.toContain("Pay $25.00");
     const partner = render({ ...overview, eligibleSource: "grant" });
     expect(partner).toContain("This screen does not charge your card");
-    expect(partner).not.toContain("Pay $49.00");
+    expect(partner).not.toContain("Pay $25.00");
   });
   it("keeps zero prorated allowance and displays the port-out deadline", () => {
     const account = {

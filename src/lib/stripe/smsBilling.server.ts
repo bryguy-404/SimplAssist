@@ -120,15 +120,23 @@ export async function createSmsCheckout(args: { businessId: string; plan: SmsPla
     if (!terminal.has(previous.status)) throw new SmsBillingError("sms_billing_existing_subscription");
     previousTerminalProof = { previous_source_terminal_status: previous.status, previous_source_terminal_verified_at: new Date().toISOString() };
   }
-  let op = await rpcOperation("acquire_sms_billing_operation", { p_business_id: args.businessId, p_owner_id: ownerId, p_request: {
+  const request = { p_business_id: args.businessId, p_owner_id: ownerId, p_request: {
     kind: "checkout", target_plan: args.plan, target_price_id: args.priceId,
     expected_subscription_id: current?.stripe_subscription_id ?? null, expected_customer_id: current?.stripe_customer_id ?? null,
     source_fingerprint: fingerprint({ subscription: current?.stripe_subscription_id ?? null, customer: current?.stripe_customer_id ?? null,
       plan: args.plan, price: args.priceId, successUrl: args.successUrl, cancelUrl: args.cancelUrl, mode: args.mode }),
     setup_fee_price_id: args.setupFeePriceId,
     ...previousTerminalProof,
-    quote: { successUrl: args.successUrl, cancelUrl: args.cancelUrl, mode: args.mode },
-  } });
+    quote: { successUrl: args.successUrl, cancelUrl: args.cancelUrl, mode: args.mode, setupFeeCents: args.setupFeePriceId ? SETUP_FEE_CENTS : 0 },
+  } };
+  let op = await rpcOperation("acquire_sms_billing_operation", request);
+  if (op.setup_fee_price_id && args.setupFeePriceId && op.setup_fee_price_id !== args.setupFeePriceId) {
+    const resolution = await expireSupersededSetupCheckout(op);
+    if (resolution) return resolution;
+    op = await rpcOperation("acquire_sms_billing_operation", request);
+    if (op.setup_fee_price_id && op.setup_fee_price_id !== args.setupFeePriceId)
+      throw new SmsBillingError("sms_billing_recovery_required");
+  }
   if (op.checkout_session_id) return recoverCheckout(op);
   assertRetryWindow(op);
   if (op.state === "prepared") {
@@ -139,21 +147,59 @@ export async function createSmsCheckout(args: { businessId: string; plan: SmsPla
       if (!fee.active || fee.currency !== "usd" || fee.unit_amount !== SETUP_FEE_CENTS || fee.type !== "one_time") throw new SmsBillingError("sms_billing_price_unavailable", 503);
     }
   }
-  op = await rpcOperation("confirm_sms_billing_operation", { p_operation_id: op.id, p_owner_id: ownerId, p_source_fingerprint: op.source_fingerprint });
+  return checkoutUrl(await materializeSmsCheckout(op), op);
+}
+/** Replays only the exact originally confirmed Checkout parameters. */
+async function materializeSmsCheckout(original: SmsBillingOperation): Promise<Stripe.Checkout.Session> {
+  if (original.checkout_session_id) return stripe.checkout.sessions.retrieve(original.checkout_session_id);
+  assertRetryWindow(original);
+  let op = await rpcOperation("confirm_sms_billing_operation", { p_operation_id: original.id, p_owner_id: original.owner_id, p_source_fingerprint: original.source_fingerprint });
+  if (!["confirming", "pending"].includes(op.state)) throw new SmsBillingError("sms_billing_recovery_required");
   if (!op.stripe_customer_id) {
-    const customer = await stripe.customers.create({ metadata: { business_id: args.businessId } }, { idempotencyKey: `sms-customer:${op.id}` });
+    const customer = await stripe.customers.create({ metadata: { business_id: op.business_id } }, { idempotencyKey: "sms-customer:" + op.id });
     op = await record(op, { stripe_customer_id: customer.id });
   }
-  const metadata = { business_id: args.businessId, plan: op.target_plan, mode: args.mode,
+  const metadata = { business_id: op.business_id, plan: op.target_plan, mode: String(op.quote.mode),
     sms_billing_operation_id: op.id, ...(op.setup_fee_price_id ? { setup_fee_price_id: op.setup_fee_price_id } : {}) };
-  const session = await stripe.checkout.sessions.create({ customer: op.stripe_customer_id!, client_reference_id: args.businessId,
+  const session = await stripe.checkout.sessions.create({ customer: op.stripe_customer_id!, client_reference_id: op.business_id,
     mode: "subscription", payment_method_types: ["card"], allow_promotion_codes: true, expires_at: seconds(op.expires_at),
     line_items: [{ price: op.target_price_id, quantity: 1 }, ...(op.setup_fee_price_id ? [{ price: op.setup_fee_price_id, quantity: 1 }] : [])],
-    success_url: args.successUrl, cancel_url: args.cancelUrl, metadata, subscription_data: { metadata },
-  }, { idempotencyKey: `sms-checkout:${op.id}` });
-  op = await record(op, { checkout_session_id: session.id, stripe_customer_id: id(session.customer), state: "pending" });
-  return checkoutUrl(session, op);
+    success_url: String(op.quote.successUrl), cancel_url: String(op.quote.cancelUrl), metadata, subscription_data: { metadata },
+  }, { idempotencyKey: "sms-checkout:" + op.id });
+  await record(op, { checkout_session_id: session.id, stripe_customer_id: id(session.customer), state: "pending" });
+  // Return customer identity acquired above to the caller's binding check.
+  original.stripe_customer_id = op.stripe_customer_id;
+  return session;
 }
+async function expireSupersededSetupCheckout(original: SmsBillingOperation): Promise<string | null> {
+  let op = original;
+  if (op.state === "prepared") {
+    const expired = await supabaseAdmin.from("sms_billing_operations").update({state:"expired"})
+      .eq("id",op.id).eq("state","prepared").select("id").maybeSingle();
+    if (expired.error) throw new SmsBillingError("sms_billing_unavailable",503);
+    if (expired.data) return null;
+    op = await operation(op.id,op.business_id);
+  }
+  if (op.state === "applied") return String(op.quote.successUrl).replace("{CHECKOUT_SESSION_ID}",op.checkout_session_id ?? "");
+  if (op.state === "expired") return null;
+  let session = await materializeSmsCheckout(op);
+  // Bind the retrieved session before attempting expiration. A lost creation
+  // response is recovered using its original idempotency key and price.
+  const bound = await bindSmsCheckoutSession(session);
+  if (!bound) throw new SmsBillingError("sms_billing_recovery_required");
+  if (session.status === "open") {
+    try { await stripe.checkout.sessions.expire(session.id,{}, {idempotencyKey:"sms-expire:"+op.id}); } catch { /* inspect outcome below */ }
+    session = await stripe.checkout.sessions.retrieve(session.id);
+    await bindSmsCheckoutSession(session);
+  }
+  if (session.status === "complete") {
+    return recoverCheckout({...op,checkout_session_id:session.id});
+  }
+  if (session.status !== "expired") throw new SmsBillingError("sms_billing_recovery_required");
+  await expireSmsCheckout(session);
+  return null;
+}
+
 function checkoutUrl(session: Stripe.Checkout.Session, op: SmsBillingOperation): string {
   assertMode(session.livemode);
   if (session.metadata?.sms_billing_operation_id !== op.id || session.client_reference_id !== op.business_id ||

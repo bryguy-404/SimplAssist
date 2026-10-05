@@ -8,7 +8,7 @@ vi.mock("@/lib/billing/planAvailability", () => ({ isPlanAvailable: () => true }
 vi.mock("./client", () => ({ stripe: { subscriptions: { retrieve: mocks.retrieve }, prices: { retrieve: mocks.price },
   invoices: { retrieve: mocks.invoice }, customers: { create: mocks.customer },
   checkout: { sessions: { create: mocks.create, retrieve: mocks.get, expire: mocks.expire } } } }));
-import { synchronizeSmsBillingOperation, type SmsBillingOperation } from "./smsBilling.server";
+import { createSmsCheckout, synchronizeSmsBillingOperation, type SmsBillingOperation } from "./smsBilling.server";
 import { SUBSCRIPTION_PLANS } from "./config";
 const businessId = "10000000-0000-4000-8000-000000000001", ownerId = "20000000-0000-4000-8000-000000000002";
 const oldId = "30000000-0000-4000-8000-000000000003", newId = "30000000-0000-4000-8000-000000000004";
@@ -90,6 +90,48 @@ beforeEach(() => {
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 describe("setup price replacement and historical receipts", () => {
+  it("verifies expiration of a bound old $49 checkout before making exactly one $25 checkout", async () => {
+    expect(await createSmsCheckout(args)).toBe("https://checkout.stripe.com/" + newId);
+    expect(operations.get(oldId)?.state).toBe("expired"); expect(operations.get(newId)?.setup_fee_price_id).toBe("price_setup25");
+    expect(mocks.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ line_items: [{ price: "price_growth", quantity: 1 }, { price: "price_setup25", quantity: 1 }] }), { idempotencyKey: "sms-checkout:" + newId });
+    expect(mocks.expire.mock.invocationCallOrder[0]).toBeLessThan(mocks.create.mock.invocationCallOrder[0]);
+    expect(mocks.customer).not.toHaveBeenCalled();
+  });
+  it("does not replace an old checkout on uncertain expiration", async () => {
+    mocks.expire.mockRejectedValue(new Error("network"));
+    await expect(createSmsCheckout(args)).rejects.toThrow("sms_billing_recovery_required");
+    expect(mocks.create).not.toHaveBeenCalled(); expect(operations.size).toBe(1); expect(operations.get(oldId)?.state).toBe("pending");
+  });
+  it("retains a completed $49 payment that races expiration and never starts a second payment", async () => {
+    mocks.expire.mockImplementation(async () => { sessions.set("cs_old", session(operations.get(oldId)!, { status: "complete", payment_status: "paid", subscription: "sub_owner" })); throw new Error("already complete"); });
+    expect(await createSmsCheckout(args)).toBe("https://simplassist.com/billing?session_id=cs_old");
+    expect(operations.get(oldId)?.state).toBe("applied"); expect(mocks.create).not.toHaveBeenCalled(); expect(operations.size).toBe(1);
+  });
+  it("uses the old price and original idempotency key to recover a lost creation response before replacement", async () => {
+    Object.assign(operations.get(oldId)!, { state: "confirming", checkout_session_id: null });
+    await createSmsCheckout(args);
+    expect(mocks.create).toHaveBeenNthCalledWith(1, expect.objectContaining({ line_items: [{ price: "price_growth", quantity: 1 }, { price: "price_setup49", quantity: 1 }] }), { idempotencyKey: "sms-checkout:" + oldId });
+    expect(mocks.create).toHaveBeenCalledTimes(2); expect(mocks.create.mock.calls[1][0].line_items[1].price).toBe("price_setup25");
+  });
+  it("reconciles a concurrent confirmation that wins the prepared expiry comparison", async () => {
+    Object.assign(operations.get(oldId)!, { state: "prepared", checkout_session_id: null }); casRace = true;
+    await createSmsCheckout(args);
+    expect(mocks.create.mock.calls[0][1]).toEqual({ idempotencyKey: "sms-checkout:" + oldId });
+    expect(operations.get(oldId)?.state).toBe("expired"); expect(mocks.create).toHaveBeenCalledTimes(2);
+  });
+  it("expires a never-confirmed prepared old quote without creating its $49 checkout", async () => {
+    Object.assign(operations.get(oldId)!, { state: "prepared", checkout_session_id: null });
+    await createSmsCheckout(args); expect(mocks.create).toHaveBeenCalledTimes(1);
+    expect(mocks.create.mock.calls[0][1]).toEqual({ idempotencyKey: "sms-checkout:" + newId }); expect(mocks.expire).not.toHaveBeenCalled();
+  });
+  it("refuses to expire a session belonging to a different customer", async () => {
+    sessions.set("cs_old", session(operations.get(oldId)!, { customer: "cus_foreign" }));
+    await expect(createSmsCheckout(args)).rejects.toThrow("sms_billing_source_changed"); expect(mocks.expire).not.toHaveBeenCalled(); expect(mocks.create).not.toHaveBeenCalled();
+  });
+  it("does not replay an unknown historical payment beyond Stripe's idempotency window", async () => {
+    Object.assign(operations.get(oldId)!, { state: "confirming", checkout_session_id: null, created_at: new Date(now - 24 * 3600_000).toISOString() });
+    await expect(createSmsCheckout(args)).rejects.toThrow("sms_billing_recovery_required"); expect(mocks.create).not.toHaveBeenCalled();
+  });
   it.each([2500, 4900])("accepts the exact original %i setup receipt, even when the old price was archived", async amount => {
     const op = operations.get(oldId)!; op.setup_fee_price_id = amount === 4900 ? "price_setup49" : "price_setup25"; op.quote.setupFeeCents = amount;
     sessions.set("cs_old", session(op, { status: "complete", payment_status: "paid", subscription: "sub_owner" })); mocks.invoice.mockResolvedValue(paidInvoice(amount));

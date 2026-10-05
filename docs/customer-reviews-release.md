@@ -39,7 +39,7 @@ replies consume the same pool.
 The Chat add-on first partial billing period prorates both its charge and its
 allowance. It renews on the base subscription's existing billing date.
 
-New SMS setup is $49 for one carrier application. A refund is available before
+New SMS setup is $25 for one carrier application. A refund is available before
 paid provider work starts. Carrier rejection or an uncertain provider result goes
 to support for reconciliation and any separately quoted resubmission; it never
 silently buys repeated registrations. Recurring review texting starts only after
@@ -50,8 +50,8 @@ Set `NEXT_PUBLIC_CUSTOMER_REVIEWS_PRICING_ENABLED=1` at **build time** only afte
 new Stripe Prices and review operations are ready. Configure the four existing
 `STRIPE_PRICE_*` plan variables with new monthly USD Prices. Configure
 `STRIPE_PRICE_REVIEW_SMS` as a licensed $20 monthly Price and
-`STRIPE_PRICE_REVIEW_SMS_ACTIVATION` as a $49 one-time Price. The generic
-`STRIPE_PRICE_SETUP_FEE` must also use the new $49 setup Price when releasing the
+`STRIPE_PRICE_REVIEW_SMS_ACTIVATION` as a $25 one-time Price. The generic
+`STRIPE_PRICE_SETUP_FEE` must also use the new $25 setup Price when releasing the
 new packages. Do not reuse a legacy plan Price ID for a new amount.
 
 The two existing accounts can be handled individually. Optional
@@ -91,7 +91,7 @@ they do not automatically create a direct Stripe subscription.
    An existing customer-care campaign needs a newly approved appropriate campaign,
    not just an administrator override. Preserve its working number while the
    replacement application is pending.
-6. Test the $49 activation, $20 add-on, partial-period quote, renewal, failed
+6. Test the $25 activation, $20 add-on, partial-period quote, renewal, failed
    payment, cancellation and pre-submission refund in Stripe test mode. Validate
    representative AI and voice costs with the owner before publicly releasing
    Growth and Pro at these prices; their existing AI entitlements remain intact.
@@ -121,7 +121,7 @@ simulated only in that isolated database; this does not certify carrier delivery
 
 Chat customers save business verification details and choose a dedicated local
 number in Reviews. The app creates their stable public consent URL, collects the
-$49 activation payment, and registers the review program. After provider approval
+$25 activation payment, and registers the review program. After provider approval
 and number assignment, the owner reviews the prorated $20/month quote and activates
 it. A failed payment cannot enable sending. These resources remain associated
 with the Chat subscription without granting the base SMS/voice plan.
@@ -159,3 +159,9 @@ work and an owner-created campaign or explicitly enabled completion automation.
 
 Do not paste provider keys or customer data into release evidence. Keep final
 verification results and any known limitations in the implementation report.
+
+Activation price history is retained. A completed $49 checkout is verified against
+its original operation and immutable Stripe Price; eligible refunds return the
+original amount. Unconfirmed quotes expire, while open old-price checkouts must
+be verified expired before a replacement $25 checkout is created. Unknown payment
+outcomes remain blocked for reconciliation. Do not delete historical Prices.

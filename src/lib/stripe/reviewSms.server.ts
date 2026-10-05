@@ -325,53 +325,79 @@ export async function createReviewSmsActivationCheckout(
   const { reviewSms } = assertBound(sub, a);
   assertChangeable(sub);
   if (reviewSms) throw new ReviewSmsError("review_sms_already_active");
-  await pendingOperation(a, "activation"); // Expire a prepared quote that never reached Checkout.
-  let op = await acquire(a, "activation", {
-    feeId,
-    amountCents: REVIEW_SMS_ACTIVATION_CENTS,
-    customerId: a.source_customer_id,
-    subscriptionId: a.source_subscription_id,
-    origin,
-    draftFingerprint: fingerprint(a.draft),
-  });
-  if (op.checkout_session_id) {
-    const session = await stripe.checkout.sessions.retrieve(
-      op.checkout_session_id,
-    );
-    if (session.status === "complete") {
+  const payload = {
+    feeId, amountCents: REVIEW_SMS_ACTIVATION_CENTS,
+    customerId: a.source_customer_id, subscriptionId: a.source_subscription_id,
+    origin, draftFingerprint: fingerprint(a.draft),
+  };
+  let op = await pendingOperation(a, "activation");
+  if (op && op.fingerprint !== fingerprint(payload)) {
+    if (op.state === "prepared") {
+      // A simultaneous confirmation wins this CAS and must be reconciled.
+      const expired = await supabaseAdmin.from("review_sms_billing_operations")
+        .update({ state: "expired" }).eq("id", op.id).eq("state", "prepared")
+        .select("id").maybeSingle();
+      if (expired.error) throw new ReviewSmsError("review_sms_state_unavailable", 503);
+      op = expired.data ? null : await readOperation(op.id, businessId, ownerId);
+    }
+    if (op) {
+      let session = await activationSession(op);
+      assertActivationSession(session, op, a);
+      if (session.status === "complete") {
+        await synchronizeReviewSmsCheckout(session);
+        return { paid: session.payment_status === "paid" };
+      }
+      if (session.status === "open") {
+        // Expiration can race with completion. Inspect again even when Stripe
+        // rejects the expire call; never turn an unknown result into a new charge.
+        try { await stripe.checkout.sessions.expire(session.id); } catch { /* retrieve below */ }
+        session = await stripe.checkout.sessions.retrieve(session.id);
+        assertActivationSession(session, op, a);
+      }
+      if (session.status === "complete") {
+        await synchronizeReviewSmsCheckout(session);
+        return { paid: session.payment_status === "paid" };
+      }
+      if (session.status !== "expired")
+        throw new ReviewSmsError("review_sms_recovery_required");
       await synchronizeReviewSmsCheckout(session);
-      return { paid: session.payment_status === "paid" };
+      op = null;
     }
-    if (session.status === "expired") {
-      await saveOperation(op, { state: "expired" });
-      throw new ReviewSmsError("review_sms_checkout_expired");
-    }
-    return { url: checkedCheckoutUrl(session, op) };
   }
-  assertReplay(op);
-  op = await confirm(op);
+  op ??= await acquire(a, "activation", payload);
+  const session = await activationSession(op);
+  assertActivationSession(session, op, a);
+  if (session.status === "complete") {
+    await synchronizeReviewSmsCheckout(session);
+    return { paid: session.payment_status === "paid" };
+  }
+  if (session.status === "expired") {
+    await synchronizeReviewSmsCheckout(session);
+    throw new ReviewSmsError("review_sms_checkout_expired");
+  }
+  return { url: checkedCheckoutUrl(session, op) };
+}
+async function activationSession(original: Operation) {
+  if (original.checkout_session_id)
+    return stripe.checkout.sessions.retrieve(original.checkout_session_id);
+  assertReplay(original);
+  const op = await confirm(original);
+  const payload = activationPayload(op);
   const metadata = {
-    business_id: businessId,
-    review_sms_account_id: a.id,
+    business_id: op.business_id,
+    review_sms_account_id: op.account_id,
     review_sms_operation_id: op.id,
   };
-  const session = await stripe.checkout.sessions.create(
-    {
-      mode: "payment",
-      customer: a.source_customer_id!,
-      client_reference_id: businessId,
-      line_items: [{ price: feeId, quantity: 1 }],
-      payment_method_types: ["card"],
-      metadata,
-      payment_intent_data: { metadata },
-      expires_at: seconds(op.created_at) + 24 * 3600,
-      success_url: `${origin}/reviews?sms=activation-paid`,
-      cancel_url: `${origin}/reviews?sms=activation-cancelled`,
-    },
-    { idempotencyKey: `review-sms-activation:${op.id}` },
-  );
+  const session = await stripe.checkout.sessions.create({
+    mode: "payment", customer: payload.customerId, client_reference_id: op.business_id,
+    line_items: [{ price: payload.feeId, quantity: 1 }],
+    payment_method_types: ["card"], metadata, payment_intent_data: { metadata },
+    expires_at: seconds(op.created_at) + 24 * 3600,
+    success_url: payload.origin + "/reviews?sms=activation-paid",
+    cancel_url: payload.origin + "/reviews?sms=activation-cancelled",
+  }, { idempotencyKey: "review-sms-activation:" + op.id });
   await saveOperation(op, { checkout_session_id: session.id });
-  return { url: checkedCheckoutUrl(session, op) };
+  return session;
 }
 function assertActivationSession(session: Stripe.Checkout.Session, op: Operation, a: ReviewSmsAccount) {
   const payload = activationPayload(op);

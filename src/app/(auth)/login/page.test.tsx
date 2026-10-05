@@ -90,6 +90,13 @@ function renderPage(requestBrand: RequestBrand): string {
 }
 
 describe("LoginPage recovery navigation", () => {
+  it("keeps credentials out of native GET URLs before hydration", () => {
+    const html = renderPage(DEFAULT_REQUEST);
+    expect(html.match(/<form\b[^>]*>/)?.[0]).toContain('method="post"');
+    expect(html.match(/<button\b[^>]*type="submit"[^>]*>/)?.[0]).toContain('disabled=""');
+    expect(mocks.signInWithPassword).not.toHaveBeenCalled();
+  });
+
   it("offers one same-domain forgot-password link beside the password flow", () => {
     const html = renderPage(DEFAULT_REQUEST);
 

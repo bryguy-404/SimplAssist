@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -34,9 +34,12 @@ const signupSchema = z
 type SignupForm = z.infer<typeof signupSchema>;
 
 export default function PublicSignupForm() {
+  const [hydrated, setHydrated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const supabase = createBrowserClient();
+
+  useEffect(() => { setHydrated(true); }, []);
 
   const {
     register,
@@ -94,7 +97,7 @@ export default function PublicSignupForm() {
         Create your account to get started.
       </p>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-5">
+      <form method="post" onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-5">
         <div>
           <label htmlFor="fullName" className={fieldLabel}>
             Full name
@@ -165,7 +168,7 @@ export default function PublicSignupForm() {
 
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={!hydrated || isSubmitting}
           className={btnPrimaryWide}
         >
           {isSubmitting ? (

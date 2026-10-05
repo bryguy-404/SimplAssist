@@ -18,6 +18,7 @@ vi.mock("react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react")>();
   return {
     ...actual,
+    useEffect: vi.fn(),
     useState: <T,>(initialValue: T | (() => T)) => {
       const index = harness.cursor;
       harness.cursor += 1;
@@ -100,6 +101,12 @@ beforeEach(() => {
 });
 
 describe("SetPasswordForm", () => {
+  it.each(["setup", "reset"] as const)("prevents native GET credential submission before %s hydration", mode => {
+    const html = renderToStaticMarkup(renderForm(mode));
+    expect(html.match(/<form\b[^>]*>/)?.[0]).toContain('method="post"');
+    expect(html.match(/<button\b[^>]*type="submit"[^>]*>/)?.[0]).toContain('disabled=""');
+  });
+
   it.each([
     ["setup", "Create your password", "Set password"],
     ["reset", "Reset your password", "Reset password"],

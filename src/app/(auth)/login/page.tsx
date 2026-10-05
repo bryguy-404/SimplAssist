@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
@@ -28,8 +28,11 @@ type LoginForm = z.infer<typeof loginSchema>;
 export default function LoginPage() {
   const router = useRouter();
   const requestBrand = useRequestBrand();
+  const [hydrated, setHydrated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const supabase = createBrowserClient();
+
+  useEffect(() => { setHydrated(true); }, []);
 
   const {
     register,
@@ -66,7 +69,7 @@ export default function LoginPage() {
         Welcome back — pick up where you left off.
       </p>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-5">
+      <form method="post" onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-5">
         <div>
           <label htmlFor="email" className={fieldLabel}>
             Email
@@ -115,7 +118,7 @@ export default function LoginPage() {
 
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={!hydrated || isSubmitting}
           className={btnPrimaryWide}
         >
           {isSubmitting ? (

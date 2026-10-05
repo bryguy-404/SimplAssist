@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -26,7 +26,9 @@ export default function SetPasswordForm({
   mode: "setup" | "reset";
 }) {
   const router = useRouter();
+  const [hydrated, setHydrated] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useEffect(() => { setHydrated(true); }, []);
   const {
     register,
     handleSubmit,
@@ -84,7 +86,7 @@ export default function SetPasswordForm({
           : "Choose the password you'll use to sign in to this workspace."}
       </p>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-5">
+      <form method="post" onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-5">
         <AuthPasswordFieldV2
           id="password"
           label="Password"
@@ -111,7 +113,7 @@ export default function SetPasswordForm({
 
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={!hydrated || isSubmitting}
           className={btnPrimaryWide}
         >
           {isSubmitting ? (

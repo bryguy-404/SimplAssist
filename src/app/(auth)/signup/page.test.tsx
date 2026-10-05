@@ -124,6 +124,13 @@ function expectInvitationOnly(html: string): void {
 }
 
 describe("SignupPage strict host policy", () => {
+  it("keeps signup credentials out of native GET URLs before hydration", async () => {
+    const html = await renderPage();
+    expect(html.match(/<form\b[^>]*>/)?.[0]).toContain('method="post"');
+    expect(html.match(/<button\b[^>]*type="submit"[^>]*>/)?.[0]).toContain('disabled=""');
+    expect(mocks.signUp).not.toHaveBeenCalled();
+  });
+
   it("keeps the canonical public signup form", async () => {
     const html = await renderPage();
 

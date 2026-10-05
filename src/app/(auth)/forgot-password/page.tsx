@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -27,8 +27,10 @@ const forgotPasswordSchema = z.object({
 type ForgotPasswordValues = z.infer<typeof forgotPasswordSchema>;
 
 export default function ForgotPasswordPage() {
+  const [hydrated, setHydrated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  useEffect(() => { setHydrated(true); }, []);
   const {
     register,
     handleSubmit,
@@ -105,7 +107,7 @@ export default function ForgotPasswordPage() {
         Enter your email and we&apos;ll send you a password reset link.
       </p>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-5">
+      <form method="post" onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-5">
         <div>
           <label htmlFor="email" className={fieldLabel}>
             Email
@@ -136,7 +138,7 @@ export default function ForgotPasswordPage() {
 
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={!hydrated || isSubmitting}
           className={btnPrimaryWide}
         >
           {isSubmitting ? (

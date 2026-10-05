@@ -37,7 +37,7 @@ fixture had an explicitly synthetic accepted initial review email; none was sent
   returned 200 and initialized the real Reviews workspace in its settings tab.
   Client-side anchor scrolling was not verified.
 
-## Remaining acceptance and rollout restriction
+## Initial browser interruption
 
 Native browser controls later returned `noWindowsAvailable`; Safari's local
 login appeared blank, and the in-app browser was unavailable while the task was
@@ -49,9 +49,9 @@ following unfinished browser checks:
 - Pending, moving, ready and support-required wizard screens.
 - Actual signup plan chooser and the deployed public fee display.
 
-Keep `DASHBOARD_UPGRADE_PROMPTS_ENABLED=0` until these pass on a working browser
-surface. Keep `REVIEW_SMS_UPGRADES_ENABLED=0` until the separate real carrier
-pilot also passes. No carrier approval or live number transfer was tested.
+At that point, both dashboard promotions and review conversions stayed disabled.
+The restored-browser follow-up below resolves the dashboard restriction. The
+separate real carrier pilot is still required; no live number transfer was tested.
 
 ## Cleanup
 
@@ -61,3 +61,54 @@ removed, and the server stopped. Browser control failure may have left local
 test tabs open; their fixture sessions no longer exist. Unrelated tabs were
 preserved. The dedicated stack received only additive migration 115; this UI
 verification did not reset a database or change production.
+
+## Restored-browser follow-up — October 5 UTC
+
+The in-app browser became available again. Acceptance used the actual dashboard,
+Reviews workspace, billing page and signup plan selector with five disposable
+local accounts. Production pricing was also inspected in the live browser.
+
+- Live pricing showed Chat $15, Growth $49 and Full $79, with $25 texting
+  activation and no activation for Chat. The real signup selector contained only
+  these three options, with initial totals of $15, $74 and $104.
+- Chat A's first and second browser dismissals persisted seven days. After
+  advancing only the fixture's snooze deadline between actions, its third
+  dismissal persisted exactly 30 days at revision 3. Reload and another tab
+  retained the preference.
+- Chat B still received its own offer, proving dismissal isolation. Permanent
+  hide persisted after reload at revision 1, without a snooze deadline.
+- Desktop (1280px) and mobile (390px) layouts, light/dark themes and visible
+  keyboard focus were checked. The mobile page had no horizontal overflow;
+  closed navigation no longer exposed offscreen keyboard controls.
+- The Reviews CTA opened Settings and focused/scrolled the fully loaded texting
+  section. On mobile its top was 96px, below the fixed header, with $20/month,
+  $35 total, $25 activation, 250 shared parts and approval/payment timing visible.
+- The Growth CTA opened the Full billing section with $79/month, 2,500 shared
+  parts, 100 voice minutes and no new activation. No quote/payment was requested.
+- Labeled synthetic carrier screens covered initial application, pending,
+  approved, moving, support-required and ready states. The move button required
+  acknowledgement and cancellation was disabled during handoff. This is visual
+  evidence only, not a live carrier pilot or payment test.
+
+The checks found and fixed asynchronous Reviews anchor scrolling, query-tab
+synchronization and closed mobile-menu focus exposure. Progress copy now names
+website chat and email availability instead of implying SMS continues during a
+handoff. A pre-hydration local sign-in also exposed native GET form submission;
+auth forms now use POST and keep submit disabled until hydrated. Only disposable
+local credentials were involved. Normal hydrated login was verified in-browser.
+
+The final regression run passed 8,078 tests across 494 files; three provider
+harnesses remained opt-in. TypeScript, focused ESLint and production build passed.
+All provider/payment/send counts matched the fixture baseline. The five fixture
+businesses and auth accounts were deleted, credentials removed and server stopped.
+The browser viewport was reset and local test tabs closed.
+
+A test-only attempt to change an immutable Growth activation record was rejected
+and rolled back; no trigger was disabled. Activation-age rules remain covered by
+unit tests. Local homepage widget configuration requests failed against the
+isolated test origin; no dashboard or upgrade runtime failure was observed.
+
+Screenshot evidence is retained at `/private/tmp/simplassist-dashboard-suggestion-desktop.jpg`,
+`/private/tmp/simplassist-dashboard-suggestion-mobile-light.jpg`,
+`/private/tmp/simplassist-dashboard-suggestion-mobile-dark.jpg`, and
+`/private/tmp/simplassist-review-upgrade-mobile-verified.jpg`.

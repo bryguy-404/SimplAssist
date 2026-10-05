@@ -141,12 +141,13 @@ run passed all 8,063 ordinary application tests. Three external-provider
 harnesses remained opt-in in that run; their separate executed evidence and
 limitations are described above.
 
-`REVIEW_SMS_UPGRADES_ENABLED=0` and `DASHBOARD_UPGRADE_PROMPTS_ENABLED=0` remain
-set in production. The provider pilot still needs an eligible, owner-approved
+At the initial release, `REVIEW_SMS_UPGRADES_ENABLED=0` and
+`DASHBOARD_UPGRADE_PROMPTS_ENABLED=0` were both set in production. The provider
+pilot still needs an eligible, owner-approved
 Chat account with paid review texting and verified protected/shared provider
 identifiers. Production inventory contains no eligible source account. Browser
-acceptance must also finish before enabling dashboard promotions; automated
-tests and synthetic provider fixtures do not substitute for the real pilot.
+acceptance was also pending at that point; the follow-up below completes it.
+Automated tests and synthetic provider fixtures do not substitute for the real pilot.
 
 Authenticated dashboard/API/database verification passed actual snooze,
 permanent-hide and revision-conflict requests, with no billing/provider side
@@ -158,3 +159,32 @@ acceptance unfinished. See `upgrade-ladder-browser-verification-2026-10-04.md`.
 The disabled start/promotion switches do not stop reconciliation of existing
 payments or number handoffs. General provider cleanup remains disabled and
 excluded partner accounts remain excluded.
+
+## Dashboard acceptance follow-up
+
+The restored in-app browser completed the previously blocked dashboard checks.
+Desktop/mobile layouts, themes, keyboard access, real preference requests,
+reload/cross-tab persistence, tenant isolation and both independent offer
+destinations passed. Production pricing and the actual signup plan chooser were
+also verified. See `upgrade-ladder-browser-verification-2026-10-04.md` for scope,
+fixes, screenshots, fixture cleanup and the remaining real-provider limitation.
+
+Navigation/accessibility fixes were committed as `6d13308`; a separately
+reviewable pre-hydration auth-form safeguard is `6adfcf3`. Both were pushed to
+`main`. Final validation passed 8,078 tests, TypeScript, ESLint and production
+build. No database migration was needed for this follow-up.
+
+The web deployment enables `DASHBOARD_UPGRADE_PROMPTS_ENABLED=1` while explicitly
+retaining `REVIEW_SMS_UPGRADES_ENABLED=0`. Eligible email-review users can discover
+text reminders, and eligible Growth users can discover Full Suite. The $35-to-$49
+offer remains suppressed until the real carrier pilot passes. Worker settings,
+subscriptions, monthly prices, account exclusions and general cleanup settings
+are unchanged.
+
+Deployment `f834d44b-67f8-47cf-884a-5a03eb5512df` reached `SUCCESS` with a passing
+health check. The deployed login form was verified in the browser to use POST,
+start with submission disabled and enable after hydration. A post-rollout
+read-only production inventory confirmed the existing subscription, billing
+operation, exclusions and provider cleanup records remained unchanged. Live
+health returned HTTP 200; bounded error-log reads contained npm configuration
+and optional image-optimizer warnings, without an application failure.

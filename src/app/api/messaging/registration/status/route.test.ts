@@ -1,3 +1,4 @@
+vi.mock("@/lib/billing/reviewTextingHandoff.server",()=>({reconcileReviewTextingCampaignEvent:vi.fn().mockResolvedValue(false)}));
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 

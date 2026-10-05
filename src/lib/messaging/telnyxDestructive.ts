@@ -3,6 +3,25 @@ import "server-only";
 import { telnyx } from "@/lib/messaging/client";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
+/** This separate permit retires only a guided upgrade's old, detached campaign.
+ * It cannot release a number, brand, profile or an unassigned candidate. The
+ * owner-approved upgrade may finish even when new acquisition is disabled. */
+export async function retireReviewUpgradeCampaign(scope: {
+  upgradeId: string; claimToken: string; campaignId: string;
+}) {
+  const protectedIds = protectedIdentifierConfiguration();
+  const profiles = [protectedIds.messagingProfileId, process.env.TELNYX_MESSAGING_PROFILE_ID].filter((value): value is string => Boolean(value));
+  const permit = await supabaseAdmin.rpc("review_texting_retire_permit", {
+    p_upgrade: scope.upgradeId, p_claim: scope.claimToken,
+    p_campaign: scope.campaignId, p_forbidden_profiles: profiles,
+  });
+  if (permit.error) deny("authorization_rpc_failed", permit.error);
+  if (permit.data !== true) deny("authorization_response_invalid");
+  const current = protectedIdentifierConfiguration();
+  if (current.messagingProfileId !== protectedIds.messagingProfileId || current.voiceApplicationId !== protectedIds.voiceApplicationId) deny("protected_identifier_configuration_changed");
+  await telnyx.messaging10dlc.campaign.deactivate(scope.campaignId, { maxRetries: 0, timeout: 10_000 });
+}
+
 export type TelnyxRemoteMutationContext =
   | "release_worker"
   | "review_sms_release"

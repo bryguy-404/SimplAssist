@@ -172,6 +172,7 @@ async function processClaimedEvent(
     return;
   }
 
+  if (kind === "campaign" && await reconcileReviewTextingCampaignEvent(resourceId)) return;
   const business = await lookupBusiness(kind, resourceId);
   if (!business) {
     // Same constraint as above: no business_id → cannot audit.
@@ -562,3 +563,4 @@ function pickString(
   }
   return null;
 }
+import { reconcileReviewTextingCampaignEvent } from "@/lib/billing/reviewTextingHandoff.server";

@@ -1,3 +1,4 @@
+vi.mock("@/lib/billing/reviewTextingProvider.server",()=>({runReviewTextingProviderLifecycle:vi.fn().mockResolvedValue(undefined)}));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),

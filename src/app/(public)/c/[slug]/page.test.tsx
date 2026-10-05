@@ -106,7 +106,7 @@ const tableQueries = new Map<
 
 function makeQuery(table: string, result: QueryResult) {
   const query: Record<string, ReturnType<typeof vi.fn>> = {};
-  for (const method of ["select", "eq", "order", "maybeSingle"]) {
+  for (const method of ["select", "eq", "in", "limit", "order", "maybeSingle"]) {
     query[method] = vi.fn(() => query);
   }
   const promise = Promise.resolve(result);
@@ -161,6 +161,7 @@ beforeEach(() => {
   tableQueries.clear();
   tableResults.set("businesses", { data: BUSINESS, error: null });
   tableResults.set("review_sms_accounts", { data: null, error: null });
+  tableResults.set("review_texting_provider_upgrades", { data: null, error: null });
   tableResults.set("business_hours", { data: HOURS, error: null });
   mocks.from.mockImplementation((table: string) => {
     const result = tableResults.get(table);
@@ -464,5 +465,15 @@ describe("review programs on public business pages", () => {
     const privacy = await renderPrivacyPage();
     expect(visibleText(privacy)).toContain("voluntary review-request SMS program");
     expect(visibleText(privacy)).not.toContain("customer-care text messages");
+  });
+  it("publishes both permission programs for an owner-approved expanded application", async () => {
+    tableResults.set("review_sms_accounts", { data: { billing_source: "direct", state: "active", draft: { consentMode: "hosted_keyword" } }, error: null });
+    tableResults.set("review_texting_provider_upgrades", { data: { upgrade_id: "approved-owner-proposal" }, error: null });
+    const html = await renderPage();
+    expect(html).toContain("SMS customer care");
+    expect(html).toContain("Review requests by text");
+    expect(html).toContain(`/c/${SLUG}/review-texts`);
+    const privacy = await renderPrivacyPage();
+    expect(visibleText(privacy)).toContain("customer-care text messages");
   });
 });

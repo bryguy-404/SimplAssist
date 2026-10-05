@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   unwrap: vi.fn(),
+  handoffPaused: vi.fn(),
   processTenantSmsInbound: vi.fn(),
   processReviewTextConsent: vi.fn(),
   reconcileTenantSmsReceipt: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock("@/lib/messaging/tenantSmsSend.server", () => ({
   processTenantSmsInbound: mocks.processTenantSmsInbound,
   reconcileTenantSmsReceipt: mocks.reconcileTenantSmsReceipt,
 }));
+vi.mock("@/lib/billing/reviewTextingHandoff.server",()=>({isReviewTextingHandoffPaused:mocks.handoffPaused}));
 vi.mock("@/lib/reviews/consent.server", () => ({
   processReviewTextConsent: mocks.processReviewTextConsent,
 }));
@@ -209,6 +211,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   tableQueues.clear();
   mocks.processReviewTextConsent.mockResolvedValue(false);
+  mocks.handoffPaused.mockResolvedValue(false);
   mocks.processTenantSmsInbound.mockResolvedValue({
     reviewHeld: false,
     keyword: null,
@@ -301,6 +304,26 @@ beforeEach(() => {
 });
 
 describe("POST /api/messaging/webhook", () => {
+  it("preserves inbound and control processing but prevents SMS AI during a review upgrade handoff", async () => {
+    mocks.handoffPaused.mockResolvedValue(true);
+    const response = await messagingWebhook(request());
+    expect(response.status).toBe(200);
+    expect(mocks.addInboundMessageOnce).toHaveBeenCalled();
+    expect(mocks.processTenantSmsInbound).toHaveBeenCalled();
+    expect(mocks.processReviewTextConsent).toHaveBeenCalled();
+    expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.completeMessagingWebhookEvent).toHaveBeenCalled();
+  });
+  it("consumes signed review consent before evaluating the outbound handoff fence", async () => {
+    mocks.processReviewTextConsent.mockResolvedValue(true);
+    mocks.handoffPaused.mockResolvedValue(true);
+    const response = await messagingWebhook(request());
+    expect(response.status).toBe(200);
+    expect(mocks.processReviewTextConsent).toHaveBeenCalled();
+    expect(mocks.handoffPaused).not.toHaveBeenCalled();
+    expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+  });
   it("persists a Starter inbound message and skips every automated reply path", async () => {
     mocks.resolveBusinessEntitlements.mockResolvedValue(STARTER_ENTITLEMENTS);
 

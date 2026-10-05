@@ -1,0 +1,101 @@
+BEGIN;
+CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
+SET LOCAL search_path=public,extensions;
+SELECT no_plan();
+INSERT INTO auth.users(id,email) VALUES('00000000-0000-4000-a113-000000000001','upgrade113@example.test');
+INSERT INTO businesses(id,owner_id,name,business_type,slug,billing_mode,onboarding_completed_at,telnyx_brand_id,telnyx_campaign_id,telnyx_messaging_profile_id,telnyx_voice_application_id,campaign_status,telnyx_resource_state)
+VALUES('10000000-0000-4000-a113-000000000001','00000000-0000-4000-a113-000000000001','Upgrade113','general','upgrade113','stripe',now(),'11300000-0000-4000-8113-000000000001','old113','11300000-0000-4000-8113-000000000002','113000001','approved','active');
+INSERT INTO subscriptions(business_id,stripe_customer_id,stripe_subscription_id,plan,status,current_period_start,current_period_end)
+VALUES('10000000-0000-4000-a113-000000000001','cus_113','sub_113','chat_only','active',now()-interval '1 day',now()+interval '29 days');
+INSERT INTO business_plan_family_locks(business_id,family,claimed_by) VALUES('10000000-0000-4000-a113-000000000001','chat_only','stripe_sync');
+INSERT INTO phone_numbers(id,business_id,phone_number,telnyx_phone_number_id,is_active,telnyx_campaign_assignment_status,telnyx_campaign_assignment_campaign_id)
+VALUES('20000000-0000-4000-a113-000000000001','10000000-0000-4000-a113-000000000001','+15745550113','11300000-0000-4000-8113-000000000003',true,'assigned','old113');
+INSERT INTO review_sms_accounts(id,business_id,owner_id,billing_source,state,source_subscription_id,source_customer_id,exclusive_resources,activation_paid_at,provider_started_at,brand_id,campaign_id,messaging_profile_id,voice_application_id,phone_number_id,draft,stripe_item_id,paid_period_start,paid_period_end,paid_invoice_id,period_allowance,review_usecase_approved_at,approval_evidence)
+VALUES('30000000-0000-4000-a113-000000000001','10000000-0000-4000-a113-000000000001','00000000-0000-4000-a113-000000000001','direct','active','sub_113','cus_113',true,now(),now(),'11300000-0000-4000-8113-000000000001','old113','11300000-0000-4000-8113-000000000002','113000001','20000000-0000-4000-a113-000000000001','{"consentMode":"hosted_keyword"}','si_113',now()-interval '1 day',now()+interval '29 days','in_113',250,now(),'approved review program');
+INSERT INTO review_sms_billing_operations(id,account_id,business_id,owner_id,kind,state,fingerprint,payload)
+VALUES('40000000-0000-4000-a113-000000000001','30000000-0000-4000-a113-000000000001','10000000-0000-4000-a113-000000000001','00000000-0000-4000-a113-000000000001','activation','completed','activation113','{}');
+INSERT INTO chat_texting_upgrades(id,business_id,owner_id,source_subscription_id,source_customer_id,target_plan,source_mode,source_review_account_id,source_review_item_id,original_activation_operation_id)
+VALUES('50000000-0000-4000-a113-000000000001','10000000-0000-4000-a113-000000000001','00000000-0000-4000-a113-000000000001','sub_113','cus_113','sms_and_chat','review_sms','30000000-0000-4000-a113-000000000001','si_113','40000000-0000-4000-a113-000000000001');
+CREATE FUNCTION pg_temp.bid() RETURNS uuid LANGUAGE sql AS $$SELECT '10000000-0000-4000-a113-000000000001'::uuid$$;
+CREATE FUNCTION pg_temp.uid() RETURNS uuid LANGUAGE sql AS $$SELECT '50000000-0000-4000-a113-000000000001'::uuid$$;
+CREATE FUNCTION pg_temp.protect() RETURNS text[] LANGUAGE sql AS $$SELECT ARRAY['11300000-0000-4000-8113-000000000099']$$;
+CREATE TEMP TABLE claim(token uuid);
+CREATE FUNCTION pg_temp.token() RETURNS uuid LANGUAGE sql AS $$SELECT token FROM claim$$;
+CREATE FUNCTION pg_temp.record(event text,evidence jsonb DEFAULT '{}') RETURNS void LANGUAGE sql AS $$SELECT review_texting_provider_record(pg_temp.uid(),pg_temp.token(),event,evidence)$$;
+CREATE FUNCTION pg_temp.move() RETURNS void LANGUAGE sql AS $$SELECT review_texting_provider_request_move(pg_temp.uid(),'00000000-0000-4000-a113-000000000001',pg_temp.protect())$$;
+SELECT ok(NOT has_function_privilege('authenticated','review_texting_provider_prepare(uuid,uuid,jsonb,text,text[])','EXECUTE'),'owner cannot forge filing authority');
+SELECT ok(NOT has_function_privilege('authenticated','review_texting_retire_permit(uuid,uuid,text,text[])','EXECUTE'),'scoped destructive permit service-only');
+SELECT ok(NOT review_texting_upgrade_provider_ready(pg_temp.uid()),'no handoff proof before prepare');
+SELECT ok(NOT review_texting_provider_owned(pg_temp.uid(),NULL),'missing protection configuration fails closed');
+SELECT ok(review_texting_provider_owned(pg_temp.uid(),pg_temp.protect()),'paid exact source recognized');
+UPDATE businesses SET billing_exempt=true WHERE id=pg_temp.bid();
+SELECT ok(NOT review_texting_provider_owned(pg_temp.uid(),pg_temp.protect()),'changed billing exemption blocks provider work after draft selection');
+UPDATE businesses SET billing_exempt=false,billing_comped=true WHERE id=pg_temp.bid();
+SELECT ok(NOT review_texting_provider_owned(pg_temp.uid(),pg_temp.protect()),'changed comped billing blocks paid provider work');
+UPDATE businesses SET billing_comped=false,billing_pilot=true WHERE id=pg_temp.bid();
+SELECT ok(NOT review_texting_provider_owned(pg_temp.uid(),pg_temp.protect()),'pilot billing cannot enter the direct conversion');
+UPDATE businesses SET billing_pilot=false,deletion_scheduled_for=now()+interval '1 day' WHERE id=pg_temp.bid();
+SELECT ok(NOT review_texting_provider_owned(pg_temp.uid(),pg_temp.protect()),'scheduled deletion blocks new paid work and assignment');
+UPDATE businesses SET deletion_scheduled_for=NULL WHERE id=pg_temp.bid();
+SELECT lives_ok($$SELECT review_texting_provider_prepare(pg_temp.bid(),'00000000-0000-4000-a113-000000000001','{"usecase":"MIXED","subUsecases":["CUSTOMER_CARE","MARKETING"],"referenceId":"upgrade:50000000-0000-4000-a113-000000000001","brandId":"11300000-0000-4000-8113-000000000001","optinKeywords":"REVIEWS","embeddedLink":true}',repeat('a',64),pg_temp.protect())$$,'owner-approved filing is persisted');
+SELECT is((SELECT telnyx_campaign_id FROM businesses WHERE id=pg_temp.bid()),'old113','prepare preserves working campaign');
+INSERT INTO claim SELECT review_texting_provider_claim(pg_temp.uid());
+SELECT ok(pg_temp.token() IS NOT NULL,'first reconciliation owns a lease');
+SELECT is(review_texting_provider_claim(pg_temp.uid()),NULL::uuid,'concurrent reconciliation cannot share lease');
+SELECT ok(NOT review_texting_provider_authorize(pg_temp.uid(),gen_random_uuid(),'submit',pg_temp.protect()),'stale lease cannot submit');
+SELECT ok(review_texting_provider_authorize(pg_temp.uid(),pg_temp.token(),'submit',pg_temp.protect()),'first candidate submission is durably authorized');
+SELECT ok(NOT review_texting_provider_authorize(pg_temp.uid(),pg_temp.token(),'submit',pg_temp.protect()),'unknown provider response never authorizes a second paid submit');
+SELECT lives_ok($$SELECT pg_temp.record('submitted','{"campaignId":"new113"}')$$,'exact candidate response can be recorded');
+SELECT is((SELECT count(*)::int FROM telnyx_managed_resources WHERE business_id=pg_temp.bid() AND provider_id='new113'),1,'candidate ownership tracked before binding');
+SELECT is(infer_business_plan_family(pg_temp.bid()),'chat_only','staged mixed candidate does not grant Growth entitlement');
+SELECT throws_ok($$SELECT pg_temp.move()$$,'P0001','review_upgrade_not_ready','move requires carrier approval');
+SELECT lives_ok($$SELECT pg_temp.record('approved',jsonb_build_object('campaignId','new113','brandId','11300000-0000-4000-8113-000000000001','status','approved','filingHash',repeat('a',64)))$$,'exact frozen filing may become approved');
+INSERT INTO billing_usage_periods(id,business_id,period_start,period_end,plan,included_sms_parts)
+VALUES('60000000-0000-4000-a113-000000000001',pg_temp.bid(),now()-interval '1 day',now()+interval '29 days','chat_only',0);
+INSERT INTO tenant_sms_sends(business_id,usage_period_id,idempotency_key,fingerprint,purpose,messaging_profile_id,sender,destination,sms_parts)
+VALUES(pg_temp.bid(),'60000000-0000-4000-a113-000000000001','in-flight113','hash','review_consent_confirmation','11300000-0000-4000-8113-000000000002','+15745550113','+15745550114',1);
+SELECT throws_ok($$SELECT pg_temp.move()$$,'P0001','review_upgrade_sender_busy','in-flight SMS prevents the move');
+UPDATE tenant_sms_sends SET status='accepted' WHERE business_id=pg_temp.bid();
+SELECT lives_ok($$SELECT pg_temp.move()$$,'explicit owner move obtains outbound fence');
+SELECT ok(review_texting_upgrade_sms_paused(pg_temp.bid()),'handoff fences outbound SMS');
+SELECT throws_ok($$DELETE FROM review_sms_accounts WHERE business_id=pg_temp.bid()$$,'55000','review_upgrade_cleanup_pending','privacy scrub cannot erase an unresolved provider operation');
+SELECT is((SELECT texting_paused_at FROM businesses WHERE id=pg_temp.bid()),NULL::timestamptz,'generic pause is untouched so inbound consent stays recordable');
+SELECT throws_ok($$SELECT cancel_chat_texting_upgrade(pg_temp.uid(),'00000000-0000-4000-a113-000000000001')$$,'P0001','texting_upgrade_handoff_in_progress','owner cannot abandon an unresolved assignment');
+SELECT throws_ok($$UPDATE businesses SET telnyx_campaign_assignment_claim_token=gen_random_uuid() WHERE id=pg_temp.bid()$$,'55000','active campaign assignment claim cannot be replaced','ordinary assignment worker cannot steal the handoff');
+SELECT throws_ok($$SELECT reserve_tenant_sms(pg_temp.bid(),'60000000-0000-4000-a113-000000000001','new-send','hash','ai_reply','11300000-0000-4000-8113-000000000002','+15745550113','+15745550114',1)$$,'P0001','sms_upgrade_handoff_pending','final outbound reservation rejects new sends');
+SELECT is(reserve_tenant_sms(pg_temp.bid(),'60000000-0000-4000-a113-000000000001','in-flight113','hash','review_consent_confirmation','11300000-0000-4000-8113-000000000002','+15745550113','+15745550114',1)->>'send','false','old receipt replay never sends again');
+SELECT ok(review_texting_provider_authorize(pg_temp.uid(),pg_temp.token(),'move',pg_temp.protect()),'only one verified move attempt authorized');
+SELECT ok(NOT review_texting_provider_authorize(pg_temp.uid(),pg_temp.token(),'move',pg_temp.protect()),'second move request forbidden after unknown acceptance');
+SELECT throws_ok($$SELECT pg_temp.record('bound','{"campaignId":"new113","phoneNumber":"+15745550113","assignmentStatus":"PENDING_ASSIGNMENT"}')$$,'P0001','review_upgrade_handoff_changed','pending is never accepted as assigned');
+UPDATE review_email_control SET enabled=true,sms_sending_enabled=true,pilot_business_ids=ARRAY[pg_temp.bid()],excluded_business_ids='{}';
+INSERT INTO contacts(id,business_id,phone_number,source_channel) VALUES('70000000-0000-4000-a113-000000000001',pg_temp.bid(),'+15745550114','manual');
+INSERT INTO conversations(id,business_id,contact_id,channel,is_ai_handling) VALUES('71000000-0000-4000-a113-000000000001',pg_temp.bid(),'70000000-0000-4000-a113-000000000001','sms',false);
+INSERT INTO messages(id,business_id,conversation_id,channel,role,content) VALUES('72000000-0000-4000-a113-000000000001',pg_temp.bid(),'71000000-0000-4000-a113-000000000001','sms','customer','REVIEWS');
+SELECT is(review_record_sms_consent(pg_temp.bid(),'11300000-0000-4000-8113-000000000002','+15745550114','+15745550113','71000000-0000-4000-a113-000000000001','72000000-0000-4000-a113-000000000001','inbound113',now(),'review-texts-v1')->>'granted','true','signed review consent is durably recorded during handoff');
+UPDATE review_texting_provider_upgrades SET handoff_requested_at=now()-interval '3 days' WHERE upgrade_id=pg_temp.uid();
+UPDATE review_sms_consent_events SET occurred_at=now()-interval '2 days',received_at=now()-interval '2 days' WHERE business_id=pg_temp.bid();
+SELECT is((SELECT count(*)::int FROM review_texting_claim_confirmations()),0,'still-moving handoff cannot send deferred confirmations');
+SELECT lives_ok($$SELECT pg_temp.record('bound','{"campaignId":"new113","phoneNumber":"+15745550113","assignmentStatus":"ASSIGNED"}')$$,'fresh exact assignment atomically binds all resource pointers');
+SELECT ok(review_texting_upgrade_provider_ready(pg_temp.uid()),'durable proof is available for payment');
+SELECT ok(NOT review_texting_upgrade_sms_paused(pg_temp.bid()),'review sending resumes after verified binding');
+SELECT ok(review_texting_confirmation_is_deferred((SELECT id FROM review_sms_consent_events WHERE business_id=pg_temp.bid())),'multi-day old signed consent remains eligible only through completed handoff proof');
+SELECT is((SELECT count(*)::int FROM review_texting_claim_confirmations()),1,'worker claims delayed confirmation after multi-day handoff');
+SELECT is((SELECT count(*)::int FROM review_texting_claim_confirmations()),0,'durable retry schedule prevents repeatedly taking the same first batch');
+SELECT is(reserve_tenant_sms(pg_temp.bid(),'60000000-0000-4000-a113-000000000001','review-consent/v1/inbound113','deferred-hash','review_consent_confirmation','11300000-0000-4000-8113-000000000002','+15745550113','+15745550114',1,'71000000-0000-4000-a113-000000000001')->>'send','true','proven handoff-deferred confirmation can pass the final shared send guard after 24 hours');
+UPDATE review_texting_deferred_confirmations SET next_attempt_at=now()-interval '1 minute';
+SELECT is((SELECT count(*)::int FROM review_texting_claim_confirmations()),0,'existing submission receipt is never retried after unknown provider acceptance');
+SELECT is(reserve_tenant_sms(pg_temp.bid(),'60000000-0000-4000-a113-000000000001','review-consent/v1/inbound113','deferred-hash','review_consent_confirmation','11300000-0000-4000-8113-000000000002','+15745550113','+15745550114',1,'71000000-0000-4000-a113-000000000001')->>'send','false','recovery remains exactly-once');
+
+SELECT is((SELECT billing_source FROM review_sms_accounts WHERE business_id=pg_temp.bid()),'direct','binding alone preserves paid 35 review billing');
+SELECT is((SELECT stripe_item_id FROM review_sms_accounts WHERE business_id=pg_temp.bid()),'si_113','binding never removes the paid review item');
+SELECT is(infer_business_plan_family(pg_temp.bid()),'chat_only','binding alone preserves Chat family');
+SELECT is((SELECT plan FROM subscriptions WHERE business_id=pg_temp.bid()),'chat_only','binding never grants the new base plan');
+SELECT ok(NOT review_texting_retire_permit(pg_temp.uid(),pg_temp.token(),'new113',pg_temp.protect()),'scoped permit cannot delete the live candidate');
+SELECT ok(review_texting_retire_permit(pg_temp.uid(),pg_temp.token(),'old113',pg_temp.protect()),'only detached old campaign can retire');
+SELECT ok(NOT review_texting_retire_permit(pg_temp.uid(),pg_temp.token(),'old113',pg_temp.protect()),'ambiguous retirement never repeats automatically');
+SELECT lives_ok($$SELECT pg_temp.record('retired')$$,'confirmed retirement is recorded');
+SELECT ok(NOT review_texting_upgrade_release_held(pg_temp.bid()),'scoped completion releases the ordinary cleanup hold');
+UPDATE subscriptions SET status='canceled' WHERE business_id=pg_temp.bid();
+SELECT ok(review_texting_upgrade_provider_ready(pg_temp.uid()),'durable handoff proof survives payment/cancellation races');
+SELECT * FROM finish();
+ROLLBACK;

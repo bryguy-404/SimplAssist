@@ -12,6 +12,7 @@ import {
   finalizeBookingSummarySend,
 } from "@/lib/booking/summarySend.server";
 import { createHash } from "node:crypto";
+import { isReviewTextingHandoffPaused } from "@/lib/billing/reviewTextingHandoff.server";
 import { NextRequest, NextResponse } from "next/server";
 import { telnyx } from "@/lib/messaging/client";
 import { getOutboundSendContext } from "@/lib/messaging/lookup";
@@ -285,7 +286,7 @@ export async function POST(request: NextRequest) {
       await completeMessagingWebhookEvent(eventKey, ownedClaimToken);
       return new NextResponse("OK", { status: 200 });
     }
-    if (inboundState.reviewHeld || inboundState.keyword) {
+    if (inboundState.reviewHeld || inboundState.keyword || await isReviewTextingHandoffPaused(businessId)) {
       // Telnyx's configured profile handles STOP/START/HELP confirmations.
       // These controls must never enter AI processing or create a second reply.
       await completeMessagingWebhookEvent(eventKey, ownedClaimToken);

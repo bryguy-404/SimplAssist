@@ -28,6 +28,7 @@ vi.mock("@/lib/messaging/client", () => ({
 }));
 
 import {
+  retireReviewUpgradeCampaign,
   deactivateTelnyxCampaign,
   deleteTelnyxBrand,
   deleteTelnyxMessagingProfile,
@@ -574,5 +575,29 @@ describe("destructive Telnyx authorization boundary", () => {
     expect(mocks.deleteBrand).not.toHaveBeenCalled();
     expect(mocks.deleteMessagingProfile).not.toHaveBeenCalled();
     expect(mocks.deleteVoiceApplication).not.toHaveBeenCalled();
+  });
+});
+
+describe("completed review upgrade campaign retirement",()=>{
+  const scope={upgradeId:ACTION_ID,claimToken:LEASE_TOKEN,campaignId:"old-campaign"};
+  it("uses the exact narrow permit without enabling general resource release",async()=>{
+    vi.stubEnv("TELNYX_REMOTE_RELEASE_ENABLED","0");
+    mocks.rpc.mockResolvedValue({data:true,error:null});
+    await retireReviewUpgradeCampaign(scope);
+    expect(mocks.rpc).toHaveBeenCalledWith("review_texting_retire_permit",expect.objectContaining({p_upgrade:ACTION_ID,p_claim:LEASE_TOKEN,p_campaign:"old-campaign"}));
+    expect(mocks.deactivateCampaign).toHaveBeenCalledWith("old-campaign",{maxRetries:0,timeout:10000});
+    expect(mocks.releasePhoneNumber).not.toHaveBeenCalled();
+    expect(mocks.deleteBrand).not.toHaveBeenCalled();
+  });
+  it.each([false,null,{authorized:true}])("rejects missing or malformed scoped proof",async(data)=>{
+    mocks.rpc.mockResolvedValue({data,error:null});
+    await expect(retireReviewUpgradeCampaign(scope)).rejects.toBeInstanceOf(TelnyxRemoteMutationAuthorizationError);
+    expect(mocks.deactivateCampaign).not.toHaveBeenCalled();
+  });
+  it("does not retry an ambiguous provider deletion",async()=>{
+    mocks.rpc.mockResolvedValue({data:true,error:null});
+    mocks.deactivateCampaign.mockRejectedValueOnce(new Error("timeout"));
+    await expect(retireReviewUpgradeCampaign(scope)).rejects.toThrow("timeout");
+    expect(mocks.deactivateCampaign).toHaveBeenCalledTimes(1);
   });
 });

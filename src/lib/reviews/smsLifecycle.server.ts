@@ -88,6 +88,12 @@ async function refreshDirectBilling(account: {
  * leave a chargeable number/campaign behind just because sending is paused. */
 export async function runReviewSmsLifecycle() {
   try {
+    const { runReviewTextingProviderLifecycle } = await import("@/lib/billing/reviewTextingProvider.server");
+    await runReviewTextingProviderLifecycle();
+  } catch {
+    console.warn("[review-sms] Texting upgrade reconciliation unavailable; will retry.");
+  }
+  try {
     await initializeNewSignupAccounts();
   } catch {
     // Initialization is retried next tick. Existing reconciliation and resource

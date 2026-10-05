@@ -73,10 +73,40 @@ async function assertTarget(priceId: string) {
 }
 async function preview(sub: Stripe.Subscription, u: TextingUpgradeRecord, priceId: string, prorationAt: number) {
   const { base, reviewSms } = sourceItems(sub, u);
-  return stripe.invoices.createPreview({ customer: u.source_customer_id, subscription: sub.id,
+  const invoice = await stripe.invoices.createPreview({ customer: u.source_customer_id, subscription: sub.id,
     subscription_details: { items: [{ id: base.id, price: priceId, quantity: 1 }, { id: reviewSms.id, deleted: true }],
       proration_date: prorationAt, proration_behavior: "always_invoice", billing_cycle_anchor: "unchanged" },
   });
+  verifyReviewConversionPreview(invoice, { baseItemId: base.id, reviewItemId: reviewSms.id, basePriceId: base.price.id,
+    reviewPriceId: reviewSms.price.id, targetPriceId: priceId, prorationAt, periodEnd: base.current_period_end });
+  return invoice;
+}
+
+type ProrationBinding = {
+  baseItemId: string; reviewItemId: string; basePriceId: string; reviewPriceId: string;
+  targetPriceId: string; prorationAt: number; periodEnd: number;
+};
+function verifyProrationLines(lines: Stripe.InvoiceLineItem[], binding: ProrationBinding) {
+  const expected = [
+    { item: binding.baseItemId, price: binding.targetPriceId, positive: true },
+    { item: binding.baseItemId, price: binding.basePriceId, positive: false },
+    { item: binding.reviewItemId, price: binding.reviewPriceId, positive: false },
+  ];
+  if (lines.length !== expected.length || expected.some(e => lines.filter(line =>
+    line.pricing?.price_details?.price === e.price && line.parent?.subscription_item_details?.subscription_item === e.item &&
+    line.parent?.subscription_item_details?.proration === true && line.quantity === 1 && Number.isSafeInteger(line.amount) &&
+    line.period.start === binding.prorationAt && line.period.end === binding.periodEnd &&
+    (e.positive ? line.amount >= 0 : line.amount <= 0)).length !== 1))
+    throw new TextingUpgradeError("texting_upgrade_proration_unverified");
+}
+/** Reject unrelated pending charges and unsupported tax/credit adjustments before any payment mutation. */
+export function verifyReviewConversionPreview(invoice: Stripe.Invoice, binding: ProrationBinding) {
+  assertMode(invoice.livemode);
+  if (invoice.lines.has_more || invoice.currency !== "usd" || !Number.isSafeInteger(invoice.amount_due) || invoice.amount_due < 0)
+    throw new TextingUpgradeError("texting_upgrade_quote_unavailable", 503);
+  verifyProrationLines(invoice.lines.data, binding);
+  if (invoice.lines.data.reduce((sum, line) => sum + line.amount, 0) !== invoice.amount_due)
+    throw new TextingUpgradeError("texting_upgrade_proration_unverified");
 }
 
 export async function quoteReviewTextingConversion(businessId: string, ownerId: string, initial: TextingUpgradeRecord) {
@@ -168,17 +198,9 @@ export function verifyReviewConversionInvoice(invoice: Stripe.Invoice, lines: St
     (op.invoice_id && invoice.id !== op.invoice_id) || invoice.billing_reason !== "subscription_update" || invoice.currency !== "usd" ||
     !op.confirmed_at || invoice.created < seconds(op.confirmed_at) - 60 || invoice.amount_due !== op.quote.amountDueCents || !invoiceOwned(invoice, op, u))
     throw new TextingUpgradeError("texting_upgrade_invoice_mismatch");
-  const expected = [
-    { item: op.stripe_item_id, price: op.target_price_id, positive: true },
-    { item: op.stripe_item_id, price: op.quote.sourceBasePriceId, positive: false },
-    { item: u.source_review_item_id, price: op.quote.sourceReviewPriceId, positive: false },
-  ];
-  if (lines.length !== expected.length || expected.some(e => lines.filter(line =>
-    line.pricing?.price_details?.price === e.price && line.parent?.subscription_item_details?.subscription_item === e.item &&
-    line.parent?.subscription_item_details?.proration === true && line.quantity === 1 &&
-    line.period.start === seconds(op.proration_at!) && line.period.end === seconds(op.source_period_end!) &&
-    (e.positive ? line.amount >= 0 : line.amount <= 0)).length !== 1))
-    throw new TextingUpgradeError("texting_upgrade_proration_unverified");
+  verifyProrationLines(lines, { baseItemId: op.stripe_item_id!, reviewItemId: u.source_review_item_id!,
+    basePriceId: String(op.quote.sourceBasePriceId), reviewPriceId: String(op.quote.sourceReviewPriceId), targetPriceId: op.target_price_id,
+    prorationAt: seconds(op.proration_at!), periodEnd: seconds(op.source_period_end!) });
 }
 async function findInvoice(u: TextingUpgradeRecord, op: SmsBillingOperation) {
   if (op.invoice_id) {

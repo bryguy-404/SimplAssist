@@ -32,7 +32,7 @@ beforeEach(()=>{
   quote:{amountDueCents:700,currency:'usd',monthlyPriceCents:4900,setupFeeCents:0,sourceMode:'review_sms',sourceBasePriceId:'price_chat_only',sourceReviewPriceId:'price_reviews',sourceReviewItemId:'si_reviews'},created_at:iso(now),expires_at:iso(now+600),confirmed_at:null,applied_at:null};
  invoice={id:'in_conversion',customer:'cus_source',livemode:false,status:'paid',status_transitions:{paid_at:now},billing_reason:'subscription_update',currency:'usd',created:now,amount_due:700,parent:{subscription_details:{subscription:sub.id,metadata:{sms_billing_operation_id:opId,chat_texting_upgrade_id:upgradeId}}},lines:{has_more:false,data:[line('si_chat','chat_only',-750),line('si_reviews','reviews',-1000),line('si_chat','sms_and_chat',2450)]}} as unknown as Stripe.Invoice;
  sourceInvoice={...invoice,id:'in_source',lines:{...invoice.lines,data:[line('si_chat','chat_only',1500),line('si_reviews','reviews',2000)].map(l=>({...l,period:{start,end},parent:{...l.parent!,subscription_item_details:{...l.parent!.subscription_item_details!,proration:false}}}))}};
- m.context.mockImplementation(async()=>context());m.ready.mockImplementation(async()=>context());m.getUpgrade.mockImplementation(async()=>u);m.retrieve.mockImplementation(async()=>sub);m.price.mockImplementation(async()=>price('sms_and_chat'));m.preview.mockResolvedValue({amount_due:700,currency:'usd'});
+ m.context.mockImplementation(async()=>context());m.ready.mockImplementation(async()=>context());m.getUpgrade.mockImplementation(async()=>u);m.retrieve.mockImplementation(async()=>sub);m.price.mockImplementation(async()=>price('sms_and_chat'));m.preview.mockResolvedValue(structuredClone(invoice));
  m.invoice.mockImplementation(async(invoiceId:string)=>invoiceId==='in_source'?{...invoice,id:invoiceId}:invoice);
  m.list.mockImplementation(async(args:{status?:string})=>({data:args.status==='open'?[]:args.status==='paid'?[sourceInvoice]:[invoice],has_more:false}));
  m.from.mockImplementation(()=>{const q={select:vi.fn(),eq:vi.fn(),maybeSingle:vi.fn()};q.select.mockReturnValue(q);q.eq.mockReturnValue(q);q.maybeSingle.mockImplementation(async()=>({data:op,error:null}));return q;});
@@ -66,6 +66,21 @@ describe('paid review SMS to Growth',()=>{
   await expect(quoteTextingUpgrade(businessId,ownerId)).rejects.toThrow('provider_pending');
   await expect(confirmTextingUpgrade(businessId,ownerId,opId,op.source_fingerprint,false)).rejects.toThrow('provider_pending');
   expect(m.update).not.toHaveBeenCalled();expect(m.preview).not.toHaveBeenCalled();
+ });
+ it.each(['extra line','wrong credit','wrong period','wrong item','tax','balance credit','truncated lines'])('rejects unsupported preview %s before claiming or charging',async(kind)=>{
+  const preview=structuredClone(invoice);
+  if(kind==='extra line')preview.lines.data.push(line('si_chat','unrelated',0));
+  if(kind==='wrong credit')preview.lines.data[1].amount=1000;
+  if(kind==='wrong period')preview.lines.data[0].period.end++;
+  if(kind==='wrong item')preview.lines.data[1].parent!.subscription_item_details!.subscription_item='si_other';
+  if(kind==='tax')preview.amount_due++;
+  if(kind==='balance credit')preview.amount_due--;
+  if(kind==='truncated lines')preview.lines.has_more=true;
+  m.preview.mockResolvedValue(preview);
+  await expect(quoteTextingUpgrade(businessId,ownerId)).rejects.toThrow();
+  expect(m.rpc.mock.calls.some(c=>c[0]==='acquire_chat_texting_upgrade_quote')).toBe(false);
+  await expect(confirmTextingUpgrade(businessId,ownerId,opId,op.source_fingerprint,false)).rejects.toThrow();
+  expect(m.rpc.mock.calls.some(c=>c[0]==='confirm_chat_texting_upgrade')).toBe(false);expect(m.update).not.toHaveBeenCalled();
  });
  it.each(['customer','addon','amount','schedule','cancel','unpaid','extra item'])('rejects changed %s before billing',async(change)=>{
   if(change==='customer')sub.customer='cus_other';if(change==='addon')sub.items.data[1].id='si_other';if(change==='amount')m.preview.mockResolvedValue({amount_due:701,currency:'usd'});

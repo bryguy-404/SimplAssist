@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import ReviewTextingUpgradeWizard from "./ReviewTextingUpgradeWizard";
 import { useCallback, useEffect, useRef, useState } from "react";
 import BusinessInfoForm from "@/components/onboarding/BusinessInfoForm";
 import BrandVerificationForm from "@/components/onboarding/BrandVerificationForm";
@@ -116,6 +117,7 @@ export default function TextingUpgradeWizard({ initialState }: { initialState?: 
   };
 
   const commonSetupReady = state ? state.businessHours.length === 7 && evaluateContentQuality(state.servicesAndFaqs).ready && state.aiSettings !== null : false;
+  if (state?.sourceMode === "review_sms") return <ReviewTextingUpgradeWizard state={state} onState={acceptState} />;
   return <div className="mx-auto max-w-3xl space-y-5">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <h1 className="text-2xl font-bold">Add texting</h1>

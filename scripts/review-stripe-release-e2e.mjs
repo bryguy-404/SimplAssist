@@ -30,7 +30,7 @@ import Stripe from "stripe";
 const API_VERSION = "2026-02-25.clover";
 const BASE_CENTS = 1500;
 const ADDON_CENTS = 2000;
-const ACTIVATION_CENTS = 4900;
+const ACTIVATION_CENTS = 2500;
 const POLL_TIMEOUT_MS = 180_000;
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const objectId = (value) => typeof value === "string" ? value : value?.id;
@@ -205,7 +205,7 @@ export async function runHarness(environment = process.env) {
     assert.equal(checkout.client_reference_id, metadata.business_id);
     assert.equal(objectId(checkout.customer), activationCustomer.id);
     await mutate("expire-activation-checkout", (options) => stripe.checkout.sessions.expire(checkout.id, {}, options));
-    await logCheck("$49 activation Checkout amount, binding, idempotency, and expiration");
+    await logCheck("$25 activation Checkout amount, binding, idempotency, and expiration");
 
     const payment = await mutate("activation-payment", (options) => stripe.paymentIntents.create({
       amount: ACTIVATION_CENTS, currency: "usd", customer: activationCustomer.id, payment_method: activationCard,
@@ -227,7 +227,7 @@ export async function runHarness(environment = process.env) {
     assert.equal(refundReplay.id, refund.id);
     assert.equal(refund.status, "succeeded");
     assert.equal(refund.amount, ACTIVATION_CENTS);
-    await logCheck("$49 test activation payment and exactly-once full refund before provider work");
+    await logCheck("$25 test activation payment and exactly-once full refund before provider work");
 
     const fixture = await createBase("renewal", base.id);
     await logCheck("$15 Chat base subscription paid without a setup charge");

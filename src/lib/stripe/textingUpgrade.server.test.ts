@@ -44,6 +44,49 @@ beforeEach(()=>{
 });
 afterEach(()=>{vi.useRealTimers();vi.unstubAllEnvs();});
 describe('Chat to texting payment',()=>{
+ it('reconciles a paid historical $49 activation invoice after the current setup price changes to $25',async()=>{
+  op={...op,state:'pending',confirmed_at:iso(now),invoice_id:inv.id,setup_fee_price_id:'price_setup49',quote:{...op.quote,setupFeeCents:4900,amountDueCents:7650}};
+  u.state='payment_pending';sub.items.data[0].price=price('full');
+  inv.amount_due=7650;inv.lines.data[0].amount=4900;inv.lines.data[0].pricing!.price_details!.price='price_setup49';
+  vi.stubEnv('STRIPE_PRICE_SETUP_FEE','price_setup25');
+  m.price.mockRejectedValue(new Error('The historical price is archived'));
+  await reconcileTextingUpgradePayment(u,op);
+  expect(op.state).toBe('applied');expect(u.paid_at).toBe(iso(now));
+  expect(m.price).not.toHaveBeenCalled();expect(m.update).not.toHaveBeenCalled();
+  expect(m.rpc).toHaveBeenCalledWith('finalize_chat_texting_upgrade_payment',expect.objectContaining({p_details:expect.objectContaining({setup_fee_price_id:'price_setup49',invoice_amount_due:7650,setup_fee_verified:true})}));
+ });
+ it('recovers a previously confirmed $49 update with its original parameters and idempotency key after the fee switch',async()=>{
+  op={...op,state:'confirming',confirmed_at:iso(now),setup_fee_price_id:'price_setup49',quote:{...op.quote,setupFeeCents:4900,amountDueCents:7650}};
+  u.state='payment_pending';inv.amount_due=7650;inv.lines.data[0].amount=4900;inv.lines.data[0].pricing!.price_details!.price='price_setup49';
+  vi.stubEnv('STRIPE_PRICE_SETUP_FEE','price_setup25');m.rollout.mockReturnValue(false);
+  await confirmTextingUpgrade(businessId,ownerId,opId,op.source_fingerprint,false);
+  expect(m.update).toHaveBeenCalledExactlyOnceWith('sub_original',expect.objectContaining({add_invoice_items:[{price:'price_setup49',quantity:1,metadata:{chat_texting_upgrade_id:upgradeId,sms_billing_operation_id:opId}}]}),{idempotencyKey:`chat-texting-upgrade:${opId}`});
+  expect(m.price).not.toHaveBeenCalled();expect(m.preview).not.toHaveBeenCalled();expect(op.state).toBe('applied');
+ });
+ it('rejects an unconfirmed $49 quote before taking payment authority and requests the replacement at $25',async()=>{
+  op.setup_fee_price_id='price_setup49';op.quote={...op.quote,setupFeeCents:4900,amountDueCents:7650};
+  vi.stubEnv('STRIPE_PRICE_SETUP_FEE','price_setup25');
+  await expect(confirmTextingUpgrade(businessId,ownerId,opId,op.source_fingerprint,false)).rejects.toThrow('texting_upgrade_price_changed');
+  expect(m.update).not.toHaveBeenCalled();expect(m.preview).not.toHaveBeenCalled();expect(m.rpc).not.toHaveBeenCalled();
+  const originalPrice=m.price.getMockImplementation()!;
+  m.price.mockImplementation(async(id:string)=>id==='price_setup25'?{...price('setup'),id}:originalPrice(id));
+  await quoteTextingUpgrade(businessId,ownerId);
+  expect(m.preview).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({invoice_items:[{price:'price_setup25',quantity:1}]}));
+  expect(m.rpc).toHaveBeenCalledWith('acquire_chat_texting_upgrade_quote',expect.objectContaining({p_request:expect.objectContaining({setup_fee_price_id:'price_setup25',quote:expect.objectContaining({setupFeeCents:2500})})}));
+  expect(m.update).not.toHaveBeenCalled();
+ });
+ it('does not replace a confirmed unresolved $49 operation with a fresh $25 quote',async()=>{
+  op={...op,state:'confirming',confirmed_at:iso(now),setup_fee_price_id:'price_setup49',quote:{...op.quote,setupFeeCents:4900}};
+  u.state='payment_pending';vi.stubEnv('STRIPE_PRICE_SETUP_FEE','price_setup25');
+  await expect(quoteTextingUpgrade(businessId,ownerId)).rejects.toThrow('texting_upgrade_payment_in_progress');
+  expect(m.price).not.toHaveBeenCalled();expect(m.preview).not.toHaveBeenCalled();expect(m.update).not.toHaveBeenCalled();
+  expect(m.rpc.mock.calls.some(([name])=>name==='acquire_chat_texting_upgrade_quote')).toBe(false);
+ });
+ it('rejects a substituted $25 fee line on a historically authorized $49 invoice',()=>{
+  op.confirmed_at=iso(now);op.setup_fee_price_id='price_setup49';op.quote={...op.quote,setupFeeCents:4900};
+  inv.lines.data[0].pricing!.price_details!.price='price_setup49';
+  expect(()=>verifyTextingUpgradeInvoice(inv,inv.lines.data,op,u)).toThrow('texting_upgrade_setup_fee_unverified');
+ });
  it.each(['sms_only','sms_and_chat','full'] as const)('updates the same subscription with one operation-bound setup fee for %s',async target=>{
   u.target_plan=target;u.starter_acknowledged_at=iso(now);op.target_plan=target;op.target_price_id=`price_${target}`;inv.lines.data=lines();
   await confirmTextingUpgrade(businessId,ownerId,opId,op.source_fingerprint,true);

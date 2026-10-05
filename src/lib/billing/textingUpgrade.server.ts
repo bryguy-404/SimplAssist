@@ -6,13 +6,14 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getOnboardingCheckoutContextForBusinessIdReadOnly } from "@/lib/onboarding/state";
 import { evaluateContentQuality } from "@/lib/contentQuality";
 import { hasSmsProviderProvenance } from "@/lib/onboarding/acquisitionPolicy";
-import { isPlanAvailable } from "@/lib/billing/planAvailability";
-import { isTextingUpgradeEnabled } from "./textingUpgradeRollout.server";
+import { DEFAULT_ACQUISITION_PLAN_ORDER, isPlanAvailable } from "@/lib/billing/planAvailability";
+import { isReviewTextingUpgradeEnabled, isTextingUpgradeEnabled } from "./textingUpgradeRollout.server";
 import { TextingUpgradeError, TEXTING_UPGRADE_STEPS, type TextingUpgradeRecord, type TextingUpgradeState, type TextingUpgradeStep } from "./textingUpgrade";
 import { operationSchema, view } from "@/lib/stripe/smsBilling.server";
 import type { SmsBillingOperation } from "@/lib/stripe/smsBilling.server";
 import type { SmsPlan } from "@/lib/stripe/smsBilling";
 import type { OnboardingState } from "@/lib/onboarding/types";
+import { approvedBasePriceCents, stripePriceIdForPlan } from "@/lib/stripe/config";
 
 export function textingUpgradeQuote(op: SmsBillingOperation) {
   return { ...view(op), quoteFingerprint: op.source_fingerprint, setupFeeCents: Number(op.quote.setupFeeCents ?? 2500) };
@@ -64,9 +65,15 @@ export async function loadTextingUpgradeContext(businessId: string, ownerId: str
   const active = s?.status === "active" && !s.cancel_at_period_end && !s.pending_plan && Date.parse(s.current_period_end) > Date.now();
   const bound = !upgrade || (s?.stripe_subscription_id === upgrade.source_subscription_id && s?.stripe_customer_id === upgrade.source_customer_id);
   const draft = !upgrade || upgrade.state === "draft" || upgrade.state === "abandoned";
+  const reviewSource = upgrade?.source_mode === "review_sms" || (phoneResult.data ?? []).length || (providerHistory.data ?? []).length
+    ? await textingUpgradeRpc("read_review_texting_upgrade_source", { p_business_id: businessId, p_owner_id: ownerId }) : null;
+  const sourceMode = upgrade && upgrade.state !== "abandoned" ? upgrade.source_mode ?? "new_sms" : reviewSource ? "review_sms" : "new_sms";
   let eligible = Boolean(direct && active && bound && b.onboarding_completed_at && s?.stripe_subscription_id && s?.stripe_customer_id &&
     (upgrade?.paid_at ? s.plan === upgrade.target_plan : s.plan === "chat_only"));
-  if (draft && !upgrade?.paid_at) {
+  if (sourceMode === "review_sms" && !upgrade?.paid_at) {
+    eligible = eligible && reviewSource?.eligible === true && s?.stripe_price_id === stripePriceIdForPlan("chat_only") &&
+      approvedBasePriceCents("chat_only", s.stripe_price_id) === 1500;
+  } else if (draft && !upgrade?.paid_at) {
     const [history, conflicts, usageHistory, billingAccount, familyLock] = await Promise.all([
       supabaseAdmin.from("chat_only_checkout_attempts").select("state,stripe_subscription_id,stripe_customer_id").eq("business_id", businessId),
       supabaseAdmin.from("sms_billing_operations").select("id,state").eq("business_id", businessId).in("state", ["prepared", "confirming", "pending", "scheduled"]),
@@ -82,30 +89,37 @@ export async function loadTextingUpgradeContext(businessId: string, ownerId: str
       !(conflicts.data ?? []).some(o => o.id !== upgrade?.billing_operation_id);
   }
   const hasOwnedPhoneResource = Boolean(phoneResult.data?.some((phone) => phone.is_active || phone.telnyx_phone_number_id) || providerHistory.data?.some((resource) => resource.resource_type === "phone_number"));
-  return { hasOwnedPhoneResource, business: b, subscription: s, upgrade, operation: op, onboarding: upgradeOnboarding, eligible };
+  return { hasOwnedPhoneResource, sourceMode, business: b, subscription: s, upgrade, operation: op, onboarding: upgradeOnboarding, eligible };
 }
 
 export async function getTextingUpgradeState(businessId: string, ownerId: string): Promise<TextingUpgradeState> {
   const context = await loadTextingUpgradeContext(businessId, ownerId);
   const { business, subscription, upgrade, operation: op, onboarding: o, eligible } = context;
   const entitlements = await resolveBusinessEntitlements(businessId);
-  const enabled = isTextingUpgradeEnabled(businessId);
+  const enabled = context.sourceMode === "review_sms" ? isReviewTextingUpgradeEnabled(businessId) : isTextingUpgradeEnabled(businessId);
   const mutable = eligible && (!upgrade || ["draft", "abandoned"].includes(upgrade.state)) && (!op || ["prepared", "expired"].includes(op.state));
-  const step = textingUpgradeResumeStep(o, upgrade, Boolean(business.compliance_info_completed_at));
+  const canContinue = enabled || Boolean(context.sourceMode === "review_sms" && upgrade && upgrade.state !== "abandoned");
+  const providerReady = context.sourceMode === "review_sms" && upgrade
+    ? await textingUpgradeRpc("review_texting_upgrade_provider_ready", { p_upgrade_id: upgrade.id }) === true : false;
+  const step = context.sourceMode === "review_sms"
+    ? !upgrade || upgrade.state === "abandoned" ? "plan" : upgrade.paid_at || upgrade.state === "payment_pending" || !providerReady ? "status" : "review"
+    : textingUpgradeResumeStep(o, upgrade, Boolean(business.compliance_info_completed_at));
   return {
-    businessId, businessInfo: o.businessInfo, businessHours: o.businessHours, brandVerification: o.brandVerification,
+    businessId, sourceMode: context.sourceMode, businessInfo: o.businessInfo, businessHours: o.businessHours, brandVerification: o.brandVerification,
     servicesAndFaqs: o.servicesAndFaqs, aiSettings: o.aiSettings, registration: o.registration, phoneNumber: o.phoneNumber,
     activePhoneNumber: o.activePhoneNumber, pendingPhoneNumber: o.pendingPhoneNumber, pendingPhoneNumberFailureReason: o.pendingPhoneNumberFailureReason,
     smsConsentAgreed: Boolean(upgrade?.phone_confirmed_at && o.smsConsentAgreed),
     upgrade: upgrade ? { id: upgrade.id, targetPlan: upgrade.target_plan, state: upgrade.state, starterAcknowledged: Boolean(upgrade.starter_acknowledged_at), paidAt: upgrade.paid_at, activatedAt: upgrade.activated_at } : null,
     eligible, enabled, message: !eligible ? "Contact support to help with this account’s texting upgrade." : !enabled ? "New texting upgrades are not available yet. Your saved setup and any payment already in progress are preserved." : null,
-    currentStep: step, steps: TEXTING_UPGRADE_STEPS, availablePlans: (["sms_only", "sms_and_chat", "full"] as const).filter(isPlanAvailable),
+    currentStep: step, steps: context.sourceMode === "review_sms" ? ["plan", "status", "review"] : TEXTING_UPGRADE_STEPS,
+    availablePlans: context.sourceMode === "review_sms" ? ["sms_and_chat"] : ([...DEFAULT_ACQUISITION_PLAN_ORDER.filter(plan => plan !== "chat_only") as SmsPlan[],
+      ...(upgrade && upgrade.state !== "abandoned" && upgrade.target_plan === "sms_only" ? ["sms_only" as const] : [])]).filter(isPlanAvailable),
     selectedPlan: upgrade?.target_plan ?? null, paidPlan: subscription?.plan ?? null,
     availableServicePlan: entitlements.active ? entitlements.plan : null,
     paymentStatus: upgrade?.paid_at ? "paid" : op?.state === "applied" ? "paid" : op?.state === "scheduled" ? "pending" : op?.state ?? "not_started",
     quote: op ? textingUpgradeQuote(op) : null,
-    actions: { canSelect: mutable && (enabled || Boolean(upgrade && upgrade.state !== "abandoned")), canSave: mutable && Boolean(upgrade && upgrade.state === "draft"),
-      canQuote: mutable && enabled && step === "review", canConfirm: eligible && enabled && step === "review" && op?.state === "prepared",
+    actions: { canSelect: mutable && (enabled || Boolean(upgrade && upgrade.state !== "abandoned")), canSave: context.sourceMode !== "review_sms" && mutable && Boolean(upgrade && upgrade.state === "draft"),
+      canQuote: mutable && canContinue && step === "review", canConfirm: eligible && canContinue && step === "review" && op?.state === "prepared",
       canCancel: Boolean(upgrade && !upgrade.paid_at && !["abandoned", "activated"].includes(upgrade.state)),
       canRefresh: Boolean(upgrade), canReplacePhone: Boolean(eligible && upgrade?.paid_at && !upgrade.activated_at && !context.hasOwnedPhoneResource && !o.activePhoneNumber && o.pendingPhoneNumberFailureReason && !["rejected"].includes(o.registration.brandStatus ?? "") && o.registration.campaignStatus !== "rejected") },
   };
@@ -114,12 +128,18 @@ export async function selectTextingUpgrade(businessId: string, ownerId: string, 
   const c = await loadTextingUpgradeContext(businessId, ownerId);
   if (!c.eligible) throw new TextingUpgradeError("texting_upgrade_support_required");
   if (!isPlanAvailable(plan)) throw new TextingUpgradeError("texting_upgrade_plan_unavailable");
-  if ((!c.upgrade || c.upgrade.state === "abandoned") && !isTextingUpgradeEnabled(businessId)) throw new TextingUpgradeError("texting_upgrade_disabled");
+  if (c.sourceMode === "review_sms" && plan !== "sms_and_chat") throw new TextingUpgradeError("texting_upgrade_invalid_plan");
+  if ((!c.upgrade || c.upgrade.state === "abandoned") && !(c.sourceMode === "review_sms" ? isReviewTextingUpgradeEnabled(businessId) : isTextingUpgradeEnabled(businessId))) throw new TextingUpgradeError("texting_upgrade_disabled");
   return parseTextingUpgrade(await textingUpgradeRpc("save_chat_texting_upgrade", { p_business_id: businessId, p_owner_id: ownerId, p_target_plan: plan, p_starter_acknowledged: starterAcknowledged }));
 }
 export async function requireTextingUpgradeReady(businessId: string, ownerId: string) {
   const c = await loadTextingUpgradeContext(businessId, ownerId);
   if (!c.eligible || !c.upgrade) throw new TextingUpgradeError("texting_upgrade_support_required");
+  if (c.upgrade.source_mode === "review_sms") {
+    if (await textingUpgradeRpc("review_texting_upgrade_provider_ready", { p_upgrade_id: c.upgrade.id }) !== true)
+      throw new TextingUpgradeError("texting_upgrade_provider_pending");
+    return c as typeof c & { upgrade: TextingUpgradeRecord };
+  }
   // Re-evaluate the forms even after claiming payment; the RPC freezes the same facts.
   const step = textingUpgradeResumeStep(c.onboarding, { ...c.upgrade, paid_at: null, state: "draft" }, Boolean(c.business.compliance_info_completed_at));
   if (step !== "review") throw new TextingUpgradeError("texting_upgrade_setup_incomplete");

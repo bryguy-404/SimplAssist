@@ -9,6 +9,7 @@ import { isPlanAvailable } from "@/lib/billing/planAvailability";
 import { assertApprovedChatOnlyStripePrice } from "./chatOnlyPrice";
 import { assertSmsPrice, invoiceSubscriptionId, operation, operationSchema, record, smsSubscriptionFingerprint, type SmsBillingOperation } from "./smsBilling.server";
 import { SETUP_FEE_CENTS, SUBSCRIPTION_PLANS, stripePriceIdForPlan, stripeSetupFeePriceId } from "./config";
+import { confirmReviewTextingConversion, quoteReviewTextingConversion, reconcileReviewTextingConversion, verifyReviewConversionInvoice } from "./reviewConversion.server";
 
 const id = (value: string | { id: string } | null | undefined) => typeof value === "string" ? value : value?.id ?? null;
 const iso = (value: number) => new Date(value * 1000).toISOString();
@@ -45,9 +46,10 @@ async function preview(sub: Stripe.Subscription, priceId: string, feeId: string,
   });
 }
 export async function quoteTextingUpgrade(businessId: string, ownerId: string) {
-  if (!isTextingUpgradeEnabled(businessId)) throw new TextingUpgradeError("texting_upgrade_disabled");
   const initial = await getTextingUpgrade(businessId);
   if (!initial) throw new TextingUpgradeError("texting_upgrade_not_found", 404);
+  if (initial.source_mode === "review_sms") return quoteReviewTextingConversion(businessId, ownerId, initial);
+  if (!isTextingUpgradeEnabled(businessId)) throw new TextingUpgradeError("texting_upgrade_disabled");
   // Read before the multi-table requirement/risk loader. Acquisition compares
   // the same snapshot under the business lock, rejecting concurrent edits.
   const observed = await textingUpgradeRpc("read_chat_texting_upgrade_setup", { p_upgrade_id: initial.id, p_owner_id: ownerId });
@@ -86,6 +88,7 @@ export async function confirmTextingUpgrade(businessId: string, ownerId: string,
   const { loadTextingUpgradeContext } = await import("@/lib/billing/textingUpgrade.server");
   const c = await loadTextingUpgradeContext(businessId, ownerId);
   const u = c.upgrade;
+  if (u?.source_mode === "review_sms") return confirmReviewTextingConversion(businessId, ownerId, operationId, quoteFingerprint);
   if (!u || u.billing_operation_id !== operationId || !c.operation || c.operation.owner_id !== ownerId) throw new TextingUpgradeError("texting_upgrade_operation_not_found", 404);
   let op = c.operation;
   if (op.source_fingerprint !== quoteFingerprint) throw new TextingUpgradeError("texting_upgrade_quote_changed");
@@ -128,6 +131,7 @@ async function invoiceLines(invoice: Stripe.Invoice): Promise<Stripe.InvoiceLine
 }
 /** The fee line carries immutable operation identity across renewals and lost update responses. */
 export function verifyTextingUpgradeInvoice(invoice: Stripe.Invoice, lines: Stripe.InvoiceLineItem[], op: SmsBillingOperation, u: TextingUpgradeRecord): void {
+  if (u.source_mode === "review_sms") return verifyReviewConversionInvoice(invoice, lines, op, u);
   assertMode(invoice.livemode);
   if (id(invoice.customer) !== u.source_customer_id || invoiceSubscriptionId(invoice) !== u.source_subscription_id ||
       (op.invoice_id && invoice.id !== op.invoice_id) || invoice.billing_reason !== "subscription_update" || invoice.currency !== "usd" ||
@@ -160,6 +164,7 @@ async function findInvoice(u: TextingUpgradeRecord, op: SmsBillingOperation) {
   return matches[0];
 }
 export async function reconcileTextingUpgradePayment(u: TextingUpgradeRecord, suppliedOperation?: SmsBillingOperation): Promise<Stripe.Subscription> {
+  if (u.source_mode === "review_sms") return reconcileReviewTextingConversion(u, suppliedOperation);
   let op = suppliedOperation ?? (u.billing_operation_id ? await operation(u.billing_operation_id, u.business_id) : null);
   const sub = await stripe.subscriptions.retrieve(u.source_subscription_id);
   assertSubscription(sub, u);
@@ -219,14 +224,28 @@ export async function cancelTextingUpgrade(businessId: string, ownerId: string) 
 }
 
 /** Called before interpreting retained initial-Chat metadata or ordinary SMS operations. */
-export async function synchronizeTextingUpgradeSubscription(input: Stripe.Subscription): Promise<{ owned: boolean; paid: boolean; subscription: Stripe.Subscription }> {
+export async function synchronizeTextingUpgradeSubscription(input: Stripe.Subscription): Promise<{ owned: boolean; paid: boolean; finalizedReviewConversion?: boolean; subscription: Stripe.Subscription }> {
   const unchanged = { owned: false, paid: false, subscription: input };
   const businessId = input.metadata?.business_id;
   if (!businessId || (!input.metadata.chat_texting_upgrade_id && input.metadata.plan !== "chat_only" && !input.metadata.checkout_attempt_id)) return unchanged;
   const u = await getTextingUpgrade(businessId);
   if (!u || u.source_subscription_id !== input.id || !u.billing_operation_id) return unchanged;
   const op = await operation(u.billing_operation_id, businessId);
-  if (["prepared", "expired"].includes(op.state) && !u.paid_at) return unchanged;
+  if (["prepared", "expired"].includes(op.state) && !u.paid_at) {
+    if (u.source_mode !== "review_sms") return unchanged;
+    // A voided conversion leaves its operation marker on the two-item source.
+    // Never feed that historical marker to the generic one-item SMS handler.
+    const fresh = await reconcileReviewTextingConversion(u, op);
+    const marker = fresh.metadata.sms_billing_operation_id;
+    if (marker && marker !== op.id) {
+      const prior = await operation(marker, businessId);
+      if (prior.state !== "expired" || prior.source_plan !== "chat_only" || prior.quote.sourceMode !== "review_sms" ||
+        prior.expected_subscription_id !== u.source_subscription_id || prior.expected_customer_id !== u.source_customer_id ||
+        prior.quote.sourceReviewItemId !== u.source_review_item_id)
+        throw new TextingUpgradeError("texting_upgrade_source_changed");
+    }
+    return { owned: Boolean(marker), paid: false, subscription: fresh };
+  }
   let fresh = await reconcileTextingUpgradePayment(u, op);
   const current = await getTextingUpgrade(businessId);
   if (!current?.paid_at) return { owned: true, paid: false, subscription: fresh };
@@ -234,5 +253,6 @@ export async function synchronizeTextingUpgradeSubscription(input: Stripe.Subscr
   const metadata = { ...fresh.metadata };
   delete metadata.plan; delete metadata.checkout_attempt_id; delete metadata.checkout_request_fingerprint; delete metadata.checkout_session_expires_at;
   fresh = { ...fresh, metadata };
-  return { owned: fresh.metadata.sms_billing_operation_id === op.id, paid: true, subscription: fresh };
+  return { owned: fresh.metadata.sms_billing_operation_id === op.id, paid: true,
+    ...(u.source_mode === "review_sms" && !u.paid_at ? { finalizedReviewConversion: true } : {}), subscription: fresh };
 }

@@ -260,6 +260,17 @@ export async function syncStripeSubscription(
   }
   const transition = await synchronizeTextingUpgradeSubscription(subscription);
   subscription = transition.subscription;
+  if (transition.finalizedReviewConversion) {
+    // The locked conversion transaction already projected current billing and
+    // preserved a cancellation racing the Stripe read. Do not overwrite it
+    // immediately with the earlier provider snapshot used for payment proof.
+    const { data, error } = await supabaseAdmin.from("subscriptions").select("business_id,stripe_customer_id,stripe_subscription_id,plan,status")
+      .eq("business_id", options.businessId ?? subscription.metadata.business_id).maybeSingle();
+    if (error) throw new Error("texting_upgrade_payment_sync_required");
+    return data?.stripe_subscription_id === subscription.id && data.status === "active"
+      ? { businessId: data.business_id, customerId: data.stripe_customer_id, subscriptionId: data.stripe_subscription_id, plan: data.plan as SubscriptionPlan }
+      : null;
+  }
   if (!transition.owned && subscription.metadata?.sms_billing_operation_id) {
     const handled = await synchronizeSmsBillingOperation(subscription);
     if (handled) {

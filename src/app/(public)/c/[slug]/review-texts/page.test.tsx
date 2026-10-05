@@ -63,6 +63,15 @@ const render = async () =>
     await Page({ params: Promise.resolve({ slug: "example" }) }),
   );
 describe("public review-text consent page", () => {
+  it("identifies the shared legal operator without publishing private registration data", async () => {
+    Object.assign(currentBusiness, { shared_registration_id: "PRIVATE_REGISTRATION_ID", legal_business_name: "Example Operator LLC",
+      address: "PRIVATE_STREET_SENTINEL", zip: "PRIVATE_ZIP_SENTINEL", ein: "PRIVATE_EIN_SENTINEL" });
+    const html = await render();
+    expect(html).toContain("Example &amp; Co is operated by Example Operator LLC.");
+    expect(html).not.toContain("PRIVATE_");
+    expect(selections.join(",")).not.toMatch(/ein|last_4_ssn|address|registrant_mobile/);
+  });
+
   it("explains sender, frequency, marketing purpose and voluntary permission without a phone form", async () => {
     const html = await render();
     expect(dynamic).toBe("force-dynamic");

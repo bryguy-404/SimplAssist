@@ -143,6 +143,8 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
           slug={business.slug}
           business={{
             name: business.name,
+            legal_operator_name: business.shared_registration_id ? business.legal_business_name : null,
+            public_address_visibility: business.public_address_visibility,
             review_sms_signup_enabled: business.review_sms_signup_enabled,
             review_consent_url: `/c/${business.slug}/review-texts`,
             phone_number: business.phone_number,
@@ -238,7 +240,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
           initialCity={business.city}
           initialState={business.state}
           initialZip={business.zip}
-          registrationLocked={registrationLocked}
+          registrationLocked={registrationLocked || Boolean(business.shared_registration_id)}
         />
 
         <div className="mt-8 border-t border-[#e3dacc] pt-8 dark:border-white/[0.12]">

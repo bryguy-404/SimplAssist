@@ -10,6 +10,12 @@ import { reviewReason, reviewRequest, reviewSchedule } from "./reviewUi";
 
 afterEach(() => vi.unstubAllGlobals());
 describe("honest review status and safe preview", () => {
+  it("explains shared-registration blockers without exposing internal provider state names", () => {
+    expect(reviewReason("shared_paid_starts_disabled")).toContain("saved details are safe");
+    expect(reviewReason("shared_campaign_capacity_exhausted")).toContain("Contact support");
+    expect(reviewReason("shared_provider_inventory_changed")).toContain("support check");
+    expect(reviewReason("review_sms_shared_registration_required")).toContain("support check");
+  });
   it("explains that hosted review texts require the customer's own keyword", () => {
     for (const code of ["review_sms_keyword_permission_required", "sms_review_keyword_permission_required"])
       expect(reviewReason(code)).toContain("text REVIEWS from their phone");

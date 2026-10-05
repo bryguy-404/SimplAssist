@@ -60,6 +60,16 @@ const REASONS: Record<string, string> = {
     "That number is no longer available. Choose another number.",
   review_sms_existing_brand_identity_locked:
     "Your registered business identity cannot be changed here. Contact support to update it.",
+  review_sms_shared_registration_required:
+    "Your shared legal registration needs a support check before texting setup can continue.",
+  shared_paid_starts_disabled:
+    "Shared registration setup is not available yet. Your saved details are safe.",
+  shared_campaign_capacity_exhausted:
+    "Your legal registration has reached its current texting-program limit. Contact support before continuing.",
+  shared_registration_changed:
+    "Your legal registration changed. Contact support to confirm it before continuing.",
+  shared_registration_proof_changed:
+    "Your legal registration changed. Contact support to confirm it before continuing.",
   review_sms_existing_campaign_needs_approval:
     "Your existing texting registration needs approval for review requests. Contact support.",
   review_sms_keyword_copy_invalid:
@@ -98,7 +108,9 @@ const REASONS: Record<string, string> = {
     "The registration payment is not available yet. Your saved details are safe.",
 };
 export function reviewReason(reason: string): string {
-  return REASONS[reason] || reason.replaceAll("_", " ");
+  return REASONS[reason] || (reason.startsWith("shared_")
+    ? "Your shared legal registration needs a support check before texting setup can continue."
+    : reason.replaceAll("_", " "));
 }
 export async function reviewRequest<T>(
   url: string,

@@ -11,11 +11,11 @@ import {
 } from "@/components/legal/LegalDocLayout";
 import { buildSmsComplianceCopy } from "@/lib/messaging/complianceCopy";
 import { getActiveSmsNumberForBusiness } from "@/lib/messaging/phoneNumberLookup";
-import type { Language } from "@/types/database";
 import { formatPhoneNumber } from "@/lib/utils";
-import { isPendingSlug } from "@/lib/util/slug.shared";
 import { loadReviewLegalProgram } from "@/lib/legal/reviewProgram.server";
 import { reviewConsentDescription } from "@/lib/reviews/consentCopy";
+import { loadPublicBusiness, type PublicBusiness } from "@/lib/legal/publicBusiness.server";
+import { businessOperatorDisclosure } from "@/lib/legal/perBusinessCopy";
 
 /**
  * Per-business public landing page (Phase 6).
@@ -29,7 +29,8 @@ import { reviewConsentDescription } from "@/lib/reviews/consentCopy";
  *
  * IMPORTANT — column projection: NEVER project ein, last_4_ssn,
  * registrant_mobile, authorized_rep_*, tax_id_type, or any other PII column.
- * The select() below is the canonical safe projection.
+ * loadPublicBusiness is the canonical safe projection. Street and postal code
+ * never enter this page for businesses with city/state-only visibility.
  */
 
 type PageProps = { params: Promise<{ slug: string }> };
@@ -37,9 +38,6 @@ type PageProps = { params: Promise<{ slug: string }> };
 // The number is activated during launch. Never cache a pre-activation page
 // that omits it; carrier reviewers must receive fresh server-rendered HTML.
 export const dynamic = "force-dynamic";
-
-const PUBLIC_PROJECTION =
-  "id, slug, name, business_type, email, phone_number, address, city, state, zip, review_sms_signup_enabled, ai_settings(language)";
 
 const DAY_NAMES = [
   "Sunday",
@@ -50,21 +48,6 @@ const DAY_NAMES = [
   "Friday",
   "Saturday",
 ];
-
-type PublicBusiness = {
-  id: string;
-  slug: string;
-  name: string;
-  business_type: string;
-  email: string | null;
-  phone_number: string | null;
-  address: string | null;
-  city: string | null;
-  state: string | null;
-  zip: string | null;
-  ai_settings: { language: Language } | null;
-  review_sms_signup_enabled?: boolean;
-};
 
 type Hours = {
   day_of_week: number;
@@ -81,17 +64,8 @@ async function loadBusiness(
   smsPhoneNumber: string | null;
   reviewProgram: Awaited<ReturnType<typeof loadReviewLegalProgram>>;
 } | null> {
-  if (isPendingSlug(slug)) return null;
-
-  const { data: business, error } = await supabaseAdmin
-    .from("businesses")
-    .select(PUBLIC_PROJECTION)
-    .eq("slug", slug)
-    .maybeSingle();
-
-  if (error || !business) return null;
-
-  const publicBusiness = business as unknown as PublicBusiness;
+  const publicBusiness = await loadPublicBusiness(slug);
+  if (!publicBusiness) return null;
   const [smsPhoneNumber, reviewProgram, { data: hours }] = await Promise.all([
     getActiveSmsNumberForBusiness(publicBusiness.id),
     loadReviewLegalProgram(publicBusiness),
@@ -189,6 +163,9 @@ export default async function BusinessLandingPage({ params }: PageProps) {
         >
           {business.name}
         </h1>
+        {businessOperatorDisclosure(business) ? (
+          <p className={`mt-3 text-sm ${body}`}>{businessOperatorDisclosure(business)}</p>
+        ) : null}
 
         {(reviewProgram.review_sms_only || reviewProgram.review_sms_signup_enabled) && (
           <section className={`mt-8 p-5 ${tile}`} aria-labelledby="review-texts-heading">

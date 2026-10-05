@@ -35,10 +35,13 @@ import {
 } from "@/lib/messaging/complianceCopy";
 import { verifyPublishedCompliancePage } from "@/lib/messaging/registration/publicCompliancePage";
 import RootLayout from "../../../layout";
-import BusinessLandingPage, { dynamic } from "./page";
+import BusinessLandingPage, { dynamic, generateMetadata as landingMetadata } from "./page";
 import PerBusinessPrivacyPage, {
   dynamic as privacyDynamic,
+  generateMetadata as privacyMetadata,
 } from "./privacy/page";
+import PerBusinessTermsPage, { generateMetadata as termsMetadata } from "./terms/page";
+import { PUBLIC_BUSINESS_PROJECTION } from "@/lib/legal/publicBusiness.server";
 
 const APP_ORIGIN = "https://app.example.test";
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000123";
@@ -82,6 +85,7 @@ const BUSINESS = {
   city: "Indianapolis",
   state: "IN",
   zip: "46204",
+  public_address_visibility: "full",
   // Deliberately stale extra data: the page's projection excludes this field,
   // and rendering must use the live shared copy instead.
   opt_in_description: "STALE PERSISTED OPT-IN COPY",
@@ -253,7 +257,7 @@ describe("/c/[slug] compliance page", () => {
     expect(mocks.getActiveSmsNumber).toHaveBeenCalledWith(BUSINESS_ID);
     const businessQuery = tableQueries.get("businesses")?.[0];
     expect(businessQuery?.select).toHaveBeenCalledWith(
-      "id, slug, name, business_type, email, phone_number, address, city, state, zip, review_sms_signup_enabled, ai_settings(language)"
+      PUBLIC_BUSINESS_PROJECTION
     );
   });
 
@@ -308,7 +312,7 @@ describe("/c/[slug] compliance page", () => {
     expect(mocks.getActiveSmsNumber).toHaveBeenCalledWith(BUSINESS_ID);
     const businessQuery = tableQueries.get("businesses")?.[0];
     expect(businessQuery?.select).toHaveBeenCalledWith(
-      "id, slug, name, email, phone_number, address, city, state, zip, review_sms_signup_enabled, opt_in_description, ai_settings(language)"
+      PUBLIC_BUSINESS_PROJECTION
     );
   });
 
@@ -447,6 +451,32 @@ describe("/c/[slug] compliance page", () => {
 });
 
 describe("review programs on public business pages", () => {
+  it("keeps private street/ZIP out of every hosted page and metadata while naming the legal operator", async () => {
+    tableResults.set("businesses", { data: { ...BUSINESS, name: "Example Studio",
+      shared_registration_id: "PRIVATE_REGISTRATION_ID", legal_business_name: "Example Operator LLC",
+      public_address_visibility: "city_state", address: "PRIVATE_STREET_SENTINEL", zip: "PRIVATE_ZIP_SENTINEL",
+      authorized_rep_name: "PRIVATE_REP_SENTINEL", ein: "PRIVATE_EIN_SENTINEL" }, error: null });
+    tableResults.set("review_sms_accounts", { data: { billing_source: "direct", state: "carrier_pending", draft: { consentMode: "hosted_keyword" } }, error: null });
+    const params = Promise.resolve({ slug: SLUG });
+    const pages = [await renderPage(), await renderPrivacyPage(), renderToStaticMarkup(await PerBusinessTermsPage({ params }))];
+    for (const html of pages) {
+      expect(html).not.toContain("PRIVATE_");
+      expect(visibleText(html)).toContain("Example Studio is operated by Example Operator LLC.");
+    }
+    expect(visibleText(pages[0])).toContain("Indianapolis, IN");
+    expect(visibleText(pages[1])).toContain("Indianapolis, IN");
+    const metadata = await Promise.all([landingMetadata({ params }), privacyMetadata({ params }), termsMetadata({ params })]);
+    expect(JSON.stringify(metadata)).not.toContain("PRIVATE_");
+    for (const query of tableQueries.get("businesses") ?? []) {
+      expect(query.select).not.toHaveBeenCalledWith("address, zip");
+    }
+  });
+
+  it("continues displaying the full address for existing full-visibility businesses", async () => {
+    expect(visibleText(await renderPage())).toContain("100 Main Street, Indianapolis, IN, 46204");
+    expect(visibleText(await renderPrivacyPage())).toContain("100 Main Street, Indianapolis, IN, 46204");
+  });
+
   it("shows a separate permission path for a new MIXED signup", async () => {
     tableResults.set("businesses", { data: { ...BUSINESS, review_sms_signup_enabled: true }, error: null });
     const html = await renderPage();

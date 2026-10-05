@@ -58,6 +58,13 @@ export type ReviewSmsOverview = {
   account: ReviewSmsAccount | null;
   canSend: boolean;
   eligibleSource: "direct" | "included" | "grant";
+  sharedRegistration?: {
+    status: "approved" | "active" | "revoked";
+    legalBusinessName: string;
+    identityVersion: number;
+    newPaidStartsAllowed?: boolean;
+    activationRecoveryAvailable?: boolean;
+  } | null;
   price: {
     monthlyCents: number;
     activationCents: number;

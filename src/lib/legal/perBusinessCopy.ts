@@ -46,6 +46,8 @@ export interface LegalDoc {
  */
 export interface LegalTemplateBusiness {
   name: string;
+  legal_operator_name?: string | null;
+  public_address_visibility?: "full" | "city_state";
   phone_number: string | null;
   sms_phone_number?: string | null;
   email: string | null;
@@ -62,6 +64,14 @@ export interface LegalTemplateBusiness {
 
 const LAST_UPDATED = "2026-07-22";
 
+/** The display name remains the sender customers recognize; a shared legal
+ * registration must also name the company legally operating that business. */
+export function businessOperatorDisclosure(b: Pick<LegalTemplateBusiness, "name" | "legal_operator_name">): string | null {
+  const operator = b.legal_operator_name?.trim();
+  if (!operator || operator === b.name.trim()) return null;
+  return `${b.name} is operated by ${operator}.`;
+}
+
 function contactEmail(b: LegalTemplateBusiness): string {
   // business.email is required in onboarding Step 1 (BusinessInfoForm), so it
   // is guaranteed non-null by the time the slug is finalized and this page is
@@ -70,7 +80,8 @@ function contactEmail(b: LegalTemplateBusiness): string {
 }
 
 function postalAddress(b: LegalTemplateBusiness): string | null {
-  const parts = [b.address, [b.city, b.state].filter(Boolean).join(", "), b.zip]
+  const full = b.public_address_visibility !== "city_state";
+  const parts = [full ? b.address : null, [b.city, b.state].filter(Boolean).join(", "), full ? b.zip : null]
     .filter((p) => p && p.trim().length > 0)
     .map((p) => p!.trim());
   if (parts.length === 0) return null;
@@ -106,7 +117,7 @@ function addReviewProgram(doc: LegalDoc, b: LegalTemplateBusiness): LegalDoc {
   const sections = doc.sections.map((section) => {
     if (b.review_sms_only && /^(1\.|3\.|4\.)/.test(section.title)) {
       return { ...section, paragraphs: section.title.startsWith("1.")
-        ? [`${b.name} operates this voluntary review-request SMS program. These disclosures explain the service and how your mobile number and consent records are used. SimplAssist provides the technology and Telnyx provides messaging delivery.`]
+        ? [`${businessOperatorDisclosure(b) ? `${businessOperatorDisclosure(b)} ` : ""}${b.name} operates this voluntary review-request SMS program. These disclosures explain the service and how your mobile number and consent records are used. SimplAssist provides the technology and Telnyx provides messaging delivery.`]
         : section.title.startsWith("3.") ? [reviewPurpose, "We use your phone number, message history, delivery information, and consent records to run this program. We do not sell your information."]
         : [consent, stop, MOBILE_INFORMATION_SHARING_DISCLOSURE] };
     }
@@ -134,7 +145,7 @@ export function buildPrivacyContent(b: LegalTemplateBusiness): LegalDoc {
         title: "1. Introduction",
         paragraphs: [
           `${name} operates an SMS text messaging program to communicate with current and prospective customers. This Privacy Policy explains what information we collect when you text or call us ${phone}, how we use it, and the rights you have over that information.`,
-          `${name} is the business responsible for this messaging program. SimplAssist provides the underlying technology platform and AI-assisted reply infrastructure on our behalf, and Telnyx is our messaging carrier. References to "we," "our," and "us" in this policy mean ${name}.`,
+          `${businessOperatorDisclosure(b) ? `${businessOperatorDisclosure(b)} ` : ""}${b.legal_operator_name || name} is the business responsible for this messaging program. SimplAssist provides the underlying technology platform and AI-assisted reply infrastructure on our behalf, and Telnyx is our messaging carrier. References to "we," "our," and "us" in this policy mean ${name}.`,
         ],
       },
       {
@@ -209,7 +220,7 @@ export function buildTermsContent(b: LegalTemplateBusiness): LegalDoc {
         title: "1. Overview",
         paragraphs: [
           `These Terms of Service ("Terms") govern your use of the SMS text messaging program operated by ${name}. By texting us ${phone} first, or by calling us ${phone}, hearing our voicemail disclosure, and leaving a message after that disclosure to request a customer-care text follow-up, you agree to these Terms.`,
-          `SimplAssist provides the technology platform and AI-assisted reply infrastructure that powers this messaging program on our behalf. ${name} is the business responsible for the program and these Terms.`,
+          `${businessOperatorDisclosure(b) ? `${businessOperatorDisclosure(b)} ` : ""}SimplAssist provides the technology platform and AI-assisted reply infrastructure that powers this messaging program on our behalf. ${b.legal_operator_name || name} is the business responsible for the program and these Terms.`,
         ],
       },
       {

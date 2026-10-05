@@ -14,6 +14,7 @@ import {
   REVIEW_TEXT_CONSENT_VERSION,
   reviewConsentConfirmation,
 } from "@/lib/reviews/consentCopy";
+import { businessOperatorDisclosure } from "@/lib/legal/perBusinessCopy";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
@@ -25,11 +26,12 @@ type PageProps = { params: Promise<{ slug: string }> };
 export default async function ReviewTextsConsentPage({ params }: PageProps) {
   const { slug } = await params;
   if (isPendingSlug(slug)) notFound();
-  // Public-safe projection: no registration identity or business address.
+  // Public-safe projection: no private registration identity or address. The
+  // guarded legal-name snapshot identifies the operator of a shared brand.
   const { data: business, error } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id,slug,name,email,owner_id,deleted_at,operations_suspended_at,texting_paused_at,telnyx_submission_disabled,review_sms_signup_enabled",
+      "id,slug,name,email,owner_id,deleted_at,operations_suspended_at,texting_paused_at,telnyx_submission_disabled,review_sms_signup_enabled,shared_registration_id,legal_business_name",
     )
     .eq("slug", slug)
     .maybeSingle();
@@ -59,6 +61,10 @@ export default async function ReviewTextsConsentPage({ params }: PageProps) {
   const phone = await getActiveSmsNumberForBusiness(business.id);
   const ready =
     account.data && ["active", "cancel_pending"].includes(account.data.state);
+  const operatorDisclosure = businessOperatorDisclosure({
+    name: business.name,
+    legal_operator_name: business.shared_registration_id ? business.legal_business_name : null,
+  });
   return (
     <PublicPageShell
       headerLeft={
@@ -87,6 +93,7 @@ export default async function ReviewTextsConsentPage({ params }: PageProps) {
         <h1 className={`text-3xl font-bold tracking-tight ${ink}`}>
           Review texts from {business.name}
         </h1>
+        {operatorDisclosure ? <p className={`mt-3 text-sm ${body}`}>{operatorDisclosure}</p> : null}
         <p className={`mt-5 leading-relaxed ${body}`}>
           After a completed service, {business.name} can text you a link to
           leave an honest Google review. Your feedback is welcome, whatever your

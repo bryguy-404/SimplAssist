@@ -56,6 +56,7 @@ const pristineRegistrationState = {
   brand_status: null,
   campaign_status: null,
   onboarding_registration_status: "not_started",
+  shared_registration_id: null,
 };
 
 const fullRequest = {
@@ -225,7 +226,7 @@ describe("POST /api/settings/business-info", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ success: true });
     expect(mocks.stateSelect).toHaveBeenCalledExactlyOnceWith(
-      SETTINGS_REGISTRATION_STATE_COLUMNS
+      `${SETTINGS_REGISTRATION_STATE_COLUMNS}, shared_registration_id`
     );
     expect(mocks.businessUpdate).toHaveBeenCalledExactlyOnceWith({
       phone_number: "(317) 555-0199",
@@ -240,6 +241,7 @@ describe("POST /api/settings/business-info", () => {
       ["telnyx_brand_id", null],
       ["brand_status", null],
       ["campaign_status", null],
+      ["shared_registration_id", null],
     ]);
   });
 
@@ -305,7 +307,7 @@ describe("POST /api/settings/business-info", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ success: true });
     expect(mocks.stateSelect).toHaveBeenCalledExactlyOnceWith(
-      SETTINGS_REGISTRATION_STATE_COLUMNS
+      `${SETTINGS_REGISTRATION_STATE_COLUMNS}, shared_registration_id`
     );
     expect(mocks.stateEq.mock.calls).toEqual([
       ["id", BUSINESS_ID],
@@ -329,6 +331,7 @@ describe("POST /api/settings/business-info", () => {
       ["telnyx_brand_id", null],
       ["brand_status", null],
       ["campaign_status", null],
+      ["shared_registration_id", null],
     ]);
   });
 
@@ -350,6 +353,34 @@ describe("POST /api/settings/business-info", () => {
       error: BUSINESS_ADDRESS_LOCK_COPY.message,
     });
     expect(mocks.businessUpdate).not.toHaveBeenCalled();
+  });
+
+  it.each(["not_started", "failed"])("keeps the shared canonical address locked before brand binding (%s)", async (status) => {
+    mocks.stateMaybeSingle.mockResolvedValue({ data: { ...pristineRegistrationState,
+      shared_registration_id: "registration", onboarding_registration_status: status }, error: null });
+    const response = await POST(makeRequest(fullRequest));
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ code: SETTINGS_REGISTRATION_LOCK_CODE, error: BUSINESS_ADDRESS_LOCK_COPY.message });
+    expect(mocks.businessUpdate).not.toHaveBeenCalled();
+  });
+
+  it("still permits an account-specific phone-only update for a staged shared registration", async () => {
+    mocks.stateMaybeSingle.mockResolvedValue({ data: { ...pristineRegistrationState,
+      shared_registration_id: "registration" }, error: null });
+    const response = await POST(makeRequest({ phoneNumber: "(317) 555-0199" }));
+    expect(response.status).toBe(200);
+    expect(mocks.businessUpdate).toHaveBeenCalledExactlyOnceWith({ phone_number: "(317) 555-0199" });
+    expect(mocks.updateEq).toHaveBeenCalledWith("shared_registration_id", "registration");
+  });
+
+  it("guards a full address save against shared staging that starts after the read", async () => {
+    mocks.updateMaybeSingle.mockResolvedValue({ data: null, error: null });
+    mocks.stateMaybeSingle.mockResolvedValueOnce({ data: pristineRegistrationState, error: null })
+      .mockResolvedValueOnce({ data: { ...pristineRegistrationState, shared_registration_id: "registration" }, error: null });
+    const response = await POST(makeRequest(fullRequest));
+    expect(mocks.updateIs).toHaveBeenCalledWith("shared_registration_id", null);
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ code: SETTINGS_REGISTRATION_LOCK_CODE, error: BUSINESS_ADDRESS_LOCK_COPY.message });
   });
 
   it("lets failed registration unlock a full update despite provider state", async () => {

@@ -47,14 +47,23 @@ const BUSINESS_CONTACT_PHONE_LOCK_COPY = {
     "Contact support to change your business contact phone because it was filed with your carrier registration.",
 } as const;
 
+type BusinessInfoRegistrationState = SettingsRegistrationState & {
+  shared_registration_id: string | null;
+};
+const BUSINESS_INFO_STATE_COLUMNS = `${SETTINGS_REGISTRATION_STATE_COLUMNS}, shared_registration_id`;
+
+function isAddressLocked(state: BusinessInfoRegistrationState): boolean {
+  return Boolean(state.shared_registration_id) || isSettingsRegistrationLocked(state);
+}
+
 async function loadRegistrationState(businessId: string, ownerId: string) {
   return supabaseAdmin
     .from("businesses")
-    .select(SETTINGS_REGISTRATION_STATE_COLUMNS)
+    .select(BUSINESS_INFO_STATE_COLUMNS)
     .eq("id", businessId)
     .eq("owner_id", ownerId)
     .is("deleted_at", null)
-    .maybeSingle<SettingsRegistrationState>();
+    .maybeSingle<BusinessInfoRegistrationState>();
 }
 
 function invalidInput(details: unknown) {
@@ -220,7 +229,7 @@ export async function POST(request: NextRequest) {
     return registrationStateUnavailableResponse();
   }
 
-  if (isSettingsRegistrationLocked(registrationState)) {
+  if (isAddressLocked(registrationState)) {
     return settingsRegistrationLockedResponse(BUSINESS_ADDRESS_LOCK_COPY);
   }
 
@@ -285,7 +294,7 @@ export async function POST(request: NextRequest) {
     return registrationStateUnavailableResponse();
   }
 
-  if (isSettingsRegistrationLocked(currentRegistrationState)) {
+  if (isAddressLocked(currentRegistrationState)) {
     return settingsRegistrationLockedResponse(BUSINESS_ADDRESS_LOCK_COPY);
   }
 

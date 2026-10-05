@@ -117,4 +117,12 @@ describe("shared voice knowledge", () => {
       "Delegate every business-specific question",
     );
   });
+  it("does not share the private registration street or ZIP with a caller", () => {
+    const voice = buildVoiceAnswerPrompt(
+      { ...business, public_address_visibility: "city_state", address: "PRIVATE_STREET_SENTINEL", zip: "PRIVATE_ZIP_SENTINEL", city: "South Bend", state: "IN" },
+      settings, services, [], [], [],
+    );
+    expect(voice).toContain("Address: South Bend, IN");
+    expect(voice).not.toContain("PRIVATE_");
+  });
 });

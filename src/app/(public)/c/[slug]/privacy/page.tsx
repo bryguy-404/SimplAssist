@@ -3,14 +3,12 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { LegalDocLayout } from "@/components/legal/LegalDocLayout";
 import { LegalSection } from "@/components/legal/legal-section";
-import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
   buildPrivacyContent,
   type LegalTemplateBusiness,
 } from "@/lib/legal/perBusinessCopy";
 import { getActiveSmsNumberForBusiness } from "@/lib/messaging/phoneNumberLookup";
-import type { Language } from "@/types/database";
-import { isPendingSlug } from "@/lib/util/slug.shared";
+import { loadPublicBusiness } from "@/lib/legal/publicBusiness.server";
 
 /**
  * Per-business privacy policy (Phase 6).
@@ -20,7 +18,7 @@ import { isPendingSlug } from "@/lib/util/slug.shared";
  *
  * IMPORTANT — column projection: this page MUST only read public-safe
  * fields. NEVER project ein, last_4_ssn, registrant_mobile, authorized_rep_*,
- * tax_id_type, or any other PII column on `businesses`. The select() below
+ * tax_id_type, or any other PII column on `businesses`. loadPublicBusiness
  * includes id only so the server can read the active SimplAssist number; id
  * is not rendered into the public page.
  */
@@ -29,29 +27,11 @@ type PageProps = { params: Promise<{ slug: string }> };
 
 export const dynamic = "force-dynamic";
 
-const PUBLIC_PROJECTION =
-  "id, slug, name, email, phone_number, address, city, state, zip, review_sms_signup_enabled, opt_in_description, ai_settings(language)";
-
-type PublicLegalBusiness = LegalTemplateBusiness & {
-  id: string;
-  slug: string;
-  ai_settings: { language: Language } | null;
-};
-
 async function loadBusiness(
   slug: string
 ): Promise<(LegalTemplateBusiness & { slug: string }) | null> {
-  if (isPendingSlug(slug)) return null;
-
-  const { data, error } = await supabaseAdmin
-    .from("businesses")
-    .select(PUBLIC_PROJECTION)
-    .eq("slug", slug)
-    .maybeSingle();
-
-  if (error || !data) return null;
-
-  const business = data as unknown as PublicLegalBusiness;
+  const business = await loadPublicBusiness(slug);
+  if (!business) return null;
 
   const [smsPhoneNumber, reviewProgram] = await Promise.all([
     getActiveSmsNumberForBusiness(business.id),
@@ -61,6 +41,7 @@ async function loadBusiness(
   return {
     ...business,
     ...reviewProgram,
+    opt_in_description: null,
     language: business.ai_settings?.language,
     sms_phone_number: smsPhoneNumber,
   };

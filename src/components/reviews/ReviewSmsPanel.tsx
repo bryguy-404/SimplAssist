@@ -8,7 +8,6 @@ import type {
   ReviewSmsQuote,
   ReviewSmsState,
 } from "@/lib/billing/reviewSms";
-import { US_STATES } from "@/lib/usStates";
 import PhoneNumberSelector from "@/components/phone/PhoneNumberSelector";
 import CustomerDialog from "@/components/customers/CustomerDialog";
 import { requestError } from "@/components/customers/customerUi";
@@ -18,15 +17,14 @@ import {
   btnSecondaryCompact,
   btnSecondaryInline,
   card,
-  fieldLabel,
   ink,
-  inputField,
   statusDanger,
   statusSuccess,
   statusWarning,
   tile,
 } from "@/lib/theme-v2/theme";
 import { reviewReason, reviewRequest, reviewTime } from "./reviewUi";
+import { LEGAL_FIELDS, REPRESENTATIVE_FIELDS, ReviewSmsRegistrationFields, ReviewSmsRegistrationNotice } from "./ReviewSmsRegistration";
 
 const ENDPOINT = "/api/reviews/sms";
 const STATES: Record<ReviewSmsState, string> = {
@@ -40,15 +38,6 @@ const STATES: Record<ReviewSmsState, string> = {
   release_pending: "Closing review texting",
   released: "Review texting closed",
 };
-const LEGAL_FIELDS = [
-  ["legalBusinessName", "Legal business name", "text"],
-  ["address", "Business street address", "text"],
-  ["city", "City", "text"],
-  ["zip", "ZIP code", "text"],
-  ["authorizedRepName", "Authorized representative name", "text"],
-  ["authorizedRepEmail", "Representative email", "email"],
-  ["authorizedRepPhone", "Representative phone (+1…)", "tel"],
-] as const;
 const amount = (cents: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
     cents / 100,
@@ -80,7 +69,7 @@ function SmsSetupForm({
   const [error, setError] = useState<string | null>(null);
   const fields = overview.setup?.fields || {};
   const included = overview.eligibleSource === "included";
-  const identityLocked = fields.identityLocked === true;
+  const sharedRegistration = overview.sharedRegistration;
   const onConsentChange = useCallback(
     (value: boolean) => setConsented(value),
     [],
@@ -114,12 +103,15 @@ function SmsSetupForm({
       phoneNumber: phone,
       consentMode: "hosted_keyword",
     };
-    for (const key of [
-      ...LEGAL_FIELDS.map(([name]) => name),
-      "entityType",
-      "ein",
-      "state",
-    ]) {
+    const editableFields = sharedRegistration
+      ? sharedRegistration.status === "approved" && fields.representativeEditable === true ? REPRESENTATIVE_FIELDS : []
+      : [
+        ...LEGAL_FIELDS.map(([name]) => name),
+        "entityType",
+        "ein",
+        "state",
+      ];
+    for (const key of editableFields) {
       const value = String(form.get(key) || "").trim();
       if (value) draft[key] = value;
     }
@@ -143,103 +135,7 @@ function SmsSetupForm({
         <legend className={`mb-4 text-sm font-semibold ${ink}`}>
           Business registration
         </legend>
-        {identityLocked ? (
-          <p className={`text-xs ${body}`}>
-            Your existing registered business details are shown below. Contact
-            support if they need to change.
-          </p>
-        ) : null}
-        <div className="grid gap-4 sm:grid-cols-2">
-          {LEGAL_FIELDS.map(([name, label, type]) => (
-            <div key={name}>
-              <label htmlFor={`${id}-${name}`} className={fieldLabel}>
-                {label}
-              </label>
-              <input
-                id={`${id}-${name}`}
-                name={name}
-                type={type}
-                required
-                readOnly={identityLocked}
-                defaultValue={String(fields[name] || "")}
-                maxLength={
-                  name === "address"
-                    ? 200
-                    : name === "authorizedRepEmail"
-                      ? 254
-                      : 120
-                }
-                className={inputField}
-              />
-            </div>
-          ))}
-          <div>
-            <label htmlFor={`${id}-state`} className={fieldLabel}>
-              State
-            </label>
-            <select
-              id={`${id}-state`}
-              name="state"
-              required
-              disabled={identityLocked}
-              defaultValue={String(fields.state || "")}
-              className={inputField}
-            >
-              <option value="">Choose a state</option>
-              {US_STATES.map(([code, name]) => (
-                <option key={code} value={code}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label htmlFor={`${id}-entity`} className={fieldLabel}>
-              Business structure
-            </label>
-            <select
-              id={`${id}-entity`}
-              name="entityType"
-              required
-              disabled={identityLocked}
-              defaultValue={String(fields.entityType || "")}
-              className={inputField}
-            >
-              <option value="">Choose a structure</option>
-              <option value="llc">LLC</option>
-              <option value="c_corp">C corporation</option>
-              <option value="s_corp">S corporation</option>
-              <option value="nonprofit">Nonprofit</option>
-              <option value="partnership">Partnership</option>
-              <option value="sole_proprietor">Sole proprietor</option>
-            </select>
-          </div>
-          <div>
-            <label
-              htmlFor={fields.hasEin ? undefined : `${id}-ein`}
-              className={fieldLabel}
-            >
-              Employer identification number (EIN)
-            </label>
-            {fields.hasEin ? (
-              <p className={`rounded-2xl p-3 text-sm ${statusSuccess}`}>
-                EIN already saved. It is not displayed here.
-              </p>
-            ) : (
-              <input
-                id={`${id}-ein`}
-                name="ein"
-                required
-                type="password"
-                autoComplete="off"
-                placeholder="XX-XXXXXXX"
-                pattern="[0-9]{2}-?[0-9]{7}"
-                maxLength={10}
-                className={inputField}
-              />
-            )}
-          </div>
-        </div>
+        <ReviewSmsRegistrationFields overview={overview} id={id} />
         <div className={`${tile} p-4`}>
           <p className={`font-semibold ${ink}`}>Customer permission page included</p>
           <p className={`mt-2 text-sm ${body}`}>
@@ -403,6 +299,9 @@ export default function ReviewSmsPanel({
   const account = overview?.account;
   const direct = overview?.eligibleSource === "direct";
   const state = account?.state;
+  const registrationUnavailable = overview?.sharedRegistration?.status === "revoked";
+  const activationRecovery = !account?.activation_paid_at && overview?.sharedRegistration?.activationRecoveryAvailable === true;
+  const newActivationAllowed = !overview?.sharedRegistration || overview.sharedRegistration.newPaidStartsAllowed === true;
   return (
     <section
       className={`${card} p-5 sm:p-7`}
@@ -464,6 +363,7 @@ export default function ReviewSmsPanel({
           </p>
         ) : (
           <div className="mt-5 space-y-5">
+            <ReviewSmsRegistrationNotice overview={overview} />
             <div className={`${tile} p-4`}>
               <p className={`font-semibold ${ink}`}>
                 {smsPriceSummary(overview)}
@@ -509,9 +409,9 @@ export default function ReviewSmsPanel({
                 ) : null}
               </div>
             ) : null}
-            {(!account || editing) && overview.eligibleSource !== "grant" ? (
+            {!registrationUnavailable && (!account || editing) && overview.eligibleSource !== "grant" ? (
               <SmsSetupForm
-                key={editing ? "edit" : "new"}
+                key={`${editing ? "edit" : "new"}-${overview.sharedRegistration?.identityVersion ?? "standalone"}`}
                 overview={overview}
                 onSaved={async () => {
                   await load();
@@ -531,21 +431,27 @@ export default function ReviewSmsPanel({
             ) : null}
             {account &&
             ["draft", "activation_pending"].includes(account.state) &&
-            !editing ? (
+            !editing && (!registrationUnavailable || activationRecovery) ? (
               <div className="space-y-4">
                 <p className={`text-sm ${body}`}>
                   Preferred number:{" "}
                   {String(account.draft.phoneNumber || "Not selected")}
                 </p>
-                <button
+                {!registrationUnavailable ? <button
                   type="button"
                   onClick={() => setEditing(true)}
                   className={btnSecondaryCompact}
                 >
                   Edit approval details
-                </button>
+                </button> : null}
                 {direct ? (
-                  <>
+                  account.activation_paid_at ? (
+                    <p className={`text-sm ${body}`}>Your activation payment was received. Check status to follow the approval process.</p>
+                  ) : activationRecovery ? (
+                    <button type="button" disabled={busy} onClick={() => perform("checkout")} className={`${btnPrimaryInline} disabled:opacity-50`}>
+                      Continue activation
+                    </button>
+                  ) : newActivationAllowed ? <>
                     <label className={`flex items-start gap-3 text-sm ${body}`}>
                       <input
                         type="checkbox"
@@ -566,7 +472,9 @@ export default function ReviewSmsPanel({
                       Pay {amount(overview.price.activationCents)} and request
                       approval
                     </button>
-                  </>
+                  </> : (
+                    <p className={`text-sm ${body}`}>New text review activations are not available for this account yet. Your approval details are saved.</p>
+                  )
                 ) : (
                   <p className={`rounded-2xl p-3 text-sm ${statusWarning}`}>
                     Your current registration does not include review requests.
@@ -589,7 +497,7 @@ export default function ReviewSmsPanel({
                 remain available. {direct ? "The monthly review-texting add-on starts only after approval and successful payment." : "Review texts activate automatically after approval and number assignment, using your plan’s existing SMS allowance."}
               </p>
             ) : null}
-            {state === "ready_unpaid" ? (
+            {state === "ready_unpaid" && !registrationUnavailable ? (
               <div className="space-y-3">
                 <p className={`text-sm ${body}`}>
                   Your number is ready. Review the prorated charge and
@@ -663,7 +571,7 @@ export default function ReviewSmsPanel({
           </div>
         )
       ) : null}
-      {quote ? (
+      {quote && !registrationUnavailable ? (
         <CustomerDialog
           title="Activate review texting"
           onClose={() => setQuote(null)}

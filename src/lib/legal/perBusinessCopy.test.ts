@@ -7,6 +7,18 @@ const business = {
   opt_in_description: "Old frozen snapshot", review_consent_url: "https://example.test/c/northstar/review-texts",
 };
 describe("public review texting program disclosures", () => {
+  it.each([buildPrivacyContent, buildTermsContent])("names the legal operator for both review-only and mixed policies", (build) => {
+    for (const program of [{ review_sms_only: true }, { review_sms_signup_enabled: true }]) {
+      expect(toPlainText(build({ ...business, ...program, legal_operator_name: "Example Operator LLC" })))
+        .toContain("Northstar is operated by Example Operator LLC.");
+    }
+  });
+  it("also redacts street and ZIP from copy generated for an owner to publish", () => {
+    const text = toPlainText(buildPrivacyContent({ ...business, public_address_visibility: "city_state",
+      address: "PRIVATE_STREET_SENTINEL", zip: "PRIVATE_ZIP_SENTINEL", city: "South Bend", state: "IN" }));
+    expect(text).toContain("South Bend, IN");
+    expect(text).not.toContain("PRIVATE_");
+  });
   it.each([buildPrivacyContent, buildTermsContent])("adds separate review permission to MIXED programs", (build) => {
     const text = toPlainText(build({ ...business, review_sms_signup_enabled: true }));
     expect(text).toContain("missed-call follow-ups");

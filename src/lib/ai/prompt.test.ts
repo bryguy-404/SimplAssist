@@ -1040,6 +1040,24 @@ describe.each(CHANNEL_CASES)(
       expect(prompt).not.toContain("Address:   ");
     });
 
+    it("keeps registration street and ZIP out of customer-facing context for city/state visibility", () => {
+      const prompt = promptFor(channel, {
+        public_address_visibility: "city_state", address: "PRIVATE_STREET_SENTINEL",
+        city: " South Bend ", state: " IN ", zip: "PRIVATE_ZIP_SENTINEL",
+      });
+      expect(prompt).toContain("\nAddress: South Bend, IN\n");
+      expect(prompt).not.toContain("PRIVATE_");
+    });
+
+    it("omits a private address when no public locality is available", () => {
+      const prompt = promptFor(channel, {
+        public_address_visibility: "city_state", address: "PRIVATE_STREET_SENTINEL",
+        city: null, state: null, zip: "PRIVATE_ZIP_SENTINEL",
+      });
+      expect(prompt).not.toContain("\nAddress:");
+      expect(prompt).not.toContain("PRIVATE_");
+    });
+
     it("joins only the address components that contain text", () => {
       const prompt = promptFor(channel, {
         address: " ",

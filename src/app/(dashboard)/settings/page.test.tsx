@@ -436,6 +436,28 @@ describe('SettingsPage registration-sensitive settings', () => {
     }
   );
 
+  it('passes publication privacy and the shared legal operator to generated policy copy', async () => {
+    const context = resolvedContext();
+    mocks.getDashboardEntitledContext.mockResolvedValue({ ...context, business: {
+      ...context.business, public_address_visibility: 'city_state', shared_registration_id: 'registration', legal_business_name: 'Example Operator LLC',
+    } });
+    renderToStaticMarkup(await SettingsPage({}));
+    expect(mocks.compliancePanel).toHaveBeenCalledWith(expect.objectContaining({ business: expect.objectContaining({
+      public_address_visibility: 'city_state', legal_operator_name: 'Example Operator LLC',
+    }) }));
+  });
+
+  it('locks a staged shared address for Chat before provider binding while keeping ordinary settings available', async () => {
+    const context = resolvedContext();
+    mocks.getDashboardEntitledContext.mockResolvedValue({ ...context,
+      entitlements: { ...context.entitlements, plan: 'chat_only' },
+      business: { ...context.business, shared_registration_id: 'registration', telnyx_brand_id: null },
+    });
+    renderToStaticMarkup(await SettingsPage({}));
+    expect(mocks.businessInfoEditor).toHaveBeenCalledWith(expect.objectContaining({ registrationLocked: true }));
+    expect(mocks.goalSettingsForm).toHaveBeenCalledWith(expect.objectContaining({ registrationLocked: false }));
+  });
+
   it('hides every SMS-only surface for Chat Only despite stale carrier data', async () => {
     const context = resolvedContext('book', RETAINED_GOAL_URL, {
       telnyx_brand_id: 'stale-brand',

@@ -62,10 +62,11 @@ function formatHoursSchedule(businessHours: BusinessHours[]): string {
 }
 
 function formatBusinessAddress(business: Business): string | null {
-  const street = business.address?.trim() || null;
+  const publicFullAddress = business.public_address_visibility !== "city_state";
+  const street = publicFullAddress ? business.address?.trim() || null : null;
   const city = business.city?.trim() || null;
   const state = business.state?.trim() || null;
-  const zip = business.zip?.trim() || null;
+  const zip = publicFullAddress ? business.zip?.trim() || null : null;
   const cityAndState = [city, state].filter(Boolean).join(", ");
   const locality = [cityAndState, zip].filter(Boolean).join(" ");
   const address = [street, locality].filter(Boolean).join(", ");

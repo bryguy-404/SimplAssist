@@ -3,13 +3,12 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { LegalDocLayout } from "@/components/legal/LegalDocLayout";
 import { LegalSection } from "@/components/legal/legal-section";
-import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
   buildTermsContent,
   type LegalTemplateBusiness,
 } from "@/lib/legal/perBusinessCopy";
 import { getActiveSmsNumberForBusiness } from "@/lib/messaging/phoneNumberLookup";
-import { isPendingSlug } from "@/lib/util/slug.shared";
+import { loadPublicBusiness } from "@/lib/legal/publicBusiness.server";
 
 /**
  * Per-business terms of service (Phase 6).
@@ -22,26 +21,11 @@ type PageProps = { params: Promise<{ slug: string }> };
 
 export const dynamic = "force-dynamic";
 
-const PUBLIC_PROJECTION =
-  "id, slug, name, email, phone_number, address, city, state, zip, review_sms_signup_enabled, opt_in_description";
-
 async function loadBusiness(
   slug: string
 ): Promise<(LegalTemplateBusiness & { slug: string }) | null> {
-  if (isPendingSlug(slug)) return null;
-
-  const { data, error } = await supabaseAdmin
-    .from("businesses")
-    .select(PUBLIC_PROJECTION)
-    .eq("slug", slug)
-    .maybeSingle();
-
-  if (error || !data) return null;
-
-  const business = data as unknown as LegalTemplateBusiness & {
-    id: string;
-    slug: string;
-  };
+  const business = await loadPublicBusiness(slug);
+  if (!business) return null;
 
   const [smsPhoneNumber, reviewProgram] = await Promise.all([
     getActiveSmsNumberForBusiness(business.id),
@@ -51,6 +35,7 @@ async function loadBusiness(
   return {
     ...business,
     ...reviewProgram,
+    opt_in_description: null,
     sms_phone_number: smsPhoneNumber,
   };
 }

@@ -42,6 +42,9 @@ export type DashboardBusiness = Pick<
   | "city"
   | "state"
   | "zip"
+  | "public_address_visibility"
+  | "shared_registration_id"
+  | "legal_business_name"
   | "opt_in_description"
   | "review_sms_signup_enabled"
   | "privacy_terms_mode"
@@ -120,6 +123,9 @@ const DASHBOARD_BUSINESS_SELECT = [
   "city",
   "state",
   "zip",
+  "public_address_visibility",
+  "shared_registration_id",
+  "legal_business_name",
   "opt_in_description",
   "review_sms_signup_enabled",
   "privacy_terms_mode",

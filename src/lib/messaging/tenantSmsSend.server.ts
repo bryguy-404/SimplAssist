@@ -178,6 +178,13 @@ export async function sendTenantSms(args: TenantSmsInput) {
   }
   const reservation = reserved.data.reservation as Reservation;
   if (!reserved.data.send) return result(reservation, true);
+  // Recheck after reserving quota, immediately before contacting the provider.
+  // Brand rejection may have arrived while an already queued send was claimed.
+  const sharedAccess = await db.rpc("shared_brand_sms_allowed", { p_business: args.businessId });
+  if (sharedAccess.error || sharedAccess.data !== true) {
+    await settle(reservation.id, "not_sent", null, "sms_shared_brand_unavailable");
+    throw new TenantSmsSendError("sms_shared_brand_unavailable", "not_sent");
+  }
   let providerId: string | null = null;
   try {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL;

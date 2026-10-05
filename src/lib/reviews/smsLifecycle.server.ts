@@ -1,4 +1,5 @@
 import "server-only";
+import { reconcileSharedBrandStatuses } from "@/lib/messaging/sharedBrandEvents.server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
   continueReviewSmsProvisioning,
@@ -87,6 +88,11 @@ async function refreshDirectBilling(account: {
 /** Runs independently of the outbound-send switches, so cancellation cannot
  * leave a chargeable number/campaign behind just because sending is paused. */
 export async function runReviewSmsLifecycle() {
+  try {
+    await reconcileSharedBrandStatuses();
+  } catch {
+    console.warn("[review-sms] Shared registration status reconciliation will retry.");
+  }
   try {
     const { runReviewTextingProviderLifecycle } = await import("@/lib/billing/reviewTextingProvider.server");
     await runReviewTextingProviderLifecycle();

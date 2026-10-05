@@ -30,6 +30,7 @@ import {
 } from "@/lib/email/registrationStatus";
 import { REJECTION_SUPPORT_MESSAGE } from "@/lib/onboarding/rejectionGuidance";
 import type { RegistrationStatus } from "@/types/database";
+import { handleSharedBrandEvent } from "@/lib/messaging/sharedBrandEvents.server";
 
 // Telnyx 10DLC brand/campaign status webhook receiver. Phase 3 wires this URL
 // into every brand and campaign it creates; Phase 4 (this file) updates the
@@ -89,6 +90,7 @@ export async function POST(request: NextRequest) {
 }
 
 async function handleEvent(event: unknown): Promise<void> {
+  if (await handleSharedBrandEvent(event)) return;
   const eventData = (event as {
     data?: {
       id?: string;

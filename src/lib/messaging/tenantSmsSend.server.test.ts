@@ -40,6 +40,7 @@ beforeEach(() => {
   });
   m.usage.mockResolvedValue({ allowed: true, periodId: "period", smsParts: 1 });
   m.rpc.mockImplementation(async (name: string, p: Record<string, unknown>) => {
+    if (name === "shared_brand_sms_allowed") return { data: true, error: null };
     if (name === "reserve_tenant_sms") {
       row = {
         id: "reservation",
@@ -67,6 +68,14 @@ beforeEach(() => {
   m.send.mockResolvedValue({ data: { id: "provider" } });
 });
 describe("tenant SMS delivery boundary", () => {
+  it("stops a queued send when the shared brand is rejected after reservation", async () => {
+    const original = m.rpc.getMockImplementation()!;
+    m.rpc.mockImplementation((name, p) => name === "shared_brand_sms_allowed"
+      ? Promise.resolve({ data: false, error: null }) : original(name, p));
+    await expect(sendTenantSms(args)).rejects.toMatchObject({ reason: "sms_shared_brand_unavailable", outcome: "not_sent" });
+    expect(m.send).not.toHaveBeenCalled();
+    expect(row).toMatchObject({ status: "not_sent", failure_reason: "sms_shared_brand_unavailable" });
+  });
   it("reserves before sending, disables SDK retries and settles accepted usage", async () => {
     const sent = await sendTenantSms(args);
     expect(sent).toMatchObject({ data: { id: "provider" }, replayed: false });

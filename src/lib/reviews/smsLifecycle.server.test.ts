@@ -1,4 +1,5 @@
 vi.mock("@/lib/billing/reviewTextingProvider.server",()=>({runReviewTextingProviderLifecycle:vi.fn().mockResolvedValue(undefined)}));
+vi.mock("@/lib/messaging/sharedBrandEvents.server",()=>({reconcileSharedBrandStatuses:vi.fn().mockResolvedValue(0)}));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),

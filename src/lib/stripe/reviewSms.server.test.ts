@@ -8,6 +8,9 @@ const mocks = vi.hoisted(() => ({
   preview: vi.fn(),
   price: vi.fn(),
   checkout: vi.fn(),
+  checkoutGet: vi.fn(),
+  checkoutExpire: vi.fn(),
+  checkoutLines: vi.fn(),
   payment: vi.fn(),
   refund: vi.fn(),
   invoice: vi.fn(),
@@ -32,7 +35,7 @@ vi.mock("./client", () => ({
     subscriptions: { retrieve: mocks.retrieve, update: mocks.update },
     prices: { retrieve: mocks.price },
     invoices: { createPreview: mocks.preview, retrieve: mocks.invoice },
-    checkout: { sessions: { create: mocks.checkout } },
+    checkout: { sessions: { create: mocks.checkout, retrieve: mocks.checkoutGet, expire: mocks.checkoutExpire, listLineItems: mocks.checkoutLines } },
     paymentIntents: { retrieve: mocks.payment },
     refunds: { create: mocks.refund },
     subscriptionSchedules: {
@@ -329,7 +332,7 @@ describe("review SMS commercial boundaries", () => {
     ).rejects.toThrow("review_sms_recovery_required");
     expect(mocks.update).not.toHaveBeenCalled();
   });
-  it("does not charge activation at the old $25 setup price", async () => {
+  it("does not sell a new activation at the future $25 price", async () => {
     account.activation_paid_at = null;
     account.state = "draft";
     mocks.price.mockResolvedValue({
@@ -353,7 +356,7 @@ describe("review SMS commercial boundaries", () => {
       kind: "activation",
       state: "confirmed",
       fingerprint: "f",
-      payload: {},
+      payload: activationPayload(4900),
       checkout_session_id: "cs_review",
       invoice_id: null,
       schedule_id: null,
@@ -381,6 +384,7 @@ describe("review SMS commercial boundaries", () => {
   });
   it("a provider-submission race blocks the refund before contacting Stripe", async () => {
     refundRace = true;
+    paidActivation(4900);
     await expect(
       refundUnsubmittedReviewSmsActivation(bid, owner),
     ).rejects.toThrow("review_sms_refund_unavailable");
@@ -460,7 +464,8 @@ describe("review SMS payment and cancellation recovery", () => {
       mode: "payment",
       customer: "cus_review",
       client_reference_id: bid,
-      metadata: { review_sms_operation_id: oid },
+      metadata: activationMetadata(),
+      amount_total: 4900, currency: "usd",
       status: "open",
       url: "https://checkout.stripe.com/c/pay/test",
     });
@@ -614,5 +619,47 @@ describe("review SMS payment and cancellation recovery", () => {
     );
     expect(mocks.scheduleCreate).not.toHaveBeenCalled();
     expect(mocks.scheduleUpdate).not.toHaveBeenCalled();
+  });
+});
+
+function activationMetadata() {
+  return { business_id: bid, review_sms_account_id: aid, review_sms_operation_id: oid };
+}
+function activationPayload(amount = 4900) {
+  return { feeId: amount === 4900 ? "price_historical" : "price_activation", amountCents: amount,
+    customerId: "cus_review", subscriptionId: "sub_review", origin: "https://simplassist.com" };
+}
+function paidActivation(amount = 4900) {
+  operation = { id: oid, account_id: aid, business_id: bid, owner_id: owner, kind: "activation", state: "completed",
+    fingerprint: "old", payload: activationPayload(amount), checkout_session_id: "cs_review", invoice_id: null,
+    schedule_id: null, created_at: new Date(now - 1000).toISOString(), expires_at: new Date(now + 1000).toISOString() };
+  const session = { id: "cs_review", livemode: false, mode: "payment", customer: "cus_review", client_reference_id: bid,
+    metadata: activationMetadata(), currency: "usd", amount_total: amount, status: "complete", payment_status: "paid",
+    payment_intent: "pi_activation" } as unknown as Stripe.Checkout.Session;
+  mocks.checkoutGet.mockResolvedValue(session);
+  mocks.payment.mockResolvedValue({ id: "pi_activation", livemode: false, status: "succeeded", currency: "usd",
+    amount, amount_received: amount, customer: "cus_review", metadata: activationMetadata() });
+  mocks.checkoutLines.mockResolvedValue({ has_more: false, data: [{ quantity: 1, amount_total: amount,
+    price: { id: activationPayload(amount).feeId, unit_amount: amount, currency: "usd", type: "one_time" } }] });
+  return session;
+}
+describe("activation price history compatibility", () => {
+  it.each([2500,4900])("verifies and replays an original %i receipt after the current price changes", async amount => {
+    const session = paidActivation(amount);
+    expect(await synchronizeReviewSmsCheckout(session)).toBe(true);
+    expect(await synchronizeReviewSmsCheckout(session)).toBe(true);
+    expect(mocks.checkout).not.toHaveBeenCalled();
+    expect(updates.some(u => u.patch.state === "completed")).toBe(true);
+  });
+  it.each([2500,4900])("refunds the original %i payment in full", async amount => {
+    paidActivation(amount);
+    expect(await refundUnsubmittedReviewSmsActivation(bid,owner)).toEqual({ refunded: true });
+    expect(mocks.refund).toHaveBeenCalledWith(expect.objectContaining({ payment_intent:"pi_activation",amount }),expect.anything());
+  });
+  it("rejects the wrong immutable Stripe Price even when the amount is the same", async () => {
+    const session = paidActivation();
+    mocks.checkoutLines.mockResolvedValue({ has_more:false,data:[{quantity:1,amount_total:4900,price:{id:"price_other",unit_amount:4900,currency:"usd",type:"one_time"}}] });
+    await expect(synchronizeReviewSmsCheckout(session)).rejects.toThrow("review_sms_activation_receipt_unverified");
+    expect(updates).toHaveLength(0);
   });
 });

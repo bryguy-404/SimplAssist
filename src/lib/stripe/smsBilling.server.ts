@@ -397,6 +397,15 @@ export async function synchronizeSmsBillingOperation(input: Stripe.Subscription)
   if (!op.confirmed_at || invoice.created < seconds(op.confirmed_at) - 60 ||
     (op.invoice_id && op.invoice_id !== invoice.id) || invoice.currency !== "usd" ||
     !["subscription_create", "subscription_update"].includes(invoice.billing_reason ?? "")) throw new SmsBillingError("sms_billing_payment_unverified");
+  if (op.kind === "checkout" && op.setup_fee_price_id) {
+    const fee = await stripe.prices.retrieve(op.setup_fee_price_id);
+    const paidFee = Number(op.quote.setupFeeCents ?? fee.unit_amount);
+    const lines = invoice.lines.data.filter(line => line.pricing?.price_details?.price === op.setup_fee_price_id);
+    if (fee.id !== op.setup_fee_price_id || fee.type !== "one_time" || fee.currency !== "usd" ||
+      ![2500, 4900].includes(paidFee) || fee.unit_amount !== paidFee || invoice.lines.has_more ||
+      lines.length !== 1 || lines[0].quantity !== 1 || lines[0].amount !== paidFee)
+      throw new SmsBillingError("sms_billing_setup_fee_unverified");
+  }
   const { data, error } = await supabaseAdmin.rpc("finalize_paid_sms_billing_operation", { p_operation_id: op.id,
     p_snapshot: { subscription_id: sub.id, customer_id: id(sub.customer), plan: op.target_plan, price_id: item.price.id, status: sub.status,
       period_start: iso(item.current_period_start), period_end: iso(item.current_period_end), cancel_at_period_end: sub.cancel_at_period_end },

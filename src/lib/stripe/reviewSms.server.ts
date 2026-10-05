@@ -48,6 +48,21 @@ const opSchema = z.object({
   expires_at: z.string(),
 });
 type Operation = z.infer<typeof opSchema>;
+// Stripe prices are immutable. Recovery is bound to the original operation,
+// never to the price configured for a new purchase today.
+const activationPayloadSchema = z.object({
+  feeId: z.string().startsWith("price_"),
+  amountCents: z.union([z.literal(2500), z.literal(4900)]),
+  customerId: z.string().startsWith("cus_"),
+  subscriptionId: z.string().startsWith("sub_"),
+  origin: z.string().url(),
+});
+function activationPayload(op: Operation) {
+  const parsed = activationPayloadSchema.safeParse(op.payload);
+  if (op.kind !== "activation" || !parsed.success)
+    throw new ReviewSmsError("review_sms_activation_receipt_unverified", 503);
+  return parsed.data;
+}
 async function rpc<T>(name: string, args: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabaseAdmin.rpc(name, args);
   if (error)
@@ -358,6 +373,41 @@ export async function createReviewSmsActivationCheckout(
   await saveOperation(op, { checkout_session_id: session.id });
   return { url: checkedCheckoutUrl(session, op) };
 }
+function assertActivationSession(session: Stripe.Checkout.Session, op: Operation, a: ReviewSmsAccount) {
+  const payload = activationPayload(op);
+  assertMode(session.livemode);
+  if (op.account_id !== a.id || op.business_id !== a.business_id ||
+    payload.customerId !== a.source_customer_id || payload.subscriptionId !== a.source_subscription_id ||
+    session.metadata?.review_sms_operation_id !== op.id || session.metadata?.review_sms_account_id !== a.id ||
+    session.metadata?.business_id !== a.business_id || session.client_reference_id !== a.business_id ||
+    id(session.customer) !== payload.customerId || session.mode !== "payment" ||
+    session.currency !== "usd" || session.amount_total !== payload.amountCents ||
+    (op.checkout_session_id && op.checkout_session_id !== session.id))
+    throw new ReviewSmsError("review_sms_checkout_unbound", 503);
+}
+async function verifyActivationPayment(op: Operation, a: ReviewSmsAccount, paymentId: string) {
+  const payload = activationPayload(op);
+  const payment = await stripe.paymentIntents.retrieve(paymentId);
+  assertMode(payment.livemode);
+  if (payment.id !== paymentId || payment.status !== "succeeded" ||
+    payment.amount !== payload.amountCents || payment.amount_received !== payload.amountCents ||
+    payment.currency !== "usd" || id(payment.customer) !== payload.customerId ||
+    payload.customerId !== a.source_customer_id || op.account_id !== a.id ||
+    payment.metadata.review_sms_operation_id !== op.id || payment.metadata.review_sms_account_id !== a.id ||
+    payment.metadata.business_id !== a.business_id)
+    throw new ReviewSmsError("review_sms_payment_unverified", 503);
+  return payment;
+}
+async function verifyActivationLine(sessionId: string, op: Operation) {
+  const payload = activationPayload(op);
+  const lines = await stripe.checkout.sessions.listLineItems(sessionId, { limit: 2 });
+  const line = lines.data[0];
+  if (lines.has_more || lines.data.length !== 1 || line.quantity !== 1 ||
+    line.price?.id !== payload.feeId || line.price.unit_amount !== payload.amountCents ||
+    line.price.currency !== "usd" || line.price.type !== "one_time" || line.amount_total !== payload.amountCents)
+    throw new ReviewSmsError("review_sms_activation_receipt_unverified", 503);
+}
+
 function checkedCheckoutUrl(session: Stripe.Checkout.Session, op: Operation) {
   assertMode(session.livemode);
   if (
@@ -388,46 +438,18 @@ export async function synchronizeReviewSmsCheckout(
     throw new ReviewSmsError("review_sms_checkout_unbound", 503);
   const op = opSchema.parse(data);
   const a = await readReviewSmsAccount(op.business_id);
-  if (
-    !a ||
-    op.kind !== "activation" ||
-    !["confirmed", "completed"].includes(op.state) ||
-    op.account_id !== a.id ||
-    session.metadata?.review_sms_account_id !== a.id ||
-    session.client_reference_id !== a.business_id ||
-    id(session.customer) !== a.source_customer_id ||
-    session.mode !== "payment" ||
-    session.currency !== "usd" ||
-    session.amount_total !== REVIEW_SMS_ACTIVATION_CENTS ||
-    (op.checkout_session_id && op.checkout_session_id !== session.id)
-  )
+  if (!a || !["confirmed", "completed", "expired"].includes(op.state))
     throw new ReviewSmsError("review_sms_checkout_unbound", 503);
+  assertActivationSession(session, op, a);
   if (session.status === "expired") {
-    await saveOperation(op, {
-      state: "expired",
-      checkout_session_id: session.id,
-    });
+    if (op.state !== "completed") await saveOperation(op, { state: "expired", checkout_session_id: session.id });
     return true;
   }
-  if (session.status !== "complete" || session.payment_status !== "paid")
-    return true;
-  if (!id(session.payment_intent))
+  if (session.status !== "complete" || session.payment_status !== "paid") return true;
+  if (op.state === "expired" || !id(session.payment_intent))
     throw new ReviewSmsError("review_sms_payment_unverified", 503);
-  const payment = await stripe.paymentIntents.retrieve(
-    id(session.payment_intent)!,
-  );
-  assertMode(payment.livemode);
-  if (
-    payment.id !== id(session.payment_intent) ||
-    payment.status !== "succeeded" ||
-    payment.amount_received !== REVIEW_SMS_ACTIVATION_CENTS ||
-    payment.currency !== "usd" ||
-    id(payment.customer) !== a.source_customer_id ||
-    payment.metadata.review_sms_operation_id !== op.id ||
-    payment.metadata.review_sms_account_id !== a.id ||
-    payment.metadata.business_id !== a.business_id
-  )
-    throw new ReviewSmsError("review_sms_payment_unverified", 503);
+  await verifyActivationLine(session.id, op);
+  const payment = await verifyActivationPayment(op, a, id(session.payment_intent)!);
   const { error: saveError } = await supabaseAdmin
     .from("review_sms_accounts")
     .update({
@@ -833,9 +855,20 @@ export async function refundUnsubmittedReviewSmsActivation(
   if (a.activation_refunded_at) return { refunded: true };
   if (!a.activation_payment_intent_id || a.provider_started_at)
     throw new ReviewSmsError("review_sms_refund_unavailable");
+  const payment = await stripe.paymentIntents.retrieve(a.activation_payment_intent_id);
+  const activation = await readOperation(payment.metadata.review_sms_operation_id, businessId, ownerId);
+  if (activation.state !== "completed" || !activation.checkout_session_id)
+    throw new ReviewSmsError("review_sms_activation_receipt_unverified", 503);
+  await verifyActivationPayment(activation, a, payment.id);
+  const receipt = await stripe.checkout.sessions.retrieve(activation.checkout_session_id);
+  assertActivationSession(receipt, activation, a);
+  if (receipt.status !== "complete" || receipt.payment_status !== "paid" || id(receipt.payment_intent) !== payment.id)
+    throw new ReviewSmsError("review_sms_activation_receipt_unverified", 503);
+  await verifyActivationLine(receipt.id, activation);
+  const amount = activationPayload(activation).amountCents;
   let op = await acquire(a, "refund", {
     paymentIntent: a.activation_payment_intent_id,
-    amount: REVIEW_SMS_ACTIVATION_CENTS,
+    amount,
   });
   assertReplay(op);
   op = await confirm(op);
@@ -851,7 +884,7 @@ export async function refundUnsubmittedReviewSmsActivation(
   await stripe.refunds.create(
     {
       payment_intent: a.activation_payment_intent_id,
-      amount: REVIEW_SMS_ACTIVATION_CENTS,
+      amount,
       metadata: { review_sms_operation_id: op.id },
     },
     { idempotencyKey: `review-sms-refund:${op.id}` },

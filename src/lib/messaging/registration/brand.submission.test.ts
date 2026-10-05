@@ -3,10 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   appendRegistrationEvent: vi.fn(),
   createBrand: vi.fn(),
-  from: vi.fn(),
+  from: vi.fn(), sharedContext: vi.fn(), sharedValidate: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/lib/messaging/sharedBusinessRegistrations.server", () => ({
+  readSharedRegistrationContext: mocks.sharedContext, validateSharedRegistrationProof: mocks.sharedValidate,
+}));
 vi.mock("@/lib/messaging/client", () => ({
   telnyx: {
     messaging10dlc: {
@@ -36,6 +39,8 @@ const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
 const BRAND_ID = "4b20019d-e93e-4000-8000-000000000001";
 const BUSINESS = {
   id: BUSINESS_ID,
+  owner_id: "owner",
+  shared_registration_id: null as string | null,
   name: "Example Dental",
   slug: "example-dental",
   legal_business_name: "Example Dental LLC",
@@ -69,6 +74,7 @@ let carrierSnapshot: {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.sharedContext.mockResolvedValue(null); mocks.sharedValidate.mockResolvedValue(null);
   vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.com");
 
   carrierSnapshot = {
@@ -193,4 +199,28 @@ describe("registerBrand charged provider submission", () => {
       expect(mocks.createBrand).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("registerBrand shared registration reuse", () => {
+  it("never creates a replacement when shared staging has no bound provider ID", async () => {
+    businessSnapshot.shared_registration_id = "shared-registration";
+    mocks.sharedContext.mockResolvedValue({ registration: { id: "shared-registration", brand_id: BRAND_ID } });
+    const paid = vi.fn();
+    await expect(registerBrand(BUSINESS_ID, { beforePaidSubmit: paid })).rejects.toMatchObject({ code: "linked_brand_needs_support" });
+    expect(paid).not.toHaveBeenCalled(); expect(mocks.createBrand).not.toHaveBeenCalled();
+  });
+  it("reuses only an actively bound canonical brand and does not record a paid create", async () => {
+    businessSnapshot.shared_registration_id = "shared-registration"; businessSnapshot.telnyx_brand_id = BRAND_ID;
+    mocks.sharedContext.mockResolvedValue({ registration: { id: "shared-registration", brand_id: BRAND_ID, identity_version: 1 }, membership: { revision: 2 } });
+    const paid = vi.fn(); await registerBrand(BUSINESS_ID, { beforePaidSubmit: paid });
+    expect(mocks.sharedValidate).toHaveBeenCalledWith({ businessId: BUSINESS_ID, ownerId: "owner", requireActive: true,
+      proof: { registrationId: "shared-registration", identityVersion: 1, membershipRevision: 2, brandId: BRAND_ID } });
+    expect(paid).not.toHaveBeenCalled(); expect(mocks.createBrand).not.toHaveBeenCalled();
+  });
+  it("does not fall back to creating a brand when shared proof validation fails", async () => {
+    businessSnapshot.shared_registration_id = "shared-registration"; businessSnapshot.telnyx_brand_id = BRAND_ID;
+    mocks.sharedContext.mockResolvedValue({ registration: { id: "shared-registration", brand_id: BRAND_ID, identity_version: 1 }, membership: { revision: 2 } });
+    mocks.sharedValidate.mockRejectedValue(new Error("revoked"));
+    await expect(registerBrand(BUSINESS_ID)).rejects.toThrow("revoked"); expect(mocks.createBrand).not.toHaveBeenCalled();
+  });
 });

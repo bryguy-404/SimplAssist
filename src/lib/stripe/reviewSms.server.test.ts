@@ -1,6 +1,7 @@
 import type Stripe from "stripe";
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
+  sharedPilot: vi.fn(), sharedContext: vi.fn(), sharedNewStart: vi.fn(), sharedValidate: vi.fn(), sharedConsume: vi.fn(), sharedReserve: vi.fn(), sharedSettle: vi.fn(), sharedReservation: vi.fn(), sharedPaidProof: vi.fn(),
   from: vi.fn(),
   rpc: vi.fn(),
   retrieve: vi.fn(),
@@ -21,6 +22,17 @@ const mocks = vi.hoisted(() => ({
   scheduleUpdate: vi.fn(),
 }));
 vi.mock("server-only", () => ({}));
+vi.mock("@/lib/messaging/sharedBusinessRegistrations.server", async importOriginal => ({
+  ...await importOriginal<object>(),
+  sharedRegistrationPilotEnabled: mocks.sharedPilot,
+  readSharedRegistrationContext: mocks.sharedContext,
+  assertSharedRegistrationForNewStart: mocks.sharedNewStart,
+  validateSharedRegistrationProof: mocks.sharedValidate,
+  consumeSharedReviewRegistration: mocks.sharedConsume,
+  reserveSharedCampaignSubmission: mocks.sharedReserve,
+  settleSharedCampaignSubmission: mocks.sharedSettle,
+  readSharedCampaignReservation: mocks.sharedReservation,
+}));
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { from: mocks.from, rpc: mocks.rpc },
 }));
@@ -46,6 +58,7 @@ vi.mock("./client", () => ({
   },
 }));
 import {
+  reviewSmsOverview,
   confirmReviewSmsRecurring,
   quoteReviewSmsRecurring,
   synchronizeReviewSmsCheckout,
@@ -115,6 +128,16 @@ let account: Record<string, unknown>,
   refundRace: boolean;
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.sharedPilot.mockReturnValue(false);
+  mocks.sharedContext.mockResolvedValue(null);
+  mocks.sharedNewStart.mockResolvedValue(null);
+  mocks.sharedValidate.mockResolvedValue(null);
+  mocks.sharedConsume.mockResolvedValue(undefined);
+  mocks.sharedReserve.mockResolvedValue(null);
+  mocks.sharedSettle.mockResolvedValue(undefined);
+  mocks.sharedReservation.mockResolvedValue(null);
+  mocks.sharedPaidProof.mockResolvedValue(null);
+
   vi.useFakeTimers();
   vi.setSystemTime(now);
   vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_reviews");
@@ -691,5 +714,102 @@ describe("activation price history and replacement", () => {
     mocks.price.mockResolvedValue({active:true,currency:"usd",unit_amount:2500,type:"one_time"});
     await expect(createReviewSmsActivationCheckout(bid,owner,"https://simplassist.com")).rejects.toThrow("review_sms_recovery_required");
     expect(mocks.checkout).not.toHaveBeenCalled();
+  });
+});
+
+const sharedProof = { registrationId: "50000000-0000-4000-8000-000000000098", identityVersion: 1, membershipRevision: 2, brandId: "brand_shared" };
+function newActivation() {
+  account.state = "draft"; account.activation_paid_at = null;
+  mocks.price.mockResolvedValue({ id: "price_activation", active: true, currency: "usd", unit_amount: 2500, type: "one_time" });
+  mocks.checkout.mockResolvedValue({ id: "cs_review", livemode: false, mode: "payment", customer: "cus_review", client_reference_id: bid,
+    metadata: activationMetadata(), amount_total: 2500, currency: "usd", status: "open", url: "https://checkout.stripe.com/c/pay/test" });
+}
+describe("shared registration activation authority", () => {
+  it("freezes the approved identity and membership revision before authorizing the $25 Checkout", async () => {
+    newActivation(); mocks.sharedNewStart.mockResolvedValue(sharedProof);
+    await createReviewSmsActivationCheckout(bid, owner, "https://simplassist.com");
+    expect(operation?.payload).toMatchObject({ amountCents: 2500, sharedRegistration: sharedProof });
+    expect(mocks.sharedNewStart).toHaveBeenCalledWith({ businessId: bid, ownerId: owner });
+    expect(mocks.sharedValidate).toHaveBeenCalledWith({ businessId: bid, ownerId: owner, proof: sharedProof });
+    expect(mocks.sharedValidate.mock.invocationCallOrder[0]).toBeLessThan(mocks.checkout.mock.invocationCallOrder[0]);
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+  it("does not create a fee Checkout when staging or capacity approval is unavailable", async () => {
+    newActivation();
+    const { SharedRegistrationError } = await import("@/lib/messaging/sharedBusinessRegistrations.server");
+    mocks.sharedNewStart.mockRejectedValue(new SharedRegistrationError("shared_campaign_capacity_exhausted"));
+    await expect(createReviewSmsActivationCheckout(bid, owner, "https://simplassist.com")).rejects.toMatchObject({ name: "ReviewSmsError", code: "shared_campaign_capacity_exhausted" });
+    expect(mocks.checkout).not.toHaveBeenCalled(); expect(mocks.price).not.toHaveBeenCalled(); expect(operation).toBeNull();
+  });
+  it("recovers an already-paid shared Checkout after its membership was revoked", async () => {
+    const session = paidActivation(2500); operation!.state = "confirmed"; account.activation_paid_at = null;
+    operation!.payload = { ...activationPayload(2500), sharedRegistration: sharedProof };
+    mocks.sharedNewStart.mockRejectedValue(new Error("admissions stopped")); mocks.sharedValidate.mockRejectedValue(new Error("revoked"));
+    expect(await createReviewSmsActivationCheckout(bid, owner, "https://simplassist.com")).toEqual({ paid: true });
+    expect(mocks.checkoutGet).toHaveBeenCalledWith(session.id);
+    expect(mocks.sharedNewStart).not.toHaveBeenCalled(); expect(mocks.sharedValidate).not.toHaveBeenCalled(); expect(mocks.checkout).not.toHaveBeenCalled();
+  });
+  it("recovers the same pending shared Checkout while new paid starts are disabled", async () => {
+    paidActivation(2500); operation!.state = "confirmed"; account.activation_paid_at = null;
+    operation!.payload = { ...activationPayload(2500), sharedRegistration: sharedProof };
+    mocks.checkoutGet.mockResolvedValue({ id: "cs_review", livemode: false, mode: "payment", customer: "cus_review", client_reference_id: bid,
+      metadata: activationMetadata(), amount_total: 2500, currency: "usd", status: "open", url: "https://checkout.stripe.com/c/pay/test" });
+    mocks.sharedNewStart.mockRejectedValue(new Error("admissions stopped"));
+    expect(await createReviewSmsActivationCheckout(bid, owner, "https://simplassist.com")).toHaveProperty("url");
+    expect(mocks.sharedValidate).toHaveBeenCalledWith({ businessId: bid, ownerId: owner, proof: sharedProof });
+    expect(mocks.sharedNewStart).not.toHaveBeenCalled(); expect(mocks.checkout).not.toHaveBeenCalled();
+  });
+  it("does not create a Checkout after its frozen membership revision stops matching", async () => {
+    paidActivation(2500); operation!.state = "confirmed"; operation!.checkout_session_id = null; account.activation_paid_at = null;
+    operation!.payload = { ...activationPayload(2500), sharedRegistration: sharedProof };
+    mocks.sharedValidate.mockRejectedValue(new Error("revision changed"));
+    await expect(createReviewSmsActivationCheckout(bid, owner, "https://simplassist.com")).rejects.toThrow("revision changed");
+    expect(mocks.checkout).not.toHaveBeenCalled();
+  });
+  it("still refunds the original shared activation before any actual paid provider work", async () => {
+    paidActivation(2500); operation!.payload = { ...activationPayload(2500), sharedRegistration: sharedProof };
+    mocks.sharedValidate.mockRejectedValue(new Error("revoked")); mocks.sharedNewStart.mockRejectedValue(new Error("stopped"));
+    mocks.refund.mockResolvedValue({ status: "succeeded" });
+    await refundUnsubmittedReviewSmsActivation(bid, owner);
+    expect(mocks.refund).toHaveBeenCalledWith(expect.objectContaining({ amount: 2500 }), expect.anything());
+    expect(mocks.sharedValidate).not.toHaveBeenCalled(); expect(mocks.sharedNewStart).not.toHaveBeenCalled();
+  });
+  it("blocks a new monthly payment after the original shared approval is revoked", async () => {
+    const quote = await quoteReviewSmsRecurring(bid, owner);
+    mocks.sharedContext.mockResolvedValue({ membership: { owner_id: owner } });
+    // Simulate the service-only paid activation lookup separately from the quote.
+    const original = mocks.from.getMockImplementation()!;
+    mocks.from.mockImplementation((table: string) => {
+      if (table !== "review_sms_billing_operations") return original(table);
+      const q = original(table); const order = q.order;
+      q.order = () => { q.maybeSingle = async () => ({ data: { ...operation, kind: "activation", state: "completed", payload: { ...activationPayload(2500), sharedRegistration: sharedProof } }, error: null }); return order(); };
+      return q;
+    });
+    mocks.sharedValidate.mockRejectedValue(new Error("membership revoked"));
+    await expect(confirmReviewSmsRecurring(bid, owner, quote.operationId, quote.fingerprint)).rejects.toThrow("membership revoked");
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("shared activation presentation authority", () => {
+  function stagedOverview() {
+    account.activation_paid_at = null; account.state = "activation_pending";
+    mocks.entitlements.mockResolvedValue({ plan: "chat_only", source: "subscription" });
+    mocks.sharedContext.mockResolvedValue({ registration: { legal_business_name: "Example LLC", identity_version: 1, status: "active", brand_status: "approved" }, membership: { owner_id: owner, status: "approved" } });
+  }
+  it.each(["confirmed", "unknown"])("keeps %s activation recovery visible after new paid starts are stopped", async state => {
+    stagedOverview(); operation = { state }; mocks.sharedPilot.mockReturnValue(false);
+    expect((await reviewSmsOverview(bid, owner)).sharedRegistration).toMatchObject({ newPaidStartsAllowed: false, activationRecoveryAvailable: true });
+    expect(mocks.checkout).not.toHaveBeenCalled(); expect(updates).toHaveLength(0);
+  });
+  it.each(["prepared", "completed", "expired"])("does not offer %s as an existing payment recovery", async state => {
+    stagedOverview(); operation = { state }; mocks.sharedPilot.mockReturnValue(false);
+    expect((await reviewSmsOverview(bid, owner)).sharedRegistration).toMatchObject({ newPaidStartsAllowed: false, activationRecoveryAvailable: false });
+  });
+  it("advertises a new shared payment only when its paid-start pilot is enabled", async () => {
+    stagedOverview(); operation = null; mocks.sharedPilot.mockReturnValue(true);
+    expect((await reviewSmsOverview(bid, owner)).sharedRegistration).toMatchObject({ newPaidStartsAllowed: true, activationRecoveryAvailable: false });
+    expect(mocks.sharedPilot).toHaveBeenCalledWith(bid, "paid_start");
+    expect(mocks.sharedNewStart).not.toHaveBeenCalled(); expect(mocks.checkout).not.toHaveBeenCalled();
   });
 });

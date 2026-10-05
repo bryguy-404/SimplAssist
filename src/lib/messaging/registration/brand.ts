@@ -12,6 +12,7 @@ import {
   TelnyxRemoteMutationAuthorizationError,
 } from "@/lib/messaging/telnyxDestructive";
 import { throwIfCarrierRejected } from "@/lib/onboarding/rejectionGuidance";
+import { readSharedRegistrationContext, validateSharedRegistrationProof } from "@/lib/messaging/sharedBusinessRegistrations.server";
 
 // Subset of the Telnyx `Vertical` enum we map to. Sourced from
 // node_modules/telnyx/resources/messaging-10dlc/brand/brand.d.ts (line 417).
@@ -131,13 +132,14 @@ export async function archiveAndClearRejectedBrand(
   const { data: business, error: readError } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id, telnyx_brand_id, telnyx_brand_source, brand_status, brand_rejection_reason"
+      "id, telnyx_brand_id, telnyx_brand_source, shared_registration_id, brand_status, brand_rejection_reason"
     )
     .eq("id", businessId)
     .single<{
       id: string;
       telnyx_brand_id: string | null;
       telnyx_brand_source: TelnyxBrandSource | null;
+      shared_registration_id: string | null;
       brand_status: string | null;
       brand_rejection_reason: string | null;
     }>();
@@ -155,7 +157,7 @@ export async function archiveAndClearRejectedBrand(
   // A linked brand existed before SimplAssist attached it. Treat a rejection
   // as a support case: do not archive its local history, touch its campaign,
   // delete it at Telnyx, or clear the business pointer automatically.
-  if (business.telnyx_brand_source === "linked_existing") {
+  if (business.telnyx_brand_source === "linked_existing" || business.shared_registration_id) {
     throw new LinkedExistingBrandSupportRequiredError(businessId);
   }
 
@@ -267,7 +269,7 @@ export async function registerBrand(businessId: string, options?: { beforePaidSu
   const { data: business, error: readError } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id, name, slug, legal_business_name, business_entity_type, business_type, has_ein, ein, compliance_info_completed_at, telnyx_brand_id, authorized_rep_name, authorized_rep_email, authorized_rep_phone, address, city, state, zip, website_url, brand_status, campaign_status, brand_rejection_reason, campaign_rejection_reason"
+      "id, owner_id, name, slug, legal_business_name, business_entity_type, business_type, has_ein, ein, compliance_info_completed_at, telnyx_brand_id, shared_registration_id, authorized_rep_name, authorized_rep_email, authorized_rep_phone, address, city, state, zip, website_url, brand_status, campaign_status, brand_rejection_reason, campaign_rejection_reason"
     )
     .eq("id", businessId)
     .single();
@@ -288,6 +290,15 @@ export async function registerBrand(businessId: string, options?: { beforePaidSu
     campaignReason: business.campaign_rejection_reason,
   });
 
+  if (business.shared_registration_id) {
+    const shared = await readSharedRegistrationContext(businessId);
+    if (!shared || !business.telnyx_brand_id || business.telnyx_brand_id !== shared.registration.brand_id)
+      throw new LinkedExistingBrandSupportRequiredError(businessId);
+    await validateSharedRegistrationProof({ businessId, ownerId: business.owner_id, requireActive: true,
+      proof: { registrationId: shared.registration.id, identityVersion: shared.registration.identity_version,
+        membershipRevision: shared.membership.revision, brandId: shared.registration.brand_id } });
+    return;
+  }
   if (business.telnyx_brand_id) {
     return;
   }

@@ -1,11 +1,17 @@
 import "server-only";
+import { reviewShared } from "@/lib/billing/sharedRegistrationErrors.server";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { adminUserIds } from "@/lib/admin/allowlist";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { telnyx } from "@/lib/messaging/client";
 import { ReviewSmsError, type ReviewSmsAccount } from "@/lib/billing/reviewSms";
 import { isReviewSmsEnabled } from "@/lib/billing/reviewSmsRollout.server";
-import { readReviewSmsAccount } from "@/lib/stripe/reviewSms.server";
+import { readReviewSmsAccount, readPaidReviewSmsSharedRegistrationProof } from "@/lib/stripe/reviewSms.server";
+import {
+  readSharedRegistrationContext, validateSharedRegistrationProof, consumeSharedReviewRegistration,
+  reserveSharedCampaignSubmission, settleSharedCampaignSubmission, readSharedCampaignReservation,
+} from "@/lib/messaging/sharedBusinessRegistrations.server";
 import {
   createMessagingProfile,
   createVoiceApplication,
@@ -94,6 +100,7 @@ const identityFields = {
   authorizedRepEmail: "authorized_rep_email",
   authorizedRepPhone: "authorized_rep_phone",
 } as const;
+const representativeFields = new Set(["authorized_rep_name", "authorized_rep_email", "authorized_rep_phone"]);
 function forbiddenProfiles(): string[] {
   const profiles = [
     process.env.TELNYX_PROTECTED_MESSAGING_PROFILE_ID,
@@ -137,6 +144,7 @@ async function business(businessId: string) {
 }
 export async function reviewSmsSetupOverview(businessId: string) {
   const b = await business(businessId);
+  const shared = await reviewShared(readSharedRegistrationContext(businessId));
   const { data: phone, error } = await supabaseAdmin
     .from("phone_numbers")
     .select("phone_number")
@@ -146,7 +154,9 @@ export async function reviewSmsSetupOverview(businessId: string) {
   if (error) throw new ReviewSmsError("review_sms_number_conflict");
   const fields: Record<string, string | boolean> = {
     hasEin: Boolean(b.ein && b.has_ein),
-    identityLocked: Boolean(b.telnyx_brand_id),
+    identityLocked: Boolean(b.telnyx_brand_id || shared),
+    representativeEditable: Boolean(shared?.membership.status === "approved" && !b.telnyx_brand_id),
+    publicAddressVisibility: b.public_address_visibility ?? "full",
     phoneNumber: phone?.phone_number ?? "",
     reviewSignupEnabled: b.review_sms_signup_enabled === true,
     consentUrl: b.slug ? reviewConsentUrl(b.slug, reviewOrigin()) : "",
@@ -219,6 +229,7 @@ export async function saveReviewSmsSetup(
   const b = await business(businessId);
   if (b.owner_id !== ownerId || b.deleted_at || b.operations_suspended_at)
     throw new ReviewSmsError("review_sms_forbidden", 403);
+  const shared = await reviewShared(validateSharedRegistrationProof({ businessId, ownerId }));
   if (draft.consentMode === "custom" && (!draft.consentDescription || !draft.consentEvidenceUrl)) {
     throw new ReviewSmsError("review_sms_setup_invalid", 400);
   }
@@ -237,7 +248,9 @@ export async function saveReviewSmsSetup(
   for (const [key, column] of Object.entries(identityFields)) {
     const value = draft[key as keyof typeof identityFields];
     if (value !== undefined) {
-      if (b.telnyx_brand_id && String(b[column] ?? "") !== value)
+      const locked = Boolean(b.telnyx_brand_id) || Boolean(shared &&
+        (shared.membership.status !== "approved" || !representativeFields.has(column)));
+      if (locked && String(b[column] ?? "") !== value)
         throw new ReviewSmsError("review_sms_existing_brand_identity_locked");
       patch[column] = value;
     }
@@ -345,6 +358,11 @@ async function assertClaim(a: ReviewSmsAccount, claim: string) {
   if (error || data !== true)
     throw new ReviewSmsError("review_sms_provisioning_stopped");
   await assertNoCarrierRejectionForBusiness(a.business_id);
+  if (await reviewShared(readSharedRegistrationContext(a.business_id))) {
+    const proof = await readPaidReviewSmsSharedRegistrationProof(a);
+    if (!proof) throw new ReviewSmsError("review_sms_shared_registration_required");
+    await reviewShared(validateSharedRegistrationProof({ businessId: a.business_id, ownerId: a.owner_id, proof }));
+  }
 }
 async function beginPaidStep(
   a: ReviewSmsAccount,
@@ -456,6 +474,13 @@ export async function continueReviewSmsProvisioning(businessId: string) {
   if (typeof claim !== "string") return;
   try {
     await assertClaim(a, claim);
+    if (await reviewShared(readSharedRegistrationContext(businessId))) {
+      const proof = await readPaidReviewSmsSharedRegistrationProof(a);
+      if (!proof) throw new ReviewSmsError("review_sms_shared_registration_required");
+      // Binding an approved existing brand is not a paid provider step. The
+      // locked consume checks the paid receipt and refund/cancellation fences.
+      await reviewShared(consumeSharedReviewRegistration({ businessId, ownerId: a.owner_id, reviewAccountId: a.id, claimToken: claim, proof }));
+    }
     await registerBrand(businessId, {
       beforePaidSubmit: () => beginPaidStep(a, claim, "brand"),
     });
@@ -577,6 +602,12 @@ export async function continueReviewSmsProvisioning(businessId: string) {
       throw new ReviewSmsError("review_sms_state_unavailable", 503);
   }
 }
+/** Telnyx's campaign retrieve omits callback URLs; all customer-visible filing
+ * fields must still match before adopting an ambiguous shared-brand outcome. */
+export function reviewSmsCampaignMatches(candidate: Record<string, unknown>, filing: Record<string, unknown>) {
+  return Object.entries(filing).filter(([key]) => !["webhookURL", "webhookFailoverURL"].includes(key))
+    .every(([key, value]) => candidate[key] === value);
+}
 async function submitReviewSmsCampaign(a: ReviewSmsAccount, claim: string) {
   const b = await business(a.business_id);
   if (b.telnyx_campaign_id) {
@@ -584,70 +615,90 @@ async function submitReviewSmsCampaign(a: ReviewSmsAccount, claim: string) {
       throw new ReviewSmsError("review_sms_existing_campaign_needs_approval");
     return;
   }
-  // Recover an exact prior reference before authorizing a charged submission.
+  const shared = await reviewShared(readSharedRegistrationContext(a.business_id));
+  const links = resolveLegalUrls(b);
+  const phone = String(a.draft.phoneNumber);
+  const label = String(b.name).slice(0, 70);
+  const keywords = reviewSmsKeywordProgram(label, b.authorized_rep_email);
+  const payload = {
+    brandId: b.telnyx_brand_id,
+    usecase: "MARKETING",
+    description: shared
+      ? `${label} is operated by ${shared.registration.legal_business_name}. The registered SimplAssist brand belongs to the same legal entity. ${label} sends marketing review requests to its own customers after completed services, with their permission. One invitation and at most one reminder; human staff handle replies.`
+      : `${label} requests honest Google reviews after completed services. One invitation and at most one reminder are sent only with the customer's permission. Human staff handle replies.`,
+    sample1: `${label}: Thank you for choosing us. Please share an honest review: ${reviewOrigin()}/r/example Reply STOP to opt out.`,
+    sample2: `${label}: A quick reminder: you can share your experience at ${reviewOrigin()}/r/example Reply STOP to opt out.`,
+    sample3: `${label}: Thank you for your feedback. Our team will help with your question. Reply STOP to opt out.`,
+    messageFlow: `${a.draft.consentDescription} Evidence: ${a.draft.consentEvidenceUrl}. Customers consent to review requests from ${label} using ${phone}. Up to 2 messages per completed service; message and data rates may apply. Consent is not required to purchase. Reply STOP to opt out or HELP for help. Privacy: ${links.privacyUrl}. Terms: ${links.termsUrl}.`,
+    subscriberOptin: true,
+    optinKeywords: a.draft.consentMode === "hosted_keyword" ? "REVIEWS" : keywords.start.keywords.join(","),
+    optinMessage: a.draft.consentMode === "hosted_keyword" ? reviewConsentConfirmation(label) : keywords.start.resp_text,
+    subscriberOptout: true,
+    optoutKeywords: keywords.stop.keywords.join(","),
+    optoutMessage: keywords.stop.resp_text,
+    subscriberHelp: true,
+    helpKeywords: keywords.info.keywords.join(","),
+    helpMessage: keywords.info.resp_text,
+    termsAndConditions: true,
+    privacyPolicyLink: links.privacyUrl,
+    termsAndConditionsLink: links.termsUrl,
+    autoRenewal: true,
+    embeddedLink: true,
+    embeddedPhone: false,
+    numberPool: false,
+    directLending: false,
+    ageGated: false,
+    referenceId: `reviews:${a.id}`,
+    webhookURL: `${reviewOrigin()}/api/messaging/registration/status`,
+    webhookFailoverURL: `${reviewOrigin()}/api/messaging/registration/status`,
+  };
+  const payloadHash = createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+  let reservation = shared ? await reviewShared(readSharedCampaignReservation(a.business_id, a.id)) : null;
+  if (reservation && (reservation.payloadHash !== payloadHash || reservation.referenceId !== payload.referenceId))
+    throw new ReviewSmsError("review_sms_campaign_recovery_required");
+  // Exact-reference recovery happens before the one-time paid-submit fences.
   const matches = [];
   for await (const c of telnyx.messaging10dlc.campaign.list(
-    { brandId: b.telnyx_brand_id },
-    { maxRetries: 0, timeout: 10000 },
+    { brandId: b.telnyx_brand_id }, { maxRetries: 0, timeout: 10000 },
   )) {
-    if (c.referenceId === `reviews:${a.id}`) matches.push(c);
+    if (c.referenceId === payload.referenceId) matches.push(c);
   }
-  if (matches.length > 1)
-    throw new ReviewSmsError("review_sms_campaign_recovery_required");
+  if (matches.length > 1) throw new ReviewSmsError("review_sms_campaign_recovery_required");
   let campaignId = matches[0]?.campaignId;
   if (!campaignId) {
     await assertClaim(a, claim);
-    await assertTenantResourceScope(
-      a.business_id,
-      b.telnyx_messaging_profile_id,
-      String(a.draft.phoneNumber),
-      null,
-    );
-    const links = resolveLegalUrls(b);
-    const phone = String(a.draft.phoneNumber);
-    const label = String(b.name).slice(0, 70);
-    const keywords = reviewSmsKeywordProgram(label, b.authorized_rep_email);
-    const payload = {
-      brandId: b.telnyx_brand_id,
-      usecase: "MARKETING",
-      description: `${label} requests honest Google reviews after completed services. One invitation and at most one reminder are sent only with the customer's permission. Human staff handle replies.`,
-      sample1: `${label}: Thank you for choosing us. Please share an honest review: ${reviewOrigin()}/r/example Reply STOP to opt out.`,
-      sample2: `${label}: A quick reminder: you can share your experience at ${reviewOrigin()}/r/example Reply STOP to opt out.`,
-      sample3: `${label}: Thank you for your feedback. Our team will help with your question. Reply STOP to opt out.`,
-      messageFlow: `${a.draft.consentDescription} Evidence: ${a.draft.consentEvidenceUrl}. Customers consent to review requests from ${label} using ${phone}. Up to 2 messages per completed service; message and data rates may apply. Consent is not required to purchase. Reply STOP to opt out or HELP for help. Privacy: ${links.privacyUrl}. Terms: ${links.termsUrl}.`,
-      subscriberOptin: true,
-      optinKeywords: a.draft.consentMode === "hosted_keyword" ? "REVIEWS" : keywords.start.keywords.join(","),
-      optinMessage: a.draft.consentMode === "hosted_keyword" ? reviewConsentConfirmation(label) : keywords.start.resp_text,
-      subscriberOptout: true,
-      optoutKeywords: keywords.stop.keywords.join(","),
-      optoutMessage: keywords.stop.resp_text,
-      subscriberHelp: true,
-      helpKeywords: keywords.info.keywords.join(","),
-      helpMessage: keywords.info.resp_text,
-      termsAndConditions: true,
-      privacyPolicyLink: links.privacyUrl,
-      termsAndConditionsLink: links.termsUrl,
-      autoRenewal: true,
-      embeddedLink: true,
-      embeddedPhone: false,
-      numberPool: false,
-      directLending: false,
-      ageGated: false,
-      referenceId: `reviews:${a.id}`,
-      webhookURL: `${reviewOrigin()}/api/messaging/registration/status`,
-      webhookFailoverURL: `${reviewOrigin()}/api/messaging/registration/status`,
-    };
-    const { data: reserved, error } = await supabaseAdmin.rpc(
-      "review_sms_reserve_campaign_submission",
-      { p_business: a.business_id, p_claim: claim },
-    );
-    if (error || reserved !== true)
-      throw new ReviewSmsError("review_sms_submission_requires_support");
-    const response = await telnyx.messaging10dlc.campaignBuilder.submit(
-      payload,
-      { maxRetries: 0, timeout: 10000 },
-    );
-    campaignId = response.campaignId;
+    await assertTenantResourceScope(a.business_id, b.telnyx_messaging_profile_id, String(a.draft.phoneNumber), null);
+    const reservedShared = await reviewShared(reserveSharedCampaignSubmission({
+      businessId: a.business_id, operationId: a.id, referenceId: payload.referenceId,
+      purpose: "review_initial", payloadHash, claimToken: claim,
+    }));
+    if (reservedShared) {
+      reservation = { ...reservedShared, payloadHash, referenceId: payload.referenceId };
+      if (!reservedShared.submit) {
+        if (!reservedShared.providerCampaignId) throw new ReviewSmsError("review_sms_campaign_recovery_required");
+        campaignId = reservedShared.providerCampaignId;
+      }
+    }
+    if (!campaignId) {
+      const { data: reserved, error } = await supabaseAdmin.rpc(
+        "review_sms_reserve_campaign_submission", { p_business: a.business_id, p_claim: claim },
+      );
+      if (error || reserved !== true) throw new ReviewSmsError("review_sms_submission_requires_support");
+      try {
+        const response = await telnyx.messaging10dlc.campaignBuilder.submit(payload, { maxRetries: 0, timeout: 10000 });
+        campaignId = response.campaignId;
+      } catch (error) {
+        if (reservation) await reviewShared(settleSharedCampaignSubmission({ businessId: a.business_id, reservationId: reservation.id, payloadHash, outcome: "uncertain" })).catch(() => {});
+        throw error;
+      }
+    }
+  }
+  if (shared) {
+    if (!reservation || !campaignId) throw new ReviewSmsError("review_sms_campaign_recovery_required");
+    const candidate = await telnyx.messaging10dlc.campaign.retrieve(campaignId, { maxRetries: 0, timeout: 10000 });
+    if (!reviewSmsCampaignMatches(candidate as unknown as Record<string, unknown>, payload))
+      throw new ReviewSmsError("review_sms_campaign_mismatch");
+    await reviewShared(settleSharedCampaignSubmission({ businessId: a.business_id, reservationId: reservation.id, payloadHash, outcome: "accepted", providerCampaignId: campaignId }));
   }
   if (typeof campaignId !== "string" || !campaignId)
     throw new ReviewSmsError("review_sms_campaign_recovery_required");

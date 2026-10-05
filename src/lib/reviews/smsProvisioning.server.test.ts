@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
+  sharedContext: vi.fn(), sharedNewStart: vi.fn(), sharedValidate: vi.fn(), sharedConsume: vi.fn(), sharedReserve: vi.fn(), sharedSettle: vi.fn(), sharedReservation: vi.fn(), sharedPaidProof: vi.fn(),
   rpc: vi.fn(),
   account: vi.fn(),
-  campaign: vi.fn(),
+  campaign: vi.fn(), campaignList: vi.fn(), campaignSubmit: vi.fn(),
   brand: vi.fn(),
   register: vi.fn(),
   profile: vi.fn(),
@@ -16,6 +17,16 @@ const mocks = vi.hoisted(() => ({
   business: {} as Record<string, unknown>,
 }));
 vi.mock("server-only", () => ({}));
+vi.mock("@/lib/messaging/sharedBusinessRegistrations.server", async importOriginal => ({
+  ...await importOriginal<object>(),
+  readSharedRegistrationContext: mocks.sharedContext,
+  assertSharedRegistrationForNewStart: mocks.sharedNewStart,
+  validateSharedRegistrationProof: mocks.sharedValidate,
+  consumeSharedReviewRegistration: mocks.sharedConsume,
+  reserveSharedCampaignSubmission: mocks.sharedReserve,
+  settleSharedCampaignSubmission: mocks.sharedSettle,
+  readSharedCampaignReservation: mocks.sharedReservation,
+}));
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: {
     rpc: mocks.rpc,
@@ -40,6 +51,7 @@ vi.mock("@/lib/supabase/admin", () => ({
 }));
 vi.mock("@/lib/stripe/reviewSms.server", () => ({
   readReviewSmsAccount: mocks.account,
+  readPaidReviewSmsSharedRegistrationProof: mocks.sharedPaidProof,
 }));
 vi.mock("./smsKeywords.server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./smsKeywords.server")>()),
@@ -52,7 +64,8 @@ vi.mock("@/lib/messaging/client", () => ({
     messagingProfiles: { retrieve: mocks.providerProfile },
     messaging10dlc: {
       brand: { retrieve: mocks.brand },
-      campaign: { retrieve: mocks.campaign },
+      campaign: { retrieve: mocks.campaign, list: mocks.campaignList },
+      campaignBuilder: { submit: mocks.campaignSubmit },
     },
   },
 }));
@@ -94,18 +107,29 @@ import {
   continueReviewSmsProvisioning,
   refreshReviewSmsProviderReadiness,
   initializeIncludedReviewSmsSignup,
-  saveReviewSmsSetup,
+  saveReviewSmsSetup, reviewSmsSetupOverview, reviewSmsCampaignMatches,
 } from "./smsProvisioning.server";
 const businessId = "10000000-0000-4000-a100-000000000001",
   adminId = "00000000-0000-4000-a100-000000000002";
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.sharedContext.mockResolvedValue(null);
+  mocks.sharedNewStart.mockResolvedValue(null);
+  mocks.sharedValidate.mockResolvedValue(null);
+  mocks.sharedConsume.mockResolvedValue(undefined);
+  mocks.sharedReserve.mockResolvedValue(null);
+  mocks.sharedSettle.mockResolvedValue(undefined);
+  mocks.sharedReservation.mockResolvedValue(null);
+  mocks.sharedPaidProof.mockResolvedValue(null);
+
   vi.stubEnv("SIMPLASSIST_ADMIN_USER_IDS", adminId);
   vi.stubEnv("REVIEWS_SMS_ENABLED", "1");
   vi.stubEnv("REVIEWS_SMS_PILOT_BUSINESS_IDS", businessId);
   vi.stubEnv("REVIEWS_SMS_PROVISIONING_ENABLED", "1");
   vi.stubEnv("TELNYX_PROTECTED_MESSAGING_PROFILE_ID", "protected-profile");
   mocks.profileOwnership = true;
+  mocks.campaignList.mockImplementation(async function* () {});
+  mocks.campaignSubmit.mockResolvedValue({ campaignId: "created-campaign" });
   mocks.inspectKeywords.mockResolvedValue({ ready: true, issues: [] });
   mocks.ensureKeywords.mockResolvedValue(undefined);
   mocks.providerProfile.mockResolvedValue({
@@ -466,5 +490,98 @@ describe("review SMS provider authority", () => {
     expect(mocks.register).toHaveBeenCalledOnce();
     expect(mocks.profile).not.toHaveBeenCalled();
     expect(mocks.phone).not.toHaveBeenCalled();
+  });
+});
+
+const sharedProof = { registrationId: "50000000-0000-4000-a100-000000000001", identityVersion: 1, membershipRevision: 2, brandId: "brand" };
+const sharedContext = { registration: { id: sharedProof.registrationId, brand_id: "brand", identity_version: 1, legal_business_name: "Example LLC" }, membership: { status: "approved", revision: 2, owner_id: "owner" } };
+async function sharedProvisioningFixture() {
+  const a = { ...(await mocks.account()), id: "account", business_id: businessId, owner_id: "owner", state: "carrier_pending", billing_source: "direct", exclusive_resources: true,
+    campaign_id: null, created_at: "2026-01-01T00:00:00Z", activation_paid_at: "2026-01-01T00:00:00Z", activation_refunded_at: null, provider_started_at: null };
+  mocks.account.mockResolvedValue(a); mocks.business.telnyx_campaign_id = null;
+  mocks.sharedContext.mockResolvedValue(sharedContext); mocks.sharedValidate.mockResolvedValue(sharedContext);
+  mocks.sharedPaidProof.mockResolvedValue(sharedProof);
+  mocks.brand.mockResolvedValue({ identityStatus: "VERIFIED" });
+  mocks.rpc.mockImplementation(async (name: string) => ({ data: name === "review_sms_claim_provisioning" ? "claim" : true, error: null }));
+  mocks.campaign.mockImplementation(async () => ({ ...mocks.campaignSubmit.mock.calls[0]?.[0], campaignId: "created-campaign" }));
+  return a;
+}
+describe("approved shared-brand provisioning", () => {
+  it("lets an approved unbound account supply its own representative without changing legal identity", async () => {
+    mocks.business.telnyx_brand_id = null;
+    mocks.sharedContext.mockResolvedValue(sharedContext); mocks.sharedValidate.mockResolvedValue(sharedContext);
+    await saveReviewSmsSetup(businessId, "owner", { phoneNumber: "+15745550111", consentMode: "custom",
+      consentDescription: "Customers give optional permission for marketing review texts.", consentEvidenceUrl: "https://example.test/consent",
+      authorizedRepName: "Account Representative", authorizedRepEmail: "representative@example.test", authorizedRepPhone: "+13175550123" });
+    expect(mocks.rpc).toHaveBeenCalledWith("review_sms_save_setup", expect.objectContaining({ p_patch: expect.objectContaining({ authorized_rep_name: "Account Representative", authorized_rep_email: "representative@example.test", authorized_rep_phone: "+13175550123" }) }));
+  });
+  it("keeps representative changes locked after shared membership is active", async () => {
+    mocks.sharedValidate.mockResolvedValue({ ...sharedContext, membership: { ...sharedContext.membership, status: "active" } });
+    await expect(saveReviewSmsSetup(businessId, "owner", { phoneNumber: "+15745550111", consentMode: "custom", consentDescription: "Customers provide review permission", consentEvidenceUrl: "https://example.test/consent", authorizedRepEmail: "changed@example.test" }))
+      .rejects.toMatchObject({ code: "review_sms_existing_brand_identity_locked" });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+  it("locks staged canonical fields before a provider brand is bound and keeps private-address visibility explicit", async () => {
+    mocks.business.telnyx_brand_id = null; mocks.business.public_address_visibility = "city_state";
+    mocks.sharedContext.mockResolvedValue(sharedContext); mocks.sharedValidate.mockResolvedValue(sharedContext);
+    expect((await reviewSmsSetupOverview(businessId)).fields).toMatchObject({ identityLocked: true, representativeEditable: true, publicAddressVisibility: "city_state", hasEin: true });
+    expect((await reviewSmsSetupOverview(businessId)).fields).not.toHaveProperty("ein");
+    await expect(saveReviewSmsSetup(businessId, "owner", { phoneNumber: "+15745550111", consentMode: "hosted_keyword", legalBusinessName: "Changed LLC" }))
+      .rejects.toMatchObject({ code: "review_sms_existing_brand_identity_locked" });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+  it("binds paid approval before brand reuse without inventing a paid brand create", async () => {
+    await sharedProvisioningFixture(); mocks.brand.mockResolvedValue({ identityStatus: "UNVERIFIED" });
+    await continueReviewSmsProvisioning(businessId);
+    expect(mocks.sharedConsume).toHaveBeenCalledWith({ businessId, ownerId: "owner", reviewAccountId: "account", claimToken: "claim", proof: sharedProof });
+    expect(mocks.sharedConsume.mock.invocationCallOrder[0]).toBeLessThan(mocks.register.mock.invocationCallOrder[0]);
+    expect(mocks.rpc).not.toHaveBeenCalledWith("review_sms_begin_paid_provider_step", expect.anything());
+    expect(mocks.campaignSubmit).not.toHaveBeenCalled(); expect(mocks.phone).not.toHaveBeenCalled();
+  });
+  it("never reaches brand registration after a concurrent refund wins consume", async () => {
+    await sharedProvisioningFixture(); mocks.sharedConsume.mockRejectedValue(new Error("refund won"));
+    await expect(continueReviewSmsProvisioning(businessId)).rejects.toThrow("refund won");
+    expect(mocks.register).not.toHaveBeenCalled(); expect(mocks.campaignSubmit).not.toHaveBeenCalled();
+  });
+  it("will not provision a shared member using an unrelated historical standalone receipt", async () => {
+    await sharedProvisioningFixture(); mocks.sharedPaidProof.mockResolvedValue(null);
+    await expect(continueReviewSmsProvisioning(businessId)).rejects.toMatchObject({ code: "review_sms_shared_registration_required" });
+    expect(mocks.sharedConsume).not.toHaveBeenCalled(); expect(mocks.register).not.toHaveBeenCalled();
+  });
+  it("reserves shared-brand capacity before the one charged campaign submission", async () => {
+    await sharedProvisioningFixture(); mocks.sharedReserve.mockResolvedValue({ id: "reservation", submit: true, providerCampaignId: null });
+    await continueReviewSmsProvisioning(businessId);
+    expect(mocks.sharedReserve).toHaveBeenCalledWith(expect.objectContaining({ businessId, operationId: "account", purpose: "review_initial", claimToken: "claim", referenceId: "reviews:account" }));
+    expect(mocks.sharedReserve.mock.invocationCallOrder[0]).toBeLessThan(mocks.campaignSubmit.mock.invocationCallOrder[0]);
+    expect(mocks.campaignSubmit.mock.calls[0][0].description).toContain("is operated by Example LLC");
+    expect(mocks.campaignSubmit.mock.calls[0][0].description).toContain("marketing review requests");
+    expect(mocks.sharedSettle).toHaveBeenCalledWith(expect.objectContaining({ businessId, reservationId: "reservation", outcome: "accepted", providerCampaignId: "created-campaign" }));
+  });
+  it("holds an uncertain shared submission and never sends a second paid request", async () => {
+    await sharedProvisioningFixture(); mocks.sharedReserve.mockResolvedValue({ id: "reservation", submit: true, providerCampaignId: null });
+    mocks.campaignSubmit.mockRejectedValueOnce(new Error("provider timeout"));
+    await expect(continueReviewSmsProvisioning(businessId)).rejects.toThrow("provider timeout");
+    expect(mocks.sharedSettle).toHaveBeenCalledWith(expect.objectContaining({ outcome: "uncertain" }));
+    mocks.sharedReserve.mockResolvedValue({ id: "reservation", submit: false, providerCampaignId: null });
+    await expect(continueReviewSmsProvisioning(businessId)).rejects.toMatchObject({ code: "review_sms_campaign_recovery_required" });
+    expect(mocks.campaignSubmit).toHaveBeenCalledTimes(1);
+  });
+  it("recovers an exact previous provider filing without resubmitting", async () => {
+    await sharedProvisioningFixture(); mocks.sharedReserve.mockResolvedValue({ id: "reservation", submit: true, providerCampaignId: null });
+    mocks.campaignSubmit.mockRejectedValueOnce(new Error("response lost"));
+    await expect(continueReviewSmsProvisioning(businessId)).rejects.toThrow("response lost");
+    const filing = mocks.campaignSubmit.mock.calls[0][0], payloadHash = mocks.sharedReserve.mock.calls[0][0].payloadHash;
+    mocks.sharedReservation.mockResolvedValue({ id: "reservation", payloadHash, referenceId: "reviews:account", providerCampaignId: null });
+    mocks.campaignList.mockImplementation(async function* () { yield { ...filing, campaignId: "created-campaign" }; });
+    await continueReviewSmsProvisioning(businessId);
+    expect(mocks.campaignSubmit).toHaveBeenCalledTimes(1);
+    expect(mocks.sharedSettle).toHaveBeenLastCalledWith(expect.objectContaining({ outcome: "accepted", providerCampaignId: "created-campaign" }));
+  });
+  it.each(["brandId", "referenceId", "description", "messageFlow", "optinKeywords", "privacyPolicyLink"])("does not accept altered %s in recovery proof", key => {
+    const filing = { brandId: "shared-brand", referenceId: "reviews:account", description: "DBA relationship", messageFlow: "Optional marketing consent", optinKeywords: "REVIEWS", privacyPolicyLink: "https://example.test/privacy", webhookURL: "https://example.test/callback" };
+    expect(reviewSmsCampaignMatches({ ...filing, [key]: "wrong" }, filing)).toBe(false);
+    const { webhookURL: _ignored, ...provider } = filing;
+    expect(_ignored).toBe("https://example.test/callback");
+    expect(reviewSmsCampaignMatches(provider, filing)).toBe(true);
   });
 });

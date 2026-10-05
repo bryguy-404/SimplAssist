@@ -1,4 +1,5 @@
 import "server-only";
+import { reviewShared } from "@/lib/billing/sharedRegistrationErrors.server";
 import { createHash } from "node:crypto";
 import type Stripe from "stripe";
 import { z } from "zod";
@@ -11,6 +12,13 @@ import {
 } from "@/lib/billing/reviewSms";
 import { isReviewSmsEnabled } from "@/lib/billing/reviewSmsRollout.server";
 import { resolveBusinessEntitlements } from "@/lib/billing/entitlements";
+import {
+  assertSharedRegistrationForNewStart,
+  readSharedRegistrationContext,
+  validateSharedRegistrationProof,
+  sharedRegistrationPilotEnabled,
+  type SharedRegistrationProof,
+} from "@/lib/messaging/sharedBusinessRegistrations.server";
 import { stripe } from "./client";
 import {
   REVIEW_SMS_ACTIVATION_CENTS,
@@ -50,18 +58,44 @@ const opSchema = z.object({
 type Operation = z.infer<typeof opSchema>;
 // Stripe prices are immutable. Recovery is bound to the original operation,
 // never to the price configured for a new purchase today.
+const sharedRegistrationProofSchema = z.object({
+  registrationId: z.string().uuid(),
+  identityVersion: z.number().int().positive(),
+  membershipRevision: z.number().int().positive(),
+  brandId: z.string().min(1),
+}).strict();
 const activationPayloadSchema = z.object({
   feeId: z.string().startsWith("price_"),
   amountCents: z.union([z.literal(2500), z.literal(4900)]),
   customerId: z.string().startsWith("cus_"),
   subscriptionId: z.string().startsWith("sub_"),
   origin: z.string().url(),
+  sharedRegistration: sharedRegistrationProofSchema.optional(),
 });
 function activationPayload(op: Operation) {
   const parsed = activationPayloadSchema.safeParse(op.payload);
   if (op.kind !== "activation" || !parsed.success)
     throw new ReviewSmsError("review_sms_activation_receipt_unverified", 503);
   return parsed.data;
+}
+/** Immutable paid receipt authority, not mutable setup fields. Old standalone
+ * activations intentionally have no shared-registration proof. */
+export async function readPaidReviewSmsSharedRegistrationProof(
+  a: ReviewSmsAccount,
+): Promise<SharedRegistrationProof | null> {
+  const { data, error } = await supabaseAdmin.from("review_sms_billing_operations")
+    .select("*").eq("account_id", a.id).eq("business_id", a.business_id)
+    .eq("owner_id", a.owner_id).eq("kind", "activation").eq("state", "completed")
+    .order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (error || !data || !a.activation_paid_at || a.activation_refunded_at)
+    throw new ReviewSmsError("review_sms_activation_receipt_unverified", 503);
+  return activationPayload(opSchema.parse(data)).sharedRegistration ?? null;
+}
+async function assertPaidSharedRegistration(a: ReviewSmsAccount) {
+  if (!(await reviewShared(readSharedRegistrationContext(a.business_id)))) return;
+  const proof = await readPaidReviewSmsSharedRegistrationProof(a);
+  if (!proof) throw new ReviewSmsError("review_sms_shared_registration_required");
+  await reviewShared(validateSharedRegistrationProof({ businessId: a.business_id, ownerId: a.owner_id, proof, requireActive: true }));
 }
 async function rpc<T>(name: string, args: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabaseAdmin.rpc(name, args);
@@ -264,11 +298,32 @@ export async function reviewSmsOverview(
       : entitlements.source === "subscription"
         ? "direct"
         : "grant");
+  const shared = await reviewShared(readSharedRegistrationContext(businessId));
+  if (shared && shared.membership.owner_id !== ownerId)
+    throw new ReviewSmsError("review_sms_forbidden", 403);
+  let activationRecoveryAvailable = false;
+  if (shared && a && !a.activation_paid_at) {
+    // Presentation only: never expire or confirm an operation during a read.
+    const pending = await supabaseAdmin.from("review_sms_billing_operations")
+      .select("state").eq("account_id", a.id).eq("business_id", businessId).eq("owner_id", ownerId)
+      .eq("kind", "activation").in("state", ["confirmed", "unknown"]).limit(1).maybeSingle();
+    if (pending.error) throw new ReviewSmsError("review_sms_state_unavailable", 503);
+    activationRecoveryAvailable = ["confirmed", "unknown"].includes(pending.data?.state ?? "");
+  }
   return {
     enabled: isReviewSmsEnabled(businessId),
     account: a,
     canSend,
     eligibleSource,
+    sharedRegistration: shared ? {
+      status: shared.membership.status,
+      legalBusinessName: shared.registration.legal_business_name,
+      identityVersion: shared.registration.identity_version,
+      newPaidStartsAllowed: shared.membership.status !== "revoked" &&
+        shared.registration.status === "active" && shared.registration.brand_status === "approved" &&
+        sharedRegistrationPilotEnabled(businessId, "paid_start"),
+      activationRecoveryAvailable,
+    } : null,
     price: {
       monthlyCents: eligibleSource === "direct" ? REVIEW_SMS_ADDON_CENTS : 0,
       activationCents:
@@ -306,10 +361,29 @@ export async function createReviewSmsActivationCheckout(
     business.partner_id
   )
     throw new ReviewSmsError("review_sms_partner_grant_required");
+  if (a.activation_paid_at) return { paid: true };
+  let op = await pendingOperation(a, "activation");
+  // Once Checkout was authorized, recover its frozen receipt even when new
+  // shared-brand admissions are disabled. Never reopen a revoked unpaid link.
+  if (op && op.state !== "prepared" && op.payload.sharedRegistration) {
+    const session = await activationSession(op);
+    assertActivationSession(session, op, a);
+    if (session.status === "complete") {
+      await synchronizeReviewSmsCheckout(session);
+      return { paid: session.payment_status === "paid" };
+    }
+    if (session.status === "expired") {
+      await synchronizeReviewSmsCheckout(session);
+      op = null;
+    } else {
+      await reviewShared(validateSharedRegistrationProof({ businessId, ownerId, proof: activationPayload(op).sharedRegistration! }));
+      return { url: checkedCheckoutUrl(session, op) };
+    }
+  }
   const { validateReviewSmsSetup } =
     await import("@/lib/reviews/smsProvisioning.server");
   await validateReviewSmsSetup(businessId);
-  if (a.activation_paid_at) return { paid: true };
+  const sharedRegistration = await reviewShared(assertSharedRegistrationForNewStart({ businessId, ownerId }));
   const feeId = process.env.STRIPE_PRICE_REVIEW_SMS_ACTIVATION;
   if (!feeId?.startsWith("price_"))
     throw new ReviewSmsError("review_sms_activation_price_unavailable", 503);
@@ -329,8 +403,8 @@ export async function createReviewSmsActivationCheckout(
     feeId, amountCents: REVIEW_SMS_ACTIVATION_CENTS,
     customerId: a.source_customer_id, subscriptionId: a.source_subscription_id,
     origin, draftFingerprint: fingerprint(a.draft),
+    ...(sharedRegistration ? { sharedRegistration } : {}),
   };
-  let op = await pendingOperation(a, "activation");
   if (op && op.fingerprint !== fingerprint(payload)) {
     if (op.state === "prepared") {
       // A simultaneous confirmation wins this CAS and must be reconciled.
@@ -381,6 +455,10 @@ async function activationSession(original: Operation) {
   if (original.checkout_session_id)
     return stripe.checkout.sessions.retrieve(original.checkout_session_id);
   assertReplay(original);
+  const originalPayload = activationPayload(original);
+  if (originalPayload.sharedRegistration) {
+    await reviewShared(validateSharedRegistrationProof({ businessId: original.business_id, ownerId: original.owner_id, proof: originalPayload.sharedRegistration }));
+  }
   const op = await confirm(original);
   const payload = activationPayload(op);
   const metadata = {
@@ -528,6 +606,7 @@ export async function quoteReviewSmsRecurring(
     Date.parse(a.ready_expires_at) <= Date.now()
   )
     throw new ReviewSmsError("review_sms_not_ready");
+  await assertPaidSharedRegistration(a);
   const sub = await stripe.subscriptions.retrieve(a.source_subscription_id!);
   const { base, reviewSms } = assertBound(sub, a);
   assertChangeable(sub);
@@ -593,6 +672,7 @@ export async function confirmReviewSmsRecurring(
       Date.parse(a.ready_expires_at) <= Date.now()
     )
       throw new ReviewSmsError("review_sms_not_ready");
+    await assertPaidSharedRegistration(a);
     const sub = await stripe.subscriptions.retrieve(a.source_subscription_id!);
     assertBound(sub, a);
     assertChangeable(sub);

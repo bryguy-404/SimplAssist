@@ -103,7 +103,7 @@ describe("archiveAndClearRejectedBrand linked-brand protection", () => {
     expect(mocks.from).toHaveBeenCalledTimes(1);
     expect(mocks.from).toHaveBeenCalledWith("businesses");
     expect(mocks.select).toHaveBeenCalledWith(
-      "id, telnyx_brand_id, telnyx_brand_source, brand_status, brand_rejection_reason"
+      "id, telnyx_brand_id, telnyx_brand_source, shared_registration_id, brand_status, brand_rejection_reason"
     );
     expect(mocks.eq).toHaveBeenCalledWith("id", BUSINESS_ID);
     expect(mocks.single).toHaveBeenCalledTimes(1);
@@ -114,5 +114,14 @@ describe("archiveAndClearRejectedBrand linked-brand protection", () => {
     expect(mocks.archiveCampaign).not.toHaveBeenCalled();
     expect(mocks.deleteBrand).not.toHaveBeenCalled();
     expect(mocks.appendRegistrationEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe("shared brand rejected recovery", () => {
+  it("never archives, clears or deletes a canonical shared brand even when its original source was created here", async () => {
+    mocks.single.mockResolvedValue({ data: { id: BUSINESS_ID, telnyx_brand_id: BRAND_ID, telnyx_brand_source: "created_by_simplassist", shared_registration_id: "shared-registration", brand_status: "rejected" }, error: null });
+    await expect(archiveAndClearRejectedBrand(BUSINESS_ID)).rejects.toBeInstanceOf(LinkedExistingBrandSupportRequiredError);
+    expect(mocks.from).toHaveBeenCalledTimes(1); expect(mocks.insert).not.toHaveBeenCalled(); expect(mocks.update).not.toHaveBeenCalled();
+    expect(mocks.archiveCampaign).not.toHaveBeenCalled(); expect(mocks.deleteBrand).not.toHaveBeenCalled();
   });
 });

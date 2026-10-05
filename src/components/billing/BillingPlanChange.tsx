@@ -28,7 +28,7 @@ export async function requestBillingChange(method: "POST" | "PATCH" | "DELETE", 
   return result.change ?? null;
 }
 
-export default function BillingPlanChange({ currentPlan, active }: { currentPlan?: string; active: boolean }) {
+export default function BillingPlanChange({ currentPlan, active, initialTargetPlan }: { currentPlan?: string; active: boolean; initialTargetPlan?: SmsPlan }) {
   const router = useRouter();
   const [change, setChange] = useState<BillingChangeView | null>(null);
   const [busy, setBusy] = useState(false);
@@ -63,7 +63,8 @@ export default function BillingPlanChange({ currentPlan, active }: { currentPlan
   }
   const money = (cents: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: change?.currency ?? "usd" }).format(cents / 100);
   const date = (value: string) => new Date(value).toLocaleDateString();
-  return <section className={`mt-6 p-6 ${card}`} aria-labelledby="billing-plan-change-heading">
+  const suggestedPlan = initialTargetPlan && options.includes(initialTargetPlan) ? initialTargetPlan : null;
+  return <section id="plan-change" className={`mt-6 p-6 ${card}`} aria-labelledby="billing-plan-change-heading">
     <h2 id="billing-plan-change-heading" className="font-semibold">Change your plan</h2>
     {error && <p role="alert" className={`mt-3 rounded-xl p-3 ${statusWarning}`}>{error}</p>}
     {pending && change ? <div className="mt-4 space-y-3" aria-live="polite">
@@ -92,7 +93,9 @@ export default function BillingPlanChange({ currentPlan, active }: { currentPlan
     </div> : <>
       {change?.state === "applied" && <p role="status" className="mt-3">Your plan change is confirmed.</p>}
       <p className="mt-2 text-sm text-stone-500 dark:text-[#bdbdbf]">Review the price before confirming. Upgrades begin after payment; lower-priced plans begin at renewal.</p>
-      <div className="mt-4 flex flex-wrap gap-3">{options.map((plan) => <button key={plan} className={secondaryCtaClass} disabled={busy || !loaded}
+      {suggestedPlan ? <p className="mt-3 text-sm">{SUBSCRIPTION_PLANS[suggestedPlan].name} is ${SUBSCRIPTION_PLANS[suggestedPlan].price}/month. {suggestedPlan === "full" ? "Includes AI voice answering and 100 voice minutes per full billing month. " : ""}Review the exact amount due before confirming.</p> : null}
+      {suggestedPlan === "full" ? <p className="mt-2 text-sm">Includes {SUBSCRIPTION_PLANS.full.includedSmsParts.toLocaleString("en-US")} shared SMS parts per full billing month. No additional activation fee or new texting registration is required for your approved number. Payment starts the upgrade; voice setup and call forwarding must be completed before it can answer calls.</p> : null}
+      <div className="mt-4 flex flex-wrap gap-3">{options.map((plan) => <button key={plan} className={plan === suggestedPlan ? primaryCtaInlineClass : secondaryCtaClass} disabled={busy || !loaded}
         onClick={() => perform(() => requestBillingChange("POST", { plan }))}>Review {SUBSCRIPTION_PLANS[plan].name}</button>)}</div>
     </>}
   </section>;

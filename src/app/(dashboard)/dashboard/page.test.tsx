@@ -4,6 +4,7 @@ import type { PrimaryGoal } from "@/types/database";
 
 const mocks = vi.hoisted(() => ({
   redirect: vi.fn(),
+  getDashboardUpgradePrompt: vi.fn(async () => null),
   requireWorkspacePageAccess: vi.fn(async () => undefined),
   getDashboardBusinessContext: vi.fn(),
   getDashboardPageEntitlements: vi.fn(),
@@ -24,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   from: vi.fn(),
 }));
 
+vi.mock("@/lib/dashboard/upgradePrompt.server", () => ({ getDashboardUpgradePrompt: mocks.getDashboardUpgradePrompt }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
   requireWorkspacePageAccess: mocks.requireWorkspacePageAccess,

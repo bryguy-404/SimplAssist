@@ -20,6 +20,10 @@ describe("reviews page access", () => {
     expect(mocks.enabled).toHaveBeenCalledWith("business");
     expect(mocks.workspace).toHaveBeenCalledWith(expect.objectContaining({ ownerEmail: "owner@example.com", initialCustomerId: "customer-id", smsEnabled: false }), expect.anything());
   });
+  it("opens the settings tab from a benefit-card link", async () => {
+    renderToStaticMarkup(await ReviewsPage({ searchParams: { tab: "settings" } }));
+    expect(mocks.workspace).toHaveBeenCalledWith(expect.objectContaining({ initialTab: "settings" }), expect.anything());
+  });
   it("applies workspace access before reading business review settings", async () => {
     mocks.access.mockRejectedValue(new Error("workspace denied"));
     await expect(ReviewsPage({})).rejects.toThrow("workspace denied");

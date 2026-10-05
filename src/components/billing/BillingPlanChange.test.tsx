@@ -17,6 +17,14 @@ describe("billing change review", () => {
     expect(html).toContain("Review Pro / Full Suite");
     expect(html).toContain("Review the price before confirming");
   });
+  it("explains the linked Full upgrade without starting a quote or payment", () => {
+    const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
+    const html = renderToStaticMarkup(<BillingPlanChange currentPlan="sms_and_chat" active initialTargetPlan="full" />);
+    expect(html).toContain('id="plan-change"');
+    expect(html).toContain("Includes AI voice answering and 100 voice minutes");
+    expect(html).toContain("Review the exact amount due before confirming.");
+    expect(fetch).not.toHaveBeenCalled();
+  });
   it("does not expose SMS plan switching to Chat Only", () => {
     expect(renderToStaticMarkup(<BillingPlanChange currentPlan="chat_only" active />)).toBe("");
   });

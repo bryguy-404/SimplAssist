@@ -8,7 +8,7 @@ import { isEmailReviewsEnabledForBusiness } from "@/lib/reviews/config";
 export default async function ReviewsPage({
   searchParams,
 }: {
-  searchParams?: { customer?: string | string[] };
+  searchParams?: { customer?: string | string[]; tab?: string | string[] };
 }) {
   await requireWorkspacePageAccess();
   const context = await getDashboardBusinessContext();
@@ -17,6 +17,7 @@ export default async function ReviewsPage({
   if (!isEmailReviewsEnabledForBusiness(context.business.id)) notFound();
   return (
     <ReviewsWorkspace
+      initialTab={searchParams?.tab === "settings" ? "settings" : "requests"}
       smsEnabled={isReviewSmsEnabled(context.business.id)}
       ownerEmail={context.user.email || ""}
       initialCustomerId={

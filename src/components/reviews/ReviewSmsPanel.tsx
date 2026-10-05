@@ -402,6 +402,7 @@ export default function ReviewSmsPanel({
   return (
     <section
       className={`${card} p-5 sm:p-7`}
+      id="review-sms"
       aria-labelledby="review-sms-title"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -461,6 +462,10 @@ export default function ReviewSmsPanel({
               <p className={`font-semibold ${ink}`}>
                 {smsPriceSummary(overview)}
               </p>
+              {direct ? <p className={`mt-2 text-sm ${body}`}>
+                On the current $15 Chat plan, that makes $35/month in total.
+                The monthly add-on begins only after approval and your payment confirmation.
+              </p> : null}
               <p className={`mt-2 text-sm ${body}`}>
                 {overview.price.includedParts} total SMS parts per full billing
                 period. Inbound texts, invitations, replies, and reminders share

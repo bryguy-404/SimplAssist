@@ -51,8 +51,7 @@ type ChatOnlyAIReplyUsage =
     }
   | { status: "unavailable" };
 
-export default async function BillingPage(_props: BillingPageProps) {
-  void _props;
+export default async function BillingPage({ searchParams }: BillingPageProps) {
   await requireWorkspacePageAccess();
   const context = await getDashboardBusinessContext();
   if (context.status === "unauthenticated") redirect("/login");
@@ -270,7 +269,7 @@ export default async function BillingPage(_props: BillingPageProps) {
       )}
 
       <TextingUpgradeEntry currentPlan={activePlan} />
-      {!textingUpgradePending && <BillingPlanChange currentPlan={activePlan} active={Boolean(hasActiveSubscription && subscription.status === "active")} />}
+      {!textingUpgradePending && <BillingPlanChange initialTargetPlan={searchParams?.upgrade === "full" ? "full" : undefined} currentPlan={activePlan} active={Boolean(hasActiveSubscription && subscription.status === "active")} />}
       {voiceSettings?.visible ? <div className="mt-6"><OwnerVoiceSettings initialSettings={voiceSettings} variant="usage" /></div> : null}
 
       {hasActiveSubscription && servicePlan !== "chat_only" && (

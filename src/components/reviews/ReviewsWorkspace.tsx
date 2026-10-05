@@ -27,10 +27,12 @@ export default function ReviewsWorkspace({
   ownerEmail,
   initialCustomerId,
   smsEnabled = false,
+  initialTab = "requests",
 }: {
   ownerEmail: string;
   initialCustomerId?: string;
   smsEnabled?: boolean;
+  initialTab?: "requests" | "settings";
 }) {
   const [smsReady, setSmsReady] = useState(false);
   const onSmsStatusChanged = useCallback(
@@ -39,7 +41,7 @@ export default function ReviewsWorkspace({
   );
   const [overview, setOverview] = useState<ReviewOverview | null>(null);
   const [history, setHistory] = useState<ReviewCampaignList | null>(null);
-  const [tab, setTab] = useState<"requests" | "settings">("requests");
+  const [tab, setTab] = useState<"requests" | "settings">(initialTab);
   const [composing, setComposing] = useState(Boolean(initialCustomerId));
   const [page, setPage] = useState(1);
   const [refresh, setRefresh] = useState(0);

@@ -16,6 +16,12 @@ import { reviewOrigin } from "@/lib/reviews/domain";
 import { processReviewTextConsent } from "@/lib/reviews/consent.server";
 import { retireReviewUpgradeCampaign } from "@/lib/messaging/telnyxDestructive";
 import { isReviewSmsEnabled } from "./reviewSmsRollout.server";
+import { upgradeShared } from "./sharedRegistrationErrors.server";
+import {
+  assertSharedRegistrationForNewStart, readSharedRegistrationContext, validateSharedRegistrationProof,
+  sharedRegistrationPilotEnabled,
+  readSharedCampaignReservation, reserveSharedCampaignSubmission, settleSharedCampaignSubmission,
+} from "@/lib/messaging/sharedBusinessRegistrations.server";
 import type { Business } from "@/types/database";
 import type { CampaignBuilderSubmitParams } from "telnyx/resources/messaging-10dlc/campaign-builder/campaign-builder";
 
@@ -57,7 +63,7 @@ async function readRow(id: string) {
   if (r.error) throw new TextingUpgradeError("review_upgrade_unavailable",503);
   return r.data as ProviderRow | null;
 }
-export function buildReviewUpgradeFiling(b: Business, upgradeId: string, phone: string): CampaignBuilderSubmitParams {
+export function buildReviewUpgradeFiling(b: Business, upgradeId: string, phone: string, sharedLegalBusinessName?: string): CampaignBuilderSubmitParams {
   if (!b.name?.trim() || !b.business_type || !b.slug || b.slug.startsWith("pending-") || b.slug.startsWith("deleted-") || !b.authorized_rep_email?.trim())
     throw new TextingUpgradeError("review_upgrade_business_details_required");
   // The frozen proposal and the hosted pages are rendered by the same program
@@ -70,7 +76,7 @@ export function buildReviewUpgradeFiling(b: Business, upgradeId: string, phone: 
   const keywords = reviewSmsKeywordProgram(label,b.authorized_rep_email ?? "");
   return {
     brandId:b.telnyx_brand_id!,usecase:"MIXED",subUsecases:["CUSTOMER_CARE","MARKETING"],
-    description:reviewSignupDescription(care.useCaseDescription),messageFlow:flow.messageFlow,
+    description:(sharedLegalBusinessName ? `${label} is operated by ${sharedLegalBusinessName}. The registered SimplAssist brand belongs to the same legal entity. ` : "") + reviewSignupDescription(care.useCaseDescription),messageFlow:flow.messageFlow,
     sample1:samples[0],sample2:samples[1],sample3:samples[2],sample4:samples[3],sample5:samples[4],
     subscriberOptin:true,optinKeywords:"REVIEWS",optinMessage:reviewConsentConfirmation(label),
     subscriberOptout:true,optoutKeywords:keywords.stop.keywords.join(","),optoutMessage:keywords.stop.resp_text,
@@ -89,14 +95,16 @@ export function reviewUpgradeCandidateMatches(candidate: Record<string, unknown>
 }
 export async function getReviewTextingProviderState(businessId: string, ownerId: string) {
   const c = await context(businessId,ownerId), p = await readRow(c.upgrade.id);
+  const shared = await upgradeShared(readSharedRegistrationContext(businessId));
   let filing: CampaignBuilderSubmitParams;
-  try {filing=p?.filing ?? buildReviewUpgradeFiling(c.business,c.upgrade.id,c.phone);}
+  try {filing=p?.filing ?? buildReviewUpgradeFiling(c.business,c.upgrade.id,c.phone,shared?.registration.legal_business_name);}
   catch(error) {
     if (!(error instanceof TextingUpgradeError) || error.code!=="review_upgrade_business_details_required") throw error;
     return {stage:"not_started",canPrepare:false,canMove:false,paused:false,error:error.code,
       submissionPreview:{description:"",samples:[],messageFlow:"",privacyUrl:"",termsUrl:""}};
   }
-  const enabled = isReviewTextingUpgradeEnabled(businessId);
+  const enabled = isReviewTextingUpgradeEnabled(businessId) &&
+    (!shared || sharedRegistrationPilotEnabled(businessId, "paid_start"));
   return {stage:p?.stage ?? "not_started",canPrepare:enabled && !p && c.upgrade.state==="draft",
     canMove:p?.stage==="approved" && c.upgrade.state==="draft",
     paused:Boolean(p?.handoff_requested_at && !p.handoff_completed_at && (p.stage==="moving" || p.assignment_attempted_at)),error:p?.last_error ?? null,
@@ -105,13 +113,27 @@ export async function getReviewTextingProviderState(businessId: string, ownerId:
 export async function prepareReviewTextingProvider(businessId: string, ownerId: string) {
   if (!isReviewTextingUpgradeEnabled(businessId)) throw new TextingUpgradeError("review_upgrade_disabled");
   const c = await context(businessId,ownerId);
+  const shared = await assertUpgradeSharedProof(businessId, ownerId);
+  await upgradeShared(assertSharedRegistrationForNewStart({ businessId, ownerId, proof: shared?.proof }));
   if (!(await getA2pRiskClearanceForBusiness(businessId)).cleared) throw new TextingUpgradeError("review_upgrade_risk_review_required");
   const old = await telnyx.messaging10dlc.campaign.retrieve(c.business.telnyx_campaign_id!,options);
   if (old.brandId!==c.business.telnyx_brand_id || old.referenceId!==`reviews:${c.account.id}` || old.usecase!=="MARKETING" || mapCampaignStatus(old).dbStatus!=="approved") throw new TextingUpgradeError("review_upgrade_source_campaign_invalid");
-  const filing = buildReviewUpgradeFiling(c.business,c.upgrade.id,c.phone);
+  const filing = buildReviewUpgradeFiling(c.business,c.upgrade.id,c.phone,shared?.context.registration.legal_business_name);
   if (!(await inspectReviewSmsKeywords(c.business.telnyx_messaging_profile_id!,keywordProgramFromCampaign(filing,c.business.name))).ready) throw new TextingUpgradeError("review_upgrade_keywords_changed");
   await rpc("review_texting_provider_prepare",{p_business:businessId,p_owner:ownerId,p_filing:filing,p_hash:createHash("sha256").update(JSON.stringify(filing)).digest("hex"),p_forbidden_profiles:forbiddenProfiles()});
   await reconcileReviewTextingProvider(c.upgrade.id);
+}
+
+async function assertUpgradeSharedProof(businessId: string, ownerId: string) {
+  const context = await upgradeShared(readSharedRegistrationContext(businessId));
+  if (!context) return null;
+  const { readReviewSmsAccount, readPaidReviewSmsSharedRegistrationProof } = await import("@/lib/stripe/reviewSms.server");
+  const account = await readReviewSmsAccount(businessId);
+  if (!account || account.owner_id !== ownerId) throw new TextingUpgradeError("review_upgrade_source_changed");
+  const proof = await readPaidReviewSmsSharedRegistrationProof(account);
+  if (!proof) throw new TextingUpgradeError("shared_registration_proof_required");
+  await upgradeShared(validateSharedRegistrationProof({ businessId, ownerId, proof, requireActive: true }));
+  return { context, proof };
 }
 export async function moveReviewTextingProvider(businessId: string, ownerId: string) {
   const c = await context(businessId,ownerId);
@@ -134,7 +156,11 @@ export async function reconcileReviewTextingProvider(upgradeId: string) {
   // stops new preparations, never recovery of a committed provider operation.
   const authorize=(operation:string)=>rpc<boolean>("review_texting_provider_authorize",{p_upgrade:upgradeId,p_claim:claim,p_operation:operation,p_forbidden_profiles:forbiddenProfiles()});
   try {
+    const shared = await assertUpgradeSharedProof(p.business_id, p.owner_id);
     if (["prepared","submitting"].includes(p.stage)) {
+      let reservation = shared ? await upgradeShared(readSharedCampaignReservation(p.business_id, upgradeId)) : null;
+      if (reservation && (reservation.payloadHash !== p.filing_hash || reservation.referenceId !== `upgrade:${upgradeId}`))
+        throw new TextingUpgradeError("shared_campaign_evidence_mismatch");
       const matches=[];
       let count=0;
       for await (const candidate of telnyx.messaging10dlc.campaign.list({brandId:p.brand_id},options)) {
@@ -149,11 +175,34 @@ export async function reconcileReviewTextingProvider(upgradeId: string) {
         if (mapBrandStatus(brand).dbStatus!=="approved") return;
         const qualification=await telnyx.messaging10dlc.campaignBuilder.brand.qualifyByUsecase("MIXED",{brandId:p.brand_id},options);
         if (qualification.usecase!=="MIXED" || (qualification.minSubUsecases ?? 99)>2 || (qualification.maxSubUsecases ?? 0)<2) { await record("support",{reason:"review_upgrade_usecase_unavailable"});return; }
-        if (!(await authorize("submit"))) return;
-        const submitted=await telnyx.messaging10dlc.campaignBuilder.submit(p.filing,options);
-        candidateId=submitted.campaignId;
+        const reservedShared = await upgradeShared(reserveSharedCampaignSubmission({ businessId: p.business_id,
+          operationId: upgradeId, referenceId: `upgrade:${upgradeId}`, purpose: "review_upgrade", payloadHash: p.filing_hash, claimToken: claim }));
+        if (reservedShared) {
+          reservation = { ...reservedShared, payloadHash: p.filing_hash, referenceId: `upgrade:${upgradeId}` };
+          if (!reservedShared.submit) {
+            if (!reservedShared.providerCampaignId) { await record("support", { reason: "review_upgrade_submission_unknown" }); return; }
+            candidateId = reservedShared.providerCampaignId;
+          }
+        }
+        if (!candidateId) {
+          if (!(await authorize("submit"))) return;
+          try {
+            const submitted=await telnyx.messaging10dlc.campaignBuilder.submit(p.filing,options);
+            candidateId=submitted.campaignId;
+          } catch (error) {
+            if (reservation) await settleSharedCampaignSubmission({ businessId: p.business_id, reservationId: reservation.id, payloadHash: p.filing_hash, outcome: "uncertain" }).catch(() => {});
+            throw error;
+          }
+        }
       }
       if (!candidateId) { if (p.submission_attempted_at) await record("support",{reason:"review_upgrade_submission_unknown"});return; }
+      if (shared) {
+        if (!reservation) throw new TextingUpgradeError("shared_campaign_evidence_missing");
+        const candidate = await telnyx.messaging10dlc.campaign.retrieve(candidateId, options);
+        if (!reviewUpgradeCandidateMatches(candidate as unknown as Record<string, unknown>, p))
+          throw new TextingUpgradeError("shared_campaign_evidence_mismatch");
+        await upgradeShared(settleSharedCampaignSubmission({ businessId: p.business_id, reservationId: reservation.id, payloadHash: p.filing_hash, outcome: "accepted", providerCampaignId: candidateId }));
+      }
       await record("submitted",{campaignId:candidateId});
       p=(await readRow(upgradeId))!;
     }

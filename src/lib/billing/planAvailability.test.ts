@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { SubscriptionPlan } from "@/types/database";
 import {
   availablePlanOrFallback,
+  defaultAcquisitionPlans,
   CUSTOMER_VISIBLE_PLAN_ORDER,
   getPlanSalesStatus,
   isPlanAvailable,
@@ -59,5 +60,14 @@ describe("plan sales availability", () => {
     expect(paidPlanForOnboardingRetry("full", "past_due")).toBeNull();
     expect(paidPlanForOnboardingRetry("full", "canceled")).toBeNull();
     expect(paidPlanForOnboardingRetry("full", null)).toBeNull();
+  });
+});
+
+ describe("default acquisition presentation", () => {
+  it("unlists SMS Only without removing purchase recovery or entitlements", () => {
+    expect(defaultAcquisitionPlans(true)).toEqual(["chat_only", "sms_and_chat", "full"]);
+    expect(defaultAcquisitionPlans(false)).toEqual(["sms_and_chat", "full"]);
+    expect(isPlanAvailable("sms_only")).toBe(true);
+    expect(paidPlanForOnboardingRetry("sms_only", "active")).toBe("sms_only");
   });
 });

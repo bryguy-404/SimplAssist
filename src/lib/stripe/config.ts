@@ -94,7 +94,7 @@ export const SUBSCRIPTION_PLANS: Record<
     includedVoiceMinutes: 0,
     includedAiReplies: null,
     features: [
-      "Everything in SMS Only",
+      "Missed-call follow-up and manual texting",
       "Full AI SMS conversations",
       "Website chat widget",
       "Custom widget branding",

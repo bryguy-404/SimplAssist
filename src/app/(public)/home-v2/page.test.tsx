@@ -50,7 +50,6 @@ describe("home-v2 Chat Only public-launch composition", () => {
   it("preserves the original plan list when public launch is disabled", () => {
     expect(plansForPublicLaunch(false)).toBe(plans);
     expect(plans.map((plan) => plan.name)).toEqual([
-      "SMS Only",
       "SMS + Web Chat",
       "Full Suite",
     ]);
@@ -90,8 +89,8 @@ describe("home-v2 Chat Only public-launch composition", () => {
     expect(text).toContain(
       "No contracts. Paid SMS activation includes a one-time $25 setup fee.",
     );
-    expect(pricing).toContain("md:grid-cols-3");
-    expect(pricing).not.toContain("lg:grid-cols-4");
+    expect(pricing).toContain("md:grid-cols-2");
+    expect(pricing).not.toContain("lg:grid-cols-3");
     for (const plan of plans) expect(text).toContain(plan.name);
   });
 
@@ -109,8 +108,8 @@ describe("home-v2 Chat Only public-launch composition", () => {
     expect(text).toContain(
       "No contracts. Chat Only has no setup fee; paid SMS activation includes a one-time $25 setup fee.",
     );
-    expect(pricing).toContain("lg:grid-cols-4");
-    expect(pricing).not.toContain("md:grid-cols-3");
+    expect(pricing).toContain("lg:grid-cols-3");
+    expect(pricing).not.toContain("md:grid-cols-2");
     expect(text.match(/Most Popular/g)).toHaveLength(1);
     for (const plan of plans) expect(text).toContain(plan.name);
   });

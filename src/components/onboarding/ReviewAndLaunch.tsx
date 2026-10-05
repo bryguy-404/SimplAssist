@@ -7,7 +7,7 @@ import { getUsStateName } from '@/lib/usStates';
 import { SETUP_FEE_CENTS, SUBSCRIPTION_PLANS } from '@/lib/stripe/config';
 import {
   availablePlanOrFallback,
-  CUSTOMER_VISIBLE_PLAN_ORDER,
+  DEFAULT_ACQUISITION_PLAN_ORDER,
   paidPlanForOnboardingRetry,
 } from "@/lib/billing/planAvailability";
 import { getPlanPresentation } from "@/lib/billing/planPresentation";
@@ -504,7 +504,7 @@ export default function ReviewAndLaunch({
                 Choose {brandArticle} {brand.name} plan
               </legend>
 
-              {CUSTOMER_VISIBLE_PLAN_ORDER.map((key) => {
+              {DEFAULT_ACQUISITION_PLAN_ORDER.map((key) => {
                 const plan = getPlanPresentation(key, brand.name);
                 const selected = selectedPlan === key;
                 const recommended = key === RECOMMENDED_PLAN;

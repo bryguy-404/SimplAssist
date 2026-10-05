@@ -425,8 +425,8 @@ export default function HomeV2Page() {
             <div
               className={`grid border-t ${hairline} divide-y ${
                 chatOnlyPublicLaunchEnabled
-                  ? "lg:grid-cols-4 lg:divide-y-0 lg:divide-x"
-                  : "md:grid-cols-3 md:divide-y-0 md:divide-x"
+                  ? "lg:grid-cols-3 lg:divide-y-0 lg:divide-x"
+                  : "md:grid-cols-2 md:divide-y-0 md:divide-x"
               } ${hairlineDivide}`}
             >
               {publicPlans.map((plan) => (

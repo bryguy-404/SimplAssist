@@ -5,9 +5,14 @@ import type { BillingChangeView, SmsPlan } from "@/lib/stripe/smsBilling";
 export const TEXTING_UPGRADE_STEPS = ["plan", "business", "verification", "use_case", "phone", "review", "status"] as const;
 export type TextingUpgradeStep = (typeof TEXTING_UPGRADE_STEPS)[number];
 export type TextingUpgradeStatus = "draft" | "payment_pending" | "carrier_pending" | "support_required" | "activated" | "abandoned";
+export type TextingUpgradeSourceMode = "new_sms" | "review_sms";
 export type TextingUpgradeRecord = {
   id: string; business_id: string; owner_id: string;
   source_subscription_id: string; source_customer_id: string;
+  /** Optional in historical in-memory fixtures; persisted records default to new_sms. */
+  source_mode?: TextingUpgradeSourceMode;
+  source_review_account_id?: string | null; source_review_item_id?: string | null;
+  original_activation_operation_id?: string | null;
   target_plan: SmsPlan; state: TextingUpgradeStatus;
   billing_operation_id: string | null; business_confirmed_at: string | null; phone_confirmed_at: string | null;
   starter_acknowledged_at: string | null; paid_at: string | null; activated_at: string | null;
@@ -18,6 +23,7 @@ export type TextingUpgradeState = Pick<OnboardingState,
   "businessId" | "businessInfo" | "businessHours" | "brandVerification" | "servicesAndFaqs" | "aiSettings" |
   "registration" | "phoneNumber" | "activePhoneNumber" | "pendingPhoneNumber" | "pendingPhoneNumberFailureReason" | "smsConsentAgreed"
 > & {
+  sourceMode?: TextingUpgradeSourceMode;
   upgrade: { id: string; targetPlan: SmsPlan; state: TextingUpgradeStatus; starterAcknowledged: boolean; paidAt: string | null; activatedAt: string | null } | null;
   eligible: boolean; enabled: boolean; message: string | null;
   currentStep: TextingUpgradeStep; steps: readonly TextingUpgradeStep[];

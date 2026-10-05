@@ -5,7 +5,7 @@ import { useBrand } from "@/components/branding/BrandProvider";
 import { PlanSelectionOption } from "@/components/onboarding/PlanSelectionOption";
 import { PulsingDot } from "@/components/ui/pulsing-dot";
 import {
-  CUSTOMER_VISIBLE_PLAN_ORDER,
+  defaultAcquisitionPlans,
   isPlanAvailable,
 } from "@/lib/billing/planAvailability";
 import { getPlanPresentation } from "@/lib/billing/planPresentation";
@@ -50,9 +50,7 @@ export default function DirectPlanSelection({
   const { name: brandName } = useBrand();
   const visiblePlans = useMemo<readonly SubscriptionPlan[]>(
     () =>
-      chatOnlyAvailable
-        ? (["chat_only", ...CUSTOMER_VISIBLE_PLAN_ORDER] as const)
-        : CUSTOMER_VISIBLE_PLAN_ORDER,
+      defaultAcquisitionPlans(chatOnlyAvailable),
     [chatOnlyAvailable],
   );
   const selectablePlans = useMemo(

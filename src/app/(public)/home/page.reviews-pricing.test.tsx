@@ -37,7 +37,6 @@ describe("homepage Customers and email reviews package", () => {
     )?.[0];
     for (const [plan, allowance] of [
       ["chat_only", "500"],
-      ["sms_only", "500"],
       ["sms_and_chat", "1,000"],
       ["full", "2,000"],
     ]) {
@@ -54,9 +53,18 @@ describe("homepage Customers and email reviews package", () => {
       const row = pricing.match(
         new RegExp(`<tr data-comparison-feature="${feature}">[\\s\\S]*?<\\/tr>`),
       )?.[0];
-      expect(row?.match(/data-comparison-value="Included"/g)).toHaveLength(4);
+      expect(row?.match(/data-comparison-value="Included"/g)).toHaveLength(3);
     }
     expect(pricing).not.toMatch(/(?:SMS|text) review requests/i);
+  });
+
+  it("uses the launched prices in structured data without an unlisted SMS offer", async () => {
+    await renderPricing(true);
+    const { getHomepageJsonLd, getHomepageSeoContent } = await import("./seo");
+    const application = getHomepageJsonLd(true)["@graph"].find(item => item["@type"] === "SoftwareApplication");
+    expect(application?.offers?.map(offer => [offer.name, offer.price])).toEqual([["Chat Only", 15], ["SMS + Web Chat", 49], ["Full Suite", 79]]);
+    expect(getHomepageSeoContent(true).description).toContain("$15/month");
+    expect(getHomepageSeoContent(true).faqs.find(faq => faq.question === "How much does SimplAssist cost?")?.answer).toContain("$49/month");
   });
 
   it("preserves the original pricing copy while the package launch is disabled", async () => {

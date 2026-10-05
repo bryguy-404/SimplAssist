@@ -8,7 +8,7 @@ import type { SubscriptionPlan } from "@/types/database";
 import { BillingActions } from "./billing-actions";
 import { FullSuiteWaitlistButton } from "@/components/waitlist/FullSuiteWaitlistButton";
 import {
-  CUSTOMER_VISIBLE_PLAN_ORDER,
+  DEFAULT_ACQUISITION_PLAN_ORDER,
   isPlanAvailable,
 } from "@/lib/billing/planAvailability";
 import { getPlanPresentation } from "@/lib/billing/planPresentation";
@@ -196,7 +196,7 @@ export default async function BillingPage(_props: BillingPageProps) {
         </div>
       ) : (
         <div className="mt-8 grid gap-6 md:grid-cols-3">
-          {CUSTOMER_VISIBLE_PLAN_ORDER.map((key) => {
+          {DEFAULT_ACQUISITION_PLAN_ORDER.map((key) => {
             const plan = SUBSCRIPTION_PLANS[key];
             const available = isPlanAvailable(key);
             const presentedPlan = getPlanPresentation(key, brand.name);

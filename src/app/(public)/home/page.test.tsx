@@ -107,7 +107,7 @@ describe("canonical homepage SEO metadata", () => {
 
     expect(metadata).toBe(HOME_METADATA);
     expect(HOME_TITLE).toHaveLength(56);
-    expect(HOME_DESCRIPTION).toHaveLength(155);
+    expect(HOME_DESCRIPTION.length).toBeLessThanOrEqual(160);
     expect(HOME_TITLE).toBe(
       "SimplAssist — Missed-Call Text Back for Small Businesses"
     );
@@ -245,7 +245,7 @@ describe("canonical homepage static HTML", () => {
     );
   });
 
-  it("renders three main plans with an SMS-only link and a complete plan matrix", () => {
+  it("renders three main plans without promoting the unlisted SMS-only plan", () => {
     const html = renderHomepage(true);
     const pricing = html.match(
       /<section id="pricing"[\s\S]*?<\/section>/,
@@ -300,7 +300,7 @@ describe("canonical homepage static HTML", () => {
     expect(text).toContain("100 voice minutes/billing month");
     expect(text).not.toContain("Priority support");
     expect(text).not.toContain("Advanced analytics dashboard");
-    expect(text).toContain("Everything in SMS Only, plus");
+    expect(text).toContain("Missed-call follow-up + manual texting");
     expect(text).toContain("Everything in SMS + Web Chat, plus");
     expect(text).toContain("Full AI SMS conversations + customization");
     expect(text).toContain("Website chat widget");
@@ -328,20 +328,13 @@ describe("canonical homepage static HTML", () => {
     expect(comparisonToggle).toContain('aria-hidden="true"');
     expect(comparisonToggle).not.toContain("<button");
     expect(comparisonToggle).not.toContain("<a");
-    const smsOnlyFootnote = pricing?.match(
-      /<p data-sms-only-footnote[^>]*>[\s\S]*?<\/p>/,
-    )?.[0];
-    expect(smsOnlyFootnote).toContain('aria-label="Get started with SMS Only"');
-    expect(smsOnlyFootnote).toContain('href="/signup"');
-    expect(visibleText(smsOnlyFootnote ?? "")).toContain("SMS Only — $25/mo");
-    expect(pricing?.indexOf("data-sms-only-footnote")).toBeGreaterThan(
-      pricing?.lastIndexOf("</article>") ?? -1,
-    );
+    expect(pricing).not.toContain("data-sms-only-footnote");
+    expect(text).not.toContain("SMS Only");
     expect(text).toContain("SMS + Web Chat");
     expect(text).toContain("Full Suite");
     expect(text.match(/Most Popular/g)).toHaveLength(1);
     expect(text).not.toContain("Coming Soon");
-    expect(pricing?.match(/href="\/signup"/g)).toHaveLength(4);
+    expect(pricing?.match(/href="\/signup"/g)).toHaveLength(3);
     expect(text).not.toContain("Notify Me When It Launches");
     expect(pricing).toContain('<table class="w-full min-w-[940px]');
     expect(pricing).toContain('role="region"');
@@ -349,14 +342,13 @@ describe("canonical homepage static HTML", () => {
     expect(pricing).toContain('tabindex="0"');
     expect(pricing).toContain("overflow-x-auto");
     expect(pricing).toContain("sticky left-0");
-    expect(pricing?.match(/scope="col"/g)).toHaveLength(5);
+    expect(pricing?.match(/scope="col"/g)).toHaveLength(4);
     expect(pricing?.match(/scope="row"/g)).toHaveLength(
       expectedComparisonFeatures.length,
     );
     expect(pricing?.match(/scope="rowgroup"/g)).toHaveLength(5);
     expect(comparisonPlanKeys).toEqual([
       "chat_only",
-      "sms_only",
       "sms_and_chat",
       "full",
     ]);
@@ -381,9 +373,7 @@ describe("canonical homepage static HTML", () => {
     expect(completedAiRepliesRow).toContain(
       'data-comparison-plan="chat_only" data-comparison-value="200"',
     );
-    expect(completedAiRepliesRow).toContain(
-      'data-comparison-plan="sms_only" data-comparison-value="Not included"',
-    );
+    expect(completedAiRepliesRow).not.toContain('data-comparison-plan="sms_only"');
     expect(completedAiRepliesRow?.match(/data-comparison-value="No set cap"/g)).toHaveLength(2);
 
     const setupFeeRow = pricing?.match(
@@ -392,7 +382,7 @@ describe("canonical homepage static HTML", () => {
     expect(setupFeeRow).toContain(
       'data-comparison-plan="chat_only" data-comparison-value="None"',
     );
-    expect(setupFeeRow?.match(/data-comparison-value="\$25 one-time SMS activation fee"/g)).toHaveLength(3);
+    expect(setupFeeRow?.match(/data-comparison-value="\$25 one-time SMS activation fee"/g)).toHaveLength(2);
 
     const mmsRow = pricing?.match(
       /<tr data-comparison-feature="MMS availability">[\s\S]*?<\/tr>/,
@@ -400,7 +390,7 @@ describe("canonical homepage static HTML", () => {
     expect(mmsRow).toContain(
       'data-comparison-plan="chat_only" data-comparison-value="Not included"',
     );
-    expect(mmsRow?.match(/data-comparison-value="Not defined"/g)).toHaveLength(3);
+    expect(mmsRow?.match(/data-comparison-value="Not defined"/g)).toHaveLength(2);
 
     for (const planKey of topPlanKeys) {
       const card = pricing?.match(
@@ -419,7 +409,7 @@ describe("canonical homepage static HTML", () => {
     }
   });
 
-  it("preserves the exact prelaunch plan and SEO presentation when Chat Only is off", () => {
+  it("keeps SMS Only unlisted when the Chat acquisition rollout is off", () => {
     const html = renderHomepage(false);
     const pricing = html.match(
       /<section id="pricing"[\s\S]*?<\/section>/,
@@ -430,14 +420,14 @@ describe("canonical homepage static HTML", () => {
     expect(pricing).not.toContain('data-plan-card="chat_only"');
     expect(pricing).not.toContain('data-plan-details="chat_only"');
     expect(pricing).not.toContain("data-sms-only-footnote");
-    expect(pricing?.match(/data-plan-card=/g)).toHaveLength(3);
-    expect(pricing?.match(/data-plan-details=/g)).toHaveLength(3);
+    expect(pricing?.match(/data-plan-card=/g)).toHaveLength(2);
+    expect(pricing?.match(/data-plan-details=/g)).toHaveLength(2);
     expect(
       Array.from(
         pricing?.matchAll(/data-plan-card="([^"]+)"/g) ?? [],
         (match) => match[1],
       ),
-    ).toEqual(["sms_only", "sms_and_chat", "full"]);
+    ).toEqual(["sms_and_chat", "full"]);
     expect(pricing).toContain("<table");
     expect(visibleText(html)).toContain(HOME_DEFINITION);
     expect(content.faqs).toBe(HOME_FAQS);
@@ -501,13 +491,12 @@ describe("homepage JSON-LD", () => {
     });
 
     const offers = application?.offers as JsonRecord[];
-    expect(offers).toHaveLength(3);
+    expect(offers).toHaveLength(2);
     expect(offers.map(({ name, price, priceCurrency }) => ({
       name,
       price,
       priceCurrency,
     }))).toEqual([
-      { name: "SMS Only", price: 25, priceCurrency: "USD" },
       { name: "SMS + Web Chat", price: 45, priceCurrency: "USD" },
       { name: "Full Suite", price: 65, priceCurrency: "USD" },
     ]);
@@ -569,7 +558,6 @@ describe("homepage JSON-LD", () => {
 
     expect(offers.map(({ name, price }) => ({ name, price }))).toEqual([
       { name: "Chat Only", price: 10 },
-      { name: "SMS Only", price: 25 },
       { name: "SMS + Web Chat", price: 45 },
       { name: "Full Suite", price: 65 },
     ]);

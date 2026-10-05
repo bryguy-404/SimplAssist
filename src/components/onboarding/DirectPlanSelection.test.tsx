@@ -65,7 +65,7 @@ describe("DirectPlanSelection", () => {
 
     expect(markup).toContain("Choose your Alpha Dog Agency plan");
     expect(markup).toContain("Chat Only");
-    expect(markup).toContain("Starter / SMS Only");
+    expect(markup).not.toContain("Starter / SMS Only");
     expect(markup).toContain("Growth / SMS + Web Chat");
     expect(markup).toContain("Pro / Full Suite");
     expect(markup).not.toContain("SimplAssist");
@@ -103,7 +103,7 @@ describe("DirectPlanSelection", () => {
     expect(markup).not.toContain("one-time setup and SMS activation fee");
   });
 
-  it.each(["chat_only", "sms_only", "sms_and_chat", "full"] as const)(
+  it.each(["chat_only", "sms_and_chat", "full"] as const)(
     "restores the saved available %s selection on return",
     (initialPlan) => {
       const markup = renderSelection({ initialPlan, chatOnlyAvailable: true });
@@ -111,6 +111,13 @@ describe("DirectPlanSelection", () => {
       expect(markup).not.toMatch(/<button[^>]*disabled=""[^>]*>Continue setup<\/button>/);
     },
   );
+
+  it("does not silently purchase a saved unlisted SMS Only selection", () => {
+    const markup = renderSelection({ initialPlan: "sms_only", chatOnlyAvailable: true });
+    expect(radio(markup, "sms_only")).toBeUndefined();
+    expect(markup).not.toContain('checked=""');
+    expect(markup).toContain("Your saved plan is temporarily unavailable.");
+  });
 
   it("keeps Back available for the legacy selector", () => {
     expect(renderSelection({

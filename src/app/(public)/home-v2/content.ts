@@ -92,24 +92,11 @@ export const steps = [
 
 export const plans = [
   {
-    name: "SMS Only",
-    price: `$${SUBSCRIPTION_PLANS.sms_only.price}`,
-    description: "Missed-call texting for small teams that want fast coverage.",
-    features: [
-      "One local SimplAssist number",
-      "Manual SMS inbox and replies",
-      "Automatic missed-call text",
-      "500 included SMS parts/month",
-      ...customerFeatures("sms_only"),
-    ],
-    highlighted: false,
-  },
-  {
     name: "SMS + Web Chat",
     price: `$${SUBSCRIPTION_PLANS.sms_and_chat.price}`,
     description: "Capture leads from calls and your website, then turn them into booked appointments.",
     features: [
-      "Everything in SMS Only",
+      "Missed-call follow-up and manual texting",
       "Website chat widget",
       "Web chat lead capture",
       "Full AI SMS conversations",

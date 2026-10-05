@@ -15,18 +15,18 @@ export const HOME_TITLE =
   "SimplAssist — Missed-Call Text Back for Small Businesses";
 
 export const HOME_DESCRIPTION =
-  `SimplAssist provides small businesses with missed call text back from $${SUBSCRIPTION_PLANS.sms_only.price}/month, plus AI conversations, website chat, and appointment booking at $${SUBSCRIPTION_PLANS.sms_and_chat.price}/month.`;
+  `SimplAssist provides small businesses with missed-call text back, AI text conversations, website chat, and appointment booking from $${SUBSCRIPTION_PLANS.sms_and_chat.price}/month.`;
 
 export const HOME_DEFINITION =
-  `SimplAssist is a missed call text back service for small businesses, with plans starting at $${SUBSCRIPTION_PLANS.sms_only.price}/month. Its $${SUBSCRIPTION_PLANS.sms_and_chat.price}/month plan adds an AI receptionist for SMS and web chat, a website chat widget, and Google Calendar appointment booking. With Full Suite, SimplAssist can also talk with callers, answer questions, collect their details, and help book appointments when you can't pick up.`;
+  `SimplAssist is a missed call text back service for small businesses, with plans starting at $${SUBSCRIPTION_PLANS.sms_and_chat.price}/month. Its $${SUBSCRIPTION_PLANS.sms_and_chat.price}/month plan adds an AI receptionist for SMS and web chat, a website chat widget, and Google Calendar appointment booking. With Full Suite, SimplAssist can also talk with callers, answer questions, collect their details, and help book appointments when you can't pick up.`;
 
 export const CHAT_ONLY_HOME_TITLE = HOME_TITLE;
 
 export const CHAT_ONLY_HOME_DESCRIPTION =
-  `Missed call text back for small businesses from $${SUBSCRIPTION_PLANS.sms_only.price}/month. Keep leads talking with SimplAssist. Explore $${SUBSCRIPTION_PLANS.chat_only.price} website chat and Full Suite phone answering.`;
+  `Website chat for small businesses from $${SUBSCRIPTION_PLANS.chat_only.price}/month. Organize customer conversations, add missed-call texting, or explore Full Suite phone answering.`;
 
 export const CHAT_ONLY_HOME_DEFINITION =
-  `SimplAssist is a missed call text back service for small businesses. SMS Only starts at $${SUBSCRIPTION_PLANS.sms_only.price}/month: missed callers receive an automatic text, and you follow up from your inbox. SMS + Web Chat at $${SUBSCRIPTION_PLANS.sms_and_chat.price}/month adds AI text conversations, website chat, and Google Calendar booking. For website chat on its own, Chat Only is $${SUBSCRIPTION_PLANS.chat_only.price}/month with 200 completed AI replies and no setup fee. Full Suite adds SimplAssist Voice, so callers can have a spoken conversation, ask questions, and get help booking appointments.`;
+  `SimplAssist is a missed call text back service for small businesses. SMS + Web Chat at $${SUBSCRIPTION_PLANS.sms_and_chat.price}/month adds AI text conversations, website chat, and Google Calendar booking. For website chat on its own, Chat Only is $${SUBSCRIPTION_PLANS.chat_only.price}/month with 200 completed AI replies and no setup fee. Full Suite adds SimplAssist Voice, so callers can have a spoken conversation, ask questions, and get help booking appointments.`;
 
 export type HomepageFaq = {
   question: string;
@@ -59,7 +59,7 @@ const BASE_HOME_FAQS = [
   {
     question: "What is SimplAssist?",
     answer:
-      `SimplAssist is a customer communication service built for small businesses. The $${SUBSCRIPTION_PLANS.sms_only.price}/month SMS Only plan gives you missed call text back and a shared inbox, and the $${SUBSCRIPTION_PLANS.sms_and_chat.price}/month plan adds an AI receptionist for SMS and web chat, a website chat widget, and appointment booking synced with Google Calendar. Full Suite adds AI phone answering so callers can speak with your receptionist when you can't pick up.`,
+      `SimplAssist is a customer communication service built for small businesses. The $${SUBSCRIPTION_PLANS.sms_and_chat.price}/month SMS + Web Chat plan provides missed-call text back, a shared inbox, an AI receptionist for SMS and web chat, a website chat widget, and appointment booking synced with Google Calendar. Full Suite adds AI phone answering so callers can speak with your receptionist when you can't pick up.`,
   },
   {
     question: "How does SimplAssist's missed call text back work?",
@@ -69,7 +69,7 @@ const BASE_HOME_FAQS = [
   {
     question: "How much does SimplAssist cost?",
     answer:
-      `SMS Only is $${SUBSCRIPTION_PLANS.sms_only.price}/month with 500 included SMS parts, and SMS + Web Chat is $${SUBSCRIPTION_PLANS.sms_and_chat.price}/month with 1,500 included SMS parts. There's a one-time $${SETUP_FEE_CENTS / 100} setup fee per business when you activate paid SMS, which covers your carrier registration. ${fullSuitePricingCopy}`,
+      `SMS + Web Chat is $${SUBSCRIPTION_PLANS.sms_and_chat.price}/month with 1,500 included SMS parts. There's a one-time $${SETUP_FEE_CENTS / 100} setup fee per business when you activate paid SMS, which covers your carrier registration. ${fullSuitePricingCopy}`,
   },
   {
     question: "What kinds of businesses is SimplAssist for?",
@@ -116,7 +116,7 @@ export const CHAT_ONLY_HOME_FAQS = [
   {
     question: "How much does SimplAssist cost?",
     answer:
-      `Chat Only is $${SUBSCRIPTION_PLANS.chat_only.price}/month with 200 completed website-chat AI replies and no setup fee. SMS Only is $${SUBSCRIPTION_PLANS.sms_only.price}/month with 500 included SMS parts, and SMS + Web Chat is $${SUBSCRIPTION_PLANS.sms_and_chat.price}/month with 1,500 included SMS parts. Paid SMS activation has a one-time $${SETUP_FEE_CENTS / 100} setup fee per business for carrier registration. ${fullSuitePricingCopy}`,
+      `Chat Only is $${SUBSCRIPTION_PLANS.chat_only.price}/month with 200 completed website-chat AI replies and no setup fee. SMS + Web Chat is $${SUBSCRIPTION_PLANS.sms_and_chat.price}/month with 1,500 included SMS parts. Paid SMS activation has a one-time $${SETUP_FEE_CENTS / 100} setup fee per business for carrier registration. ${fullSuitePricingCopy}`,
   },
   ...VOICE_FAQS,
   BASE_HOME_FAQS[2],
@@ -224,7 +224,7 @@ const monthlyPriceSpecification = (price: number) => ({
 const activationPriceSpecification = {
   "@type": "PriceSpecification",
   name: "One-time SMS activation fee",
-  price: 25,
+  price: SETUP_FEE_CENTS / 100,
   priceCurrency: "USD",
 };
 
@@ -241,34 +241,22 @@ export function getHomepageJsonLd(chatOnlyPublicLaunchEnabled = false) {
             "@type": "Offer",
             name: "Chat Only",
             url: `${SITE_ORIGIN}/#pricing`,
-            price: 10,
+            price: SUBSCRIPTION_PLANS.chat_only.price,
             priceCurrency: "USD",
             availability: "https://schema.org/InStock",
-            priceSpecification: [monthlyPriceSpecification(10)],
+            priceSpecification: [monthlyPriceSpecification(SUBSCRIPTION_PLANS.chat_only.price)],
           },
         ]
       : []),
     {
       "@type": "Offer",
-      name: "SMS Only",
-      url: `${SITE_ORIGIN}/#pricing`,
-      price: 25,
-      priceCurrency: "USD",
-      availability: "https://schema.org/InStock",
-      priceSpecification: [
-        monthlyPriceSpecification(25),
-        activationPriceSpecification,
-      ],
-    },
-    {
-      "@type": "Offer",
       name: "SMS + Web Chat",
       url: `${SITE_ORIGIN}/#pricing`,
-      price: 45,
+      price: SUBSCRIPTION_PLANS.sms_and_chat.price,
       priceCurrency: "USD",
       availability: "https://schema.org/InStock",
       priceSpecification: [
-        monthlyPriceSpecification(45),
+        monthlyPriceSpecification(SUBSCRIPTION_PLANS.sms_and_chat.price),
         activationPriceSpecification,
       ],
     },

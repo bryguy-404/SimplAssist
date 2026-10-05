@@ -182,8 +182,8 @@ describe("ReviewAndLaunch visible brand copy", () => {
     expect(html).toContain(
       "Choose a SimplAssist number before submitting SMS registration."
     );
-    expect(html).toContain("One local SimplAssist number");
-    expect(html.match(/Plan option:/g)).toHaveLength(3);
+    expect(html).toContain("Full AI SMS conversations");
+    expect(html.match(/Plan option:/g)).toHaveLength(2);
     expect(html).not.toContain("200 AI replies/month");
     expect(html).not.toContain("Chat Only");
   });
@@ -195,7 +195,7 @@ describe("ReviewAndLaunch visible brand copy", () => {
     expect(html).toContain(
       "Choose an Alpha Dog Agency number before submitting SMS registration."
     );
-    expect(html).toContain("One local Alpha Dog Agency number");
+    expect(html).toContain("Full AI SMS conversations");
     expect(html).not.toContain("SimplAssist");
   });
 

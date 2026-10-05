@@ -29,6 +29,17 @@ export const CUSTOMER_VISIBLE_PLAN_ORDER = Object.freeze(
   ),
 );
 
+/** Presentation only: unlisted SMS Only remains supported for existing accounts. */
+export const DEFAULT_ACQUISITION_PLAN_ORDER = Object.freeze(
+  CUSTOMER_VISIBLE_PLAN_ORDER.filter((plan) => plan !== "sms_only"),
+);
+
+export function defaultAcquisitionPlans(chatOnlyAvailable = false): readonly SubscriptionPlan[] {
+  return chatOnlyAvailable
+    ? ["chat_only", ...DEFAULT_ACQUISITION_PLAN_ORDER]
+    : DEFAULT_ACQUISITION_PLAN_ORDER;
+}
+
 export function getPlanSalesStatus(
   plan: SubscriptionPlan
 ): PlanSalesStatus {

@@ -5,6 +5,9 @@ import { TextingUpgradeError, type TextingUpgradeRecord } from "./textingUpgrade
 const upgradeSchema = z.object({
   id: z.string().uuid(), business_id: z.string().uuid(), owner_id: z.string().uuid(),
   source_subscription_id: z.string(), source_customer_id: z.string(), target_plan: z.enum(["sms_only", "sms_and_chat", "full"]),
+  source_mode: z.enum(["new_sms", "review_sms"]).default("new_sms"),
+  source_review_account_id: z.string().uuid().nullable().default(null), source_review_item_id: z.string().nullable().default(null),
+  original_activation_operation_id: z.string().uuid().nullable().default(null),
   state: z.enum(["draft", "payment_pending", "carrier_pending", "support_required", "activated", "abandoned"]),
   billing_operation_id: z.string().uuid().nullable(), business_confirmed_at: z.string().nullable(), phone_confirmed_at: z.string().nullable(), starter_acknowledged_at: z.string().nullable(),
   paid_at: z.string().nullable(), activated_at: z.string().nullable(), created_at: z.string(), updated_at: z.string(),

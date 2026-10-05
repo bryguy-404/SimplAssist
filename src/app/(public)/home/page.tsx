@@ -17,7 +17,7 @@ import { HeroDemo } from "@/lib/theme-v2/hero-demo";
 import { CtaRace } from "@/lib/theme-v2/cta-race";
 import { FullSuiteWaitlistButton } from "@/components/waitlist/FullSuiteWaitlistButton";
 import { isChatOnlyPublicLaunchEnabled } from "@/lib/billing/chatOnlyPublicLaunch.server";
-import { isPlanAvailable } from "@/lib/billing/planAvailability";
+import { defaultAcquisitionPlans, isPlanAvailable } from "@/lib/billing/planAvailability";
 import {
   customerFeatures,
   CUSTOMER_REVIEWS_PRICING_ENABLED,
@@ -218,14 +218,14 @@ const existingPlans = [
     billingNote: smsActivationFeeLabel,
     description: "Let AI handle text and website conversations, capture leads, and book appointments.",
     highlights: [
-      "Everything in SMS Only, plus",
+      "Missed-call follow-up + manual texting",
       "Website chat widget + lead capture",
       "Full AI SMS conversations + customization",
       "Google Calendar booking",
       `${formattedSmsParts("sms_and_chat")} included SMS parts/month`,
     ],
     features: [
-      "Everything in SMS Only",
+      "Missed-call follow-up and manual texting",
       "Website chat widget",
       "Custom widget branding",
       "Web chat lead capture",
@@ -270,7 +270,7 @@ const comparisonGroups: ReadonlyArray<{
         values: {
           chat_only: false,
           sms_only: false,
-          sms_and_chat: "SMS Only",
+          sms_and_chat: "Missed-call texting",
           full: "SMS + Web Chat",
         },
       },
@@ -671,12 +671,9 @@ function PlanComparisonCell({ value }: { value: PlanComparisonValue }) {
 export default function HomePage() {
   const publicChatOnlyAvailable = isChatOnlyPublicLaunchEnabled();
   const seoContent = getHomepageSeoContent(publicChatOnlyAvailable);
-  const comparisonPlans = publicChatOnlyAvailable
-    ? [chatOnlyPlan, ...existingPlans]
-    : existingPlans;
-  const pricingCardPlans = publicChatOnlyAvailable
-    ? comparisonPlans.filter((plan) => plan.planKey !== "sms_only")
-    : comparisonPlans;
+  const publicPlans = defaultAcquisitionPlans(publicChatOnlyAvailable);
+  const comparisonPlans = [chatOnlyPlan, ...existingPlans].filter((plan) => publicPlans.includes(plan.planKey));
+  const pricingCardPlans = comparisonPlans;
 
   return (
     <div className={`${pageShell} isolate`} style={{ fontFamily: fontStack }}>
@@ -751,8 +748,8 @@ export default function HomePage() {
               <p className={`text-[clamp(17px,2.3vw,20px)] leading-[1.7] ${body} max-w-[680px] mb-7`}>
                 When you can&apos;t answer, SimplAssist sends your caller a text so
                 they can tell you what they need. Missed-call texting starts at
-                {" "}{formattedPlanPrice("sms_only")}/month. Add AI text conversations
-                and website chat, or let SimplAssist talk with callers on Full Suite.
+                {" "}{formattedPlanPrice("sms_and_chat")}/month, including AI text conversations
+                and website chat. Full Suite adds phone answering.
               </p>
 
               {/* CTA buttons — flat, matte, no glow */}
@@ -764,7 +761,7 @@ export default function HomePage() {
               </div>
 
               <p className={`text-sm leading-6 ${body}`}>
-                {smsActivationFeeLabel}. SMS Only includes manual follow-up.
+                {smsActivationFeeLabel}. SMS + Web Chat includes AI text conversations.
                 {publicChatOnlyAvailable && (
                   <> Just need website chat? <Link href="/ai-chatbot-for-small-business" className={`${inlineLink} underline underline-offset-4`}>Start with {formattedPlanPrice("chat_only")}/month webchat</Link>, with no setup fee.</>
                 )}
@@ -820,7 +817,7 @@ export default function HomePage() {
             {[
               { title: "Your business misses a call", text: "You might be with a customer, on a job, or away from the phone. SimplAssist handles missed-call follow-up on your configured business line." },
               { title: "The caller gets a text", text: "A branded message invites them to reply. For example: “Sorry we missed your call. How can we help?” They can explain what they need without calling again." },
-              { title: "Keep the conversation moving", text: "Reply yourself with SMS Only. SMS + Web Chat and Full Suite add AI text conversations that answer questions and help book appointments with a connected Google Calendar." },
+              { title: "Keep the conversation moving", text: "SMS + Web Chat and Full Suite include AI text conversations that answer questions and help book appointments with a connected Google Calendar." },
             ].map((step, index) => (
                 <li key={step.title} className={`${card} h-full p-6 sm:p-8`}>
                   <span aria-hidden="true" className={`text-sm font-extrabold ${accentText}`}>0{index + 1}</span>
@@ -1147,22 +1144,6 @@ export default function HomePage() {
             {FULL_SUITE_USAGE_NOTE}
           </p>
 
-          {publicChatOnlyAvailable && (
-            <p
-              data-sms-only-footnote
-              className={`mt-5 text-center text-sm leading-6 ${body}`}
-            >
-              Just need missed-call texting without web chat?{" "}
-              <Link
-                href="/signup"
-                aria-label="Get started with SMS Only"
-                className={`${inlineLink} font-semibold underline-offset-4 hover:underline`}
-              >
-                SMS Only — {formattedPlanPrice("sms_only")}/mo{" "}
-                <span aria-hidden="true">&rarr;</span>
-              </Link>
-            </p>
-          )}
 
           <Reveal className="mt-7">
             <details className="sa-pricing-comparison group">

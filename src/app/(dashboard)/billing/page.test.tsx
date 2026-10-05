@@ -59,7 +59,7 @@ vi.mock("@/lib/branding/requestBrand.server", () => ({
   getRequestBrand: mocks.getRequestBrand,
 }));
 vi.mock("@/lib/billing/planAvailability", () => ({
-  CUSTOMER_VISIBLE_PLAN_ORDER: ["sms_only", "sms_and_chat", "full"],
+  DEFAULT_ACQUISITION_PLAN_ORDER: ["sms_and_chat", "full"],
   isPlanAvailable: mocks.isPlanAvailable,
 }));
 vi.mock("@/lib/billing/aiReplyMeter.server", () => ({
@@ -248,9 +248,9 @@ describe("BillingPage", () => {
 
     const html = renderToStaticMarkup(await BillingPage({}));
 
-    expect(html).toContain("One local Alpha Dog Agency number");
+    expect(html).toContain("Growth / SMS + Web Chat");
     expect(html).not.toContain("One local SimplAssist number");
-    expect(html).toContain("$25");
+    expect(html).toContain("$45");
     expect(html).toContain("Stripe billing action");
     expect(html).not.toContain("Billing during suspension");
     expect(html).not.toContain("billing continues");
@@ -279,13 +279,13 @@ describe("BillingPage", () => {
       expect(mocks.redirect).not.toHaveBeenCalled();
       expect(html).toContain("Billing");
       expect(html).toContain("Choose a plan to get started");
-      expect(html).toContain("Starter / SMS Only");
+      expect(html).not.toContain("Starter / SMS Only");
       expect(html).toContain("Growth / SMS + Web Chat");
       expect(html).not.toContain("Chat Only");
       expect(html).not.toContain("200 AI replies/month");
       expect(html).not.toContain("Pro / Full Suite");
       expect(html).not.toContain("Notify Me When It Launches");
-      expect(html.match(/Stripe billing action: checkout/g)).toHaveLength(2);
+      expect(html.match(/Stripe billing action: checkout/g)).toHaveLength(1);
       expect(mocks.isPlanAvailable).toHaveBeenCalledWith("full");
       expect(mocks.getCurrentAIReplyUsage).not.toHaveBeenCalled();
     },
@@ -314,7 +314,7 @@ describe("BillingPage", () => {
     expect(html).toContain("$65");
     expect(html).not.toContain("Coming Soon");
     expect(html).not.toContain("Notify Me When It Launches");
-    expect(html.match(/Stripe billing action: checkout/g)).toHaveLength(3);
+    expect(html.match(/Stripe billing action: checkout/g)).toHaveLength(2);
   });
 
   it("keeps an existing active Full subscription and portal visible while Full is unavailable", async () => {

@@ -42,6 +42,7 @@ export default function ReviewsWorkspace({
   const [overview, setOverview] = useState<ReviewOverview | null>(null);
   const [history, setHistory] = useState<ReviewCampaignList | null>(null);
   const [tab, setTab] = useState<"requests" | "settings">(initialTab);
+  useEffect(() => setTab(initialTab), [initialTab]);
   const [composing, setComposing] = useState(Boolean(initialCustomerId));
   const [page, setPage] = useState(1);
   const [refresh, setRefresh] = useState(0);
@@ -277,7 +278,7 @@ export default function ReviewsWorkspace({
               onSaved={setOverview}
             />
             {smsEnabled ? (
-              <ReviewSmsPanel onStatusChanged={onSmsStatusChanged} />
+              <ReviewSmsPanel active={tab === "settings"} onStatusChanged={onSmsStatusChanged} />
             ) : null}
           </div>
           <div

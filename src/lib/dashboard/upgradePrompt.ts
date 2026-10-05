@@ -68,7 +68,7 @@ export function chooseDashboardUpgradePrompt(s: UpgradePromptSnapshot, now = Dat
   if (!s.eligibleBusiness) return null;
   if (s.textingUpgrade && !["activated", "abandoned"].includes(s.textingUpgrade.state)) {
     return progress("growth", s.textingUpgrade.state === "draft" ? "Continue your texting setup" : "Your texting upgrade is in progress",
-      "Review your saved setup and any next steps. Your current plan remains available while we confirm the change.", REVIEW_TEXTING_UPGRADE_HREF);
+      "Review your saved setup and any next steps. Website chat and email reviews remain available while we confirm the change.", REVIEW_TEXTING_UPGRADE_HREF);
   }
   if (s.pendingBilling) return progress("voice", "A billing change is in progress", "Check its status before starting another change.", "/billing#plan-change");
   const a = s.reviewAccount;

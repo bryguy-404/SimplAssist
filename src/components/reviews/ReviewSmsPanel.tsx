@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
 import { CheckCircle2, MessageSquare, RefreshCw } from "lucide-react";
+import { useHashTarget } from "@/lib/ui/useHashTarget";
 import type {
   ReviewSmsOverview,
   ReviewSmsQuote,
@@ -294,13 +295,16 @@ function SmsSetupForm({
 
 export default function ReviewSmsPanel({
   onStatusChanged,
+  active = true,
 }: {
   onStatusChanged: (canSend: boolean) => void;
+  active?: boolean;
 }) {
   const [overview, setOverview] = useState<ReviewSmsOverview | null>(null);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const section = useHashTarget<HTMLElement>("review-sms", active && Boolean(overview || error));
   const [notice, setNotice] = useState<string | null>(null);
   const [quote, setQuote] = useState<ReviewSmsQuote | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
@@ -403,6 +407,8 @@ export default function ReviewSmsPanel({
     <section
       className={`${card} p-5 sm:p-7`}
       id="review-sms"
+      ref={section}
+      tabIndex={-1}
       aria-labelledby="review-sms-title"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">

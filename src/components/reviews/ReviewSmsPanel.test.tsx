@@ -5,7 +5,8 @@ import type {
   ReviewSmsOverview,
 } from "@/lib/billing/reviewSms";
 
-const harness = vi.hoisted(() => ({ states: [] as unknown[], cursor: 0 }));
+const harness = vi.hoisted(() => ({ states: [] as unknown[], cursor: 0, hashTarget: vi.fn(() => ({ current: null })) }));
+vi.mock("@/lib/ui/useHashTarget", () => ({ useHashTarget: harness.hashTarget }));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
   useState: <T,>(initial: T) => {
@@ -31,7 +32,7 @@ const overview: ReviewSmsOverview = {
   eligibleSource: "direct",
   price: { monthlyCents: 2000, activationCents: 2500, includedParts: 250 },
 };
-function render(value: ReviewSmsOverview, extraStates: unknown[] = []) {
+function render(value: ReviewSmsOverview | null, extraStates: unknown[] = []) {
   harness.states = [value, ...extraStates];
   harness.cursor = 0;
   return renderToStaticMarkup(<ReviewSmsPanel onStatusChanged={vi.fn()} />);
@@ -39,8 +40,17 @@ function render(value: ReviewSmsOverview, extraStates: unknown[] = []) {
 beforeEach(() => {
   harness.states = [];
   harness.cursor = 0;
+  harness.hashTarget.mockClear();
 });
 describe("review texting pricing and lifecycle presentation", () => {
+  it("waits for the full texting panel or a terminal loading error before resolving its anchor", () => {
+    render(null);
+    expect(harness.hashTarget).toHaveBeenLastCalledWith("review-sms", false);
+    render(overview);
+    expect(harness.hashTarget).toHaveBeenLastCalledWith("review-sms", true);
+    render(null, [false, false, "Could not load texting settings"]);
+    expect(harness.hashTarget).toHaveBeenLastCalledWith("review-sms", true);
+  });
   it("offers no activation or setup actions when review texting is disabled", () => {
     const html = render({ ...overview, enabled: false });
     expect(html).toContain(

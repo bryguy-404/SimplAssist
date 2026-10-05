@@ -122,6 +122,13 @@ beforeEach(() => {
 });
 
 describe("Sidebar navigation", () => {
+  it("hides the closed mobile panel from keyboard focus and assistive technology", () => {
+    const markup = renderSidebar();
+    const mobile = markup.match(/<aside id="mobile-dashboard-navigation"[^>]*>/)?.[0];
+    expect(mobile).toContain('aria-hidden="true"');
+    expect(mobile).toContain("invisible pointer-events-none");
+    expect(markup).toContain('aria-controls="mobile-dashboard-navigation"');
+  });
   it.each([null, "book", "quote", "callback"] as const)(
     "keeps primary_goal=%s byte-identical to the default legacy navigation",
     (primaryGoal) => {

@@ -188,6 +188,7 @@ export default function Sidebar({
           onClick={() => setMobileOpen((o) => !o)}
           aria-label={mobileOpen ? "Close menu" : "Open menu"}
           aria-expanded={mobileOpen}
+          aria-controls="mobile-dashboard-navigation"
           className="shrink-0 flex items-center justify-center min-h-[44px] min-w-[44px] -mr-1 rounded-lg text-[var(--brand-primary)] dark:text-[var(--brand-primary-dark)] transition-transform duration-200 active:scale-90 hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--brand-primary-rgb)/.50)] dark:focus-visible:ring-[rgb(var(--brand-primary-dark-rgb)/.50)] focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-[#121214]"
         >
           <StaggeredMenuIcon open={mobileOpen} />
@@ -204,12 +205,14 @@ export default function Sidebar({
 
       {/* Mobile sidebar — floating panel */}
       <aside
+        id="mobile-dashboard-navigation"
+        aria-hidden={!mobileOpen}
         className={`lg:hidden fixed z-50 w-[min(16rem,calc(100vw-1.5rem))] left-3 top-3 bottom-3 flex flex-col
           bg-white/95 dark:bg-[rgba(18,18,20,0.94)] backdrop-blur-[20px] backdrop-saturate-[1.4]
           border border-[#ece4d8] dark:border-white/[0.12]
           rounded-2xl shadow-[0_24px_64px_rgba(0,0,0,0.18)] dark:shadow-[0_24px_64px_rgba(0,0,0,0.55)]
           transform transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] overflow-hidden
-          ${mobileOpen ? "translate-x-0" : "-translate-x-[calc(100%+14px)]"}`}
+          ${mobileOpen ? "visible translate-x-0" : "invisible pointer-events-none -translate-x-[calc(100%+14px)]"}`}
       >
         {sidebarContent}
       </aside>

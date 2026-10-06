@@ -11,7 +11,9 @@ import { AdminFlagForm } from "../AdminFlagForm";
 import { BusinessPartnerBillingForm } from "../BusinessPartnerBillingForm";
 import { A2pApproveForm } from "../A2pApproveForm";
 import { ExistingTelnyxBrandForm } from "../ExistingTelnyxBrandForm";
+import { SharedRegistrationForm, type SharedRegistrationAccounts } from "../SharedRegistrationForm";
 import { getExistingTelnyxBrandLinkState } from "@/lib/messaging/registration/existingBrand";
+import { readSharedRegistrationContext, sharedRegistrationPilotEnabled } from "@/lib/messaging/sharedBusinessRegistrations.server";
 import {
   AccountDeletionServiceError,
   getAdminAccountDeletionPreview,
@@ -50,6 +52,8 @@ import type {
 
 export const dynamic = "force-dynamic";
 
+const SHARED_SOURCE_BUSINESS_ID = "ea848911-ef72-44a6-8cf3-c47b3959be26";
+
 type DetailBusiness = {
   id: string;
   owner_id: string | null;
@@ -85,6 +89,7 @@ type DetailBusiness = {
   campaign_status: string | null;
   has_ein: boolean | null;
   telnyx_campaign_id: string | null;
+  shared_registration_id: string | null;
   billing_pilot: boolean;
   billing_comped: boolean;
   billing_exempt: boolean;
@@ -133,7 +138,7 @@ export default async function AdminBusinessPage({
   const { data: business, error: businessError } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id, owner_id, deleted_at, deletion_scheduled_for, partner_id, billing_mode, partner_plan, name, business_type, business_type_other, website_url, use_case_description, sample_messages, opt_in_description, a2p_risk_review_status, a2p_risk_review_input_hash, a2p_risk_review_message, a2p_risk_review_reason, a2p_risk_review_findings, a2p_risk_review_customer_answer, a2p_risk_review_customer_selections, a2p_risk_review_reviewed_at, a2p_risk_review_override_note, onboarding_registration_status, brand_status, campaign_status, has_ein, telnyx_campaign_id, billing_pilot, billing_comped, billing_exempt, telnyx_submission_disabled, sms_overage_opt_in, billing_admin_notes",
+      "id, owner_id, deleted_at, deletion_scheduled_for, partner_id, billing_mode, partner_plan, name, business_type, business_type_other, website_url, use_case_description, sample_messages, opt_in_description, a2p_risk_review_status, a2p_risk_review_input_hash, a2p_risk_review_message, a2p_risk_review_reason, a2p_risk_review_findings, a2p_risk_review_customer_answer, a2p_risk_review_customer_selections, a2p_risk_review_reviewed_at, a2p_risk_review_override_note, onboarding_registration_status, brand_status, campaign_status, has_ein, telnyx_campaign_id, shared_registration_id, billing_pilot, billing_comped, billing_exempt, telnyx_submission_disabled, sms_overage_opt_in, billing_admin_notes",
     )
     .eq("id", params.businessId)
     .maybeSingle<DetailBusiness>();
@@ -196,6 +201,30 @@ export default async function AdminBusinessPage({
         <AdminAccountDeletionPanel initialPreview={deletionPreview} />
       </main>
     );
+  }
+
+  // This private control is bound to the exact two-account admission allowlist.
+  // Reading the page performs no provider inspection or registration mutation.
+  let sharedRegistrationAccounts: SharedRegistrationAccounts | null = null;
+  let sharedMembershipStatus: "approved" | "active" | "revoked" | null = null;
+  if (business.owner_id && business.id !== SHARED_SOURCE_BUSINESS_ID &&
+      sharedRegistrationPilotEnabled(business.id, "admission") &&
+      sharedRegistrationPilotEnabled(SHARED_SOURCE_BUSINESS_ID, "admission")) {
+    const [sourceResult, context] = await Promise.all([
+      supabaseAdmin.from("businesses").select("id,owner_id,deleted_at,deletion_scheduled_for")
+        .eq("id", SHARED_SOURCE_BUSINESS_ID)
+        .maybeSingle<{ id: string; owner_id: string | null; deleted_at: string | null; deletion_scheduled_for: string | null }>(),
+      readSharedRegistrationContext(business.id),
+    ]);
+    const source = sourceResult.data;
+    if (!sourceResult.error && source?.id === SHARED_SOURCE_BUSINESS_ID && source.owner_id &&
+        !source.deleted_at && !source.deletion_scheduled_for) {
+      sharedRegistrationAccounts = {
+        sourceBusinessId: source.id, sourceOwnerId: source.owner_id,
+        targetBusinessId: business.id, targetOwnerId: business.owner_id,
+      };
+      sharedMembershipStatus = context?.membership.status ?? null;
+    }
   }
 
   const [
@@ -441,7 +470,17 @@ export default async function AdminBusinessPage({
         />
       </section>
 
-      <DetailsCard
+      {sharedRegistrationAccounts ? <DetailsCard title="Private shared registration" open>
+        <SharedRegistrationForm
+          accounts={sharedRegistrationAccounts}
+          targetBusinessName={business.name}
+          membershipStatus={sharedMembershipStatus}
+        />
+      </DetailsCard> : business.shared_registration_id ? <DetailsCard title="Shared legal registration">
+        <p className="text-sm text-stone-600 dark:text-[#bdbdbf]">
+          This account uses a shared legal registration. Its existing membership is retained when new admissions are disabled.
+        </p>
+      </DetailsCard> : <DetailsCard
         title="Existing Telnyx brand recovery"
         open={existingBrandLinkState !== null}
       >
@@ -449,7 +488,7 @@ export default async function AdminBusinessPage({
           businessId={business.id}
           initialLinkState={existingBrandLinkState}
         />
-      </DetailsCard>
+      </DetailsCard>}
 
       <DetailsCard title="Carrier-safe submitted copy">
         <div className="space-y-4 text-sm">

@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   buildRisk: vi.fn(),
   hashRisk: vi.fn(),
   getExistingBrand: vi.fn(),
+  sharedPilotEnabled: vi.fn(),
+  sharedContext: vi.fn(),
+  sharedForm: vi.fn(),
   loadHealth: vi.fn(),
   loadActivity: vi.fn(),
   results: new Map<
@@ -57,6 +60,16 @@ vi.mock("@/lib/messaging/registration/riskScreening", () => ({
 }));
 vi.mock("@/lib/messaging/registration/existingBrand", () => ({
   getExistingTelnyxBrandLinkState: mocks.getExistingBrand,
+}));
+vi.mock("@/lib/messaging/sharedBusinessRegistrations.server", () => ({
+  sharedRegistrationPilotEnabled: mocks.sharedPilotEnabled,
+  readSharedRegistrationContext: mocks.sharedContext,
+}));
+vi.mock("../SharedRegistrationForm", () => ({
+  SharedRegistrationForm: (props: unknown) => {
+    mocks.sharedForm(props);
+    return <div>SHARED_REGISTRATION_FORM</div>;
+  },
 }));
 vi.mock("../AdminFlagForm", () => ({
   AdminFlagForm: () => <div>ADMIN_FLAG_FORM</div>,
@@ -157,6 +170,7 @@ function storedBusiness(overrides: Record<string, unknown> = {}) {
     has_ein: true,
     ein: "12-3456789",
     telnyx_campaign_id: "campaign-current",
+    shared_registration_id: null,
     pending_phone_number: "+13175550049",
     billing_pilot: false,
     billing_comped: false,
@@ -281,6 +295,8 @@ beforeEach(() => {
   mocks.buildRisk.mockResolvedValue({ input: { businessName: "Lifecycle" } });
   mocks.hashRisk.mockReturnValue("risk-hash");
   mocks.getExistingBrand.mockResolvedValue(null);
+  mocks.sharedPilotEnabled.mockReturnValue(false);
+  mocks.sharedContext.mockResolvedValue(null);
   mocks.from.mockImplementation((table: string) => {
     const query = {
       select: vi.fn(),
@@ -303,6 +319,54 @@ beforeEach(() => {
 });
 
 describe("AdminBusinessPage account lifecycle rendering", () => {
+  it("keeps private shared setup hidden and avoids its reads when admission is off", async () => {
+    const html = renderToStaticMarkup(await AdminBusinessPage({ params: { businessId: BUSINESS_ID } }));
+    expect(html).not.toContain("SHARED_REGISTRATION_FORM");
+    expect(mocks.sharedContext).not.toHaveBeenCalled();
+  });
+
+  it("binds shared setup to server-read source and target owners and replaces legacy attachment", async () => {
+    const source = "ea848911-ef72-44a6-8cf3-c47b3959be26";
+    const sourceOwner = "00000000-0000-4000-a045-000000000002";
+    mocks.sharedPilotEnabled.mockReturnValue(true);
+    const baseFrom = mocks.from.getMockImplementation()!;
+    mocks.from.mockImplementation((table: string) => {
+      const query = baseFrom(table);
+      if (table === "businesses") {
+        query.eq.mockImplementation((_column: string, id: string) => {
+          if (id === source) query.maybeSingle.mockResolvedValue({
+            data: { id: source, owner_id: sourceOwner, deleted_at: null, deletion_scheduled_for: null }, error: null,
+          });
+          return query;
+        });
+      }
+      return query;
+    });
+    const html = renderToStaticMarkup(await AdminBusinessPage({ params: { businessId: BUSINESS_ID } }));
+    expect(mocks.sharedForm).toHaveBeenCalledWith({
+      accounts: { sourceBusinessId: source, sourceOwnerId: sourceOwner, targetBusinessId: BUSINESS_ID, targetOwnerId: OWNER_ID },
+      targetBusinessName: "Lifecycle Dental", membershipStatus: null,
+    });
+    expect(html).toContain("SHARED_REGISTRATION_FORM");
+    expect(html).not.toContain("EXISTING_TELNYX_FORM");
+    expect(mocks.sharedContext).toHaveBeenCalledWith(BUSINESS_ID);
+    expect(mocks.requireAdminUser.mock.invocationCallOrder[0]).toBeLessThan(mocks.sharedPilotEnabled.mock.invocationCallOrder[0]);
+  });
+
+  it("does not expose shared controls if the exact source cannot be verified", async () => {
+    mocks.sharedPilotEnabled.mockReturnValue(true);
+    const html = renderToStaticMarkup(await AdminBusinessPage({ params: { businessId: BUSINESS_ID } }));
+    expect(html).not.toContain("SHARED_REGISTRATION_FORM");
+    expect(mocks.sharedForm).not.toHaveBeenCalled();
+  });
+
+  it("never offers legacy brand attachment for an existing shared member when admissions are off", async () => {
+    mocks.results.set("businesses", { data: storedBusiness({ shared_registration_id: "shared-registration" }), error: null });
+    const html = renderToStaticMarkup(await AdminBusinessPage({ params: { businessId: BUSINESS_ID } }));
+    expect(html).toContain("This account uses a shared legal registration");
+    expect(html).not.toContain("EXISTING_TELNYX_FORM");
+    expect(html).not.toContain("SHARED_REGISTRATION_FORM");
+  });
   it.each(["support_required", "carrier_pending"])(
     "provides a paid-upgrade recovery hint for %s",
     async (state) => {

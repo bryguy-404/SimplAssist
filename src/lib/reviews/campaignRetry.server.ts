@@ -11,6 +11,7 @@ import { campaignAttemptRpc, captureReviewCampaignFailure, readReviewCampaignAtt
 import { buildReviewCampaignFiling, reviewCampaignFilingHash, reviewSmsCampaignMatches } from "./campaignFiling.server";
 import { readReviewCampaignInventory } from "./campaignInventory.server";
 import { validateReviewSmsSetup } from "./smsProvisioning.server";
+import { mapCampaignStatus } from "@/lib/messaging/registration/statusMapper";
 
 const PILOT = "0e2bf188-ab53-4d3b-8e1a-7aac49125811";
 export function reviewCampaignRetryEnabled(businessId: string) {
@@ -94,6 +95,52 @@ function samePreparationIdentity(c: RetryContext, input: PrepareCampaignRetry) {
     c.proof.context.membership.revision === input.membershipRevision;
 }
 
+/** A bound, recorded submission no longer satisfies the new-submission setup
+ * preflight. Inspect its immutable evidence without reopening that workflow. */
+async function inspectRecordedCampaign(account: ReviewSmsAccount, attempts: ReviewCampaignAttempt[]) {
+  const owned = attempts.filter(t => t.business_id === account.business_id && t.owner_id === account.owner_id && t.account_id === account.id);
+  const accepted = owned.filter(t => t.state === "accepted" && t.provider_campaign_id === account.campaign_id &&
+    t.reference_id === `reviews:${account.id}${t.attempt_number === 1 ? "" : `:r${t.attempt_number - 1}`}`);
+  const originals = owned.filter(t => t.attempt_number === 1);
+  if (!account.campaign_id || !account.provider_submitted_at || accepted.length !== 1 || originals.length !== 1) return null;
+  const attempt = accepted[0], original = originals[0];
+  if (!original.reservation_id || !/^[a-f0-9]{64}$/.test(original.payload_hash) ||
+    (attempt.attempt_number !== 1 && attempt.original_reservation_id !== original.reservation_id) ||
+    typeof attempt.filing.brandId !== "string" || !attempt.filing.brandId || attempt.filing.referenceId !== attempt.reference_id)
+    return null;
+  let providerMatchCount = 0;
+  let reason = "The campaign submission is recorded for this account. Current carrier status could not be verified; no submission was repeated.";
+  try {
+    const inventory = await readReviewCampaignInventory(attempt.filing.brandId);
+    const references = new Set(owned.map(t => t.reference_id));
+    const matches = inventory.records.filter(t => references.has(t.referenceId ?? ""));
+    providerMatchCount = matches.length;
+    const candidate = await telnyx.messaging10dlc.campaign.retrieve(account.campaign_id, { maxRetries: 0, timeout: 10000 });
+    if (candidate.campaignId !== account.campaign_id || !reviewSmsCampaignMatches(candidate as unknown as Record<string, unknown>, attempt.filing)) {
+      reason = "The campaign submission is recorded, but current Telnyx details do not match its saved application. Review the discrepancy; no retry is permitted.";
+    } else if (matches.length > 1 || matches.some(t => t.campaignId !== account.campaign_id)) {
+      reason = "The campaign submission is recorded. Multiple or conflicting campaigns were found; review them before changing service. No retry is permitted.";
+    } else if (mapCampaignStatus(candidate).dbStatus === "rejected") {
+      reason = "The campaign submission is recorded, but Telnyx now reports a rejected, suspended, or expired campaign. Review the carrier feedback; no retry is permitted.";
+    } else if (account.cancel_at || account.activation_refunded_at || ["cancel_pending", "release_pending", "released", "support_required"].includes(account.state)) {
+      reason = "The campaign submission is recorded and matches Telnyx. Existing account restrictions remain in place; this inspection does not resume texting or authorize a retry.";
+    } else {
+      reason = matches.length === 0
+        ? "The campaign submission is recorded and its Telnyx details match, although the campaign list has not caught up. Carrier approval and number readiness are checked separately before texting is enabled."
+        : "The campaign submission is recorded and matches Telnyx. Carrier approval and number readiness are checked separately before texting is enabled; no further submission is needed.";
+    }
+  } catch {
+    // A temporary provider read failure cannot erase a completed submission.
+  }
+  return {
+    eligible: false, correctedEligible: false, preparedRetry: null, reason,
+    businessId: account.business_id, ownerId: account.owner_id, accountId: account.id,
+    originalReservationId: original.reservation_id, originalPayloadHash: original.payload_hash, membershipRevision: null,
+    state: account.state, providerMatchCount,
+    attempts: owned.map(t => ({ id: t.id, referenceId: t.reference_id, state: t.state, startedAt: t.started_at, diagnostics: t.diagnostics })),
+  };
+}
+
 export async function inspectReviewCampaignRetry(businessId: string) {
   assertEnabled(businessId);
   // Historical diagnostics remain readable if a later carrier rejection makes
@@ -101,6 +148,8 @@ export async function inspectReviewCampaignRetry(businessId: string) {
   const account = await readReviewSmsAccount(businessId);
   if (!account) throw new ReviewSmsError("review_sms_campaign_retry_changed");
   const attempts = await readReviewCampaignAttempts(businessId);
+  const recorded = await inspectRecordedCampaign(account, attempts);
+  if (recorded) return recorded;
   let c: Awaited<ReturnType<typeof context>>;
   try { c = await context(businessId); }
   catch {

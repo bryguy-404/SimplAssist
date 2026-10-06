@@ -644,4 +644,119 @@ describe("one corrected keyword submission", () => {
     expect(calls("review_sms_finish_campaign_attempt")[0][1]).toMatchObject({ p_attempt: correctedAttemptId, p_outcome: "accepted" });
     expect(mocks.submit).not.toHaveBeenCalled();
   });
+
+  function bindAcceptedCorrection() {
+    withPreparedCorrection();
+    Object.assign(correction, { state: "accepted", provider_campaign_id: "corrected-campaign" });
+    Object.assign(account, { campaign_id: "corrected-campaign", provider_submitted_at: "2026-10-06T05:00:00Z", provider_attempt_count: 3 });
+    mocks.inventory.mockResolvedValue({ records: [{ campaignId: "corrected-campaign", referenceId: `${referenceId}:r2` }] });
+    mocks.retrieve.mockResolvedValue({ ...correctedFiling, campaignId: "corrected-campaign", campaignStatus: "TCR_PENDING", submissionStatus: "PENDING" });
+    mocks.validate.mockRejectedValue(new Error("The new-submission setup preflight no longer permits a bound campaign"));
+  }
+
+  it("inspects a bound accepted submission without requiring new-submission eligibility", async () => {
+    bindAcceptedCorrection();
+    const before = structuredClone([original, attempt, correction, account]);
+    const state = await inspectReviewCampaignRetry(businessId);
+    expect(state).toMatchObject({
+      eligible: false, correctedEligible: false, preparedRetry: null,
+      ownerId, accountId, originalReservationId: reservationId, originalPayloadHash: hash(historical),
+      state: "carrier_pending", providerMatchCount: 1,
+    });
+    expect(state.reason).toContain("submission is recorded and matches Telnyx");
+    expect(state.reason).toContain("Carrier approval and number readiness are checked separately");
+    expect(state.attempts[2]).toMatchObject({ id: correctedAttemptId, state: "accepted" });
+    expect([original, attempt, correction, account]).toEqual(before);
+    expect(mocks.validate).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it("returns confirmed account identity after successful execution even when the post-bind setup preflight would reject", async () => {
+    withPreparedCorrection();
+    mocks.retrieve.mockResolvedValue({ ...correctedFiling, campaignId: "created-campaign", campaignStatus: "MNO_PENDING" });
+    const normalRpc = mocks.rpc.getMockImplementation()!;
+    mocks.rpc.mockImplementation(async (name, args) => {
+      if (name === "review_sms_finish_campaign_attempt" && args.p_outcome === "accepted") {
+        Object.assign(correction, { state: "accepted", provider_campaign_id: "created-campaign" });
+        Object.assign(account, { campaign_id: "created-campaign", provider_submitted_at: "2026-10-06T05:00:00Z", provider_attempt_count: 3 });
+        mocks.inventory.mockResolvedValue({ records: [{ campaignId: "created-campaign", referenceId: `${referenceId}:r2` }] });
+        mocks.validate.mockRejectedValue(new Error("already bound"));
+      }
+      return normalRpc(name, args);
+    });
+    await expect(executeReviewCampaignRetry({ businessId, attemptId: correctedAttemptId, token })).resolves.toMatchObject({
+      eligible: false, correctedEligible: false, preparedRetry: null, ownerId, accountId,
+      originalReservationId: reservationId, originalPayloadHash: hash(historical), providerMatchCount: 1,
+    });
+    expect(mocks.submit).toHaveBeenCalledOnce();
+    expect(mocks.validate).toHaveBeenCalledOnce();
+  });
+
+  it.each(["inventory", "candidate"])("retains recorded acceptance and durable identity if the current provider %s read fails", async stage => {
+    bindAcceptedCorrection();
+    if (stage === "inventory") mocks.inventory.mockRejectedValue(new Error("temporary provider failure"));
+    else mocks.retrieve.mockRejectedValue(new Error("temporary provider failure"));
+    const state = await inspectReviewCampaignRetry(businessId);
+    expect(state).toMatchObject({ eligible: false, correctedEligible: false, preparedRetry: null,
+      originalReservationId: reservationId, originalPayloadHash: hash(historical), providerMatchCount: stage === "inventory" ? 0 : 1 });
+    expect(state.reason).toContain("submission is recorded");
+    expect(state.reason).toContain("Current carrier status could not be verified");
+    expect(state.attempts[2].state).toBe("accepted");
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it.each(["cancel_pending", "release_pending", "released", "support_required"])("inspecting accepted submission preserves %s restrictions", async state => {
+    bindAcceptedCorrection();
+    account.state = state as ReviewSmsAccount["state"];
+    const result = await inspectReviewCampaignRetry(businessId);
+    expect(result).toMatchObject({ state, eligible: false, correctedEligible: false, preparedRetry: null });
+    expect(result.reason).toContain("Existing account restrictions remain in place");
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it.each(["MNO_REJECTED", "TCR_SUSPENDED", "TCR_EXPIRED"])("reports current carrier %s without erasing recorded submission or granting approval", async campaignStatus => {
+    bindAcceptedCorrection();
+    mocks.retrieve.mockResolvedValue({ ...correctedFiling, campaignId: "corrected-campaign", campaignStatus });
+    const result = await inspectReviewCampaignRetry(businessId);
+    expect(result).toMatchObject({ eligible: false, correctedEligible: false, preparedRetry: null });
+    expect(result.reason).toContain("rejected, suspended, or expired");
+    expect(result.attempts[2].state).toBe("accepted");
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it("reports exact-filing mismatch without accepting changed provider details", async () => {
+    bindAcceptedCorrection();
+    mocks.retrieve.mockResolvedValue({ ...correctedFiling, campaignId: "corrected-campaign", description: "Changed details" });
+    const result = await inspectReviewCampaignRetry(businessId);
+    expect(result.reason).toContain("do not match its saved application");
+    expect(result).toMatchObject({ eligible: false, correctedEligible: false, preparedRetry: null, providerMatchCount: 1 });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it("reports all observed original/retry matches instead of hiding a duplicate", async () => {
+    bindAcceptedCorrection();
+    mocks.inventory.mockResolvedValue({ records: [
+      { campaignId: "old-campaign", referenceId }, { campaignId: "corrected-campaign", referenceId: `${referenceId}:r2` },
+    ] });
+    const result = await inspectReviewCampaignRetry(businessId);
+    expect(result).toMatchObject({ providerMatchCount: 2, eligible: false, correctedEligible: false, preparedRetry: null });
+    expect(result.reason).toContain("Multiple or conflicting campaigns");
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([{ owner_id: token }, { account_id: token }, { provider_campaign_id: "other-campaign" }, { original_reservation_id: token }])(
+    "does not use a substituted accepted journal binding for success identity %#", async changed => {
+      bindAcceptedCorrection();
+      Object.assign(correction, changed);
+      const result = await inspectReviewCampaignRetry(businessId);
+      expect(result).toMatchObject({ eligible: false, correctedEligible: false, preparedRetry: null, originalReservationId: null });
+      expect(result.reason).toContain("Current registration could not be verified");
+      expect(mocks.retrieve).not.toHaveBeenCalled();
+      expect(mocks.rpc).not.toHaveBeenCalled();
+    },
+  );
 });

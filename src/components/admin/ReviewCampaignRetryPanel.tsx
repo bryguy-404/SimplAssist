@@ -29,11 +29,12 @@ const inspectionSchema = z.object({
     diagnostics: z.unknown().optional(),
   })),
   providerMatchCount: z.number().int().nonnegative(),
+  preparedRetry: z.object({ attemptId: z.string().uuid(), revision: z.number().int().positive() }).nullable().optional(),
 });
 const authorizationSchema = z.object({
   attemptId: z.string().uuid(),
   token: z.string().min(1),
-  expiresAt: z.string().datetime(),
+  expiresAt: z.string().datetime({ offset: true }),
 });
 type Inspection = z.infer<typeof inspectionSchema>;
 type RetainedAuthorization = z.infer<typeof authorizationSchema> & Pick<Inspection,
@@ -116,6 +117,9 @@ export function ReviewCampaignRetryPanel({ businessId }: { businessId: string })
   const retainedAuthorization = useRef<RetainedAuthorization | null>(null);
   const canRetry = supportsRetry(inspection) && accepted && !retryStarted;
   const canResume = resumeInspected && matchesPreparedAuthorization(inspection, retainedAuthorization.current);
+  const canRecover = resumeInspected && inspection?.preparedRetry && inspection.ownerId && inspection.accountId &&
+    inspection.originalReservationId && inspection.originalPayloadHash && inspection.membershipRevision &&
+    inspection.providerMatchCount === 0 && !retainedAuthorization.current;
 
   async function inspect() {
     if (pending.current) return;
@@ -130,7 +134,7 @@ export function ReviewCampaignRetryPanel({ businessId }: { businessId: string })
       }), businessId);
       setInspection(result);
       const resumable = matchesPreparedAuthorization(result, retainedAuthorization.current);
-      setResumeInspected(resumable);
+      setResumeInspected(resumable || Boolean(result.preparedRetry));
       if (!resumable) retainedAuthorization.current = null;
     } catch (cause) {
       setInspection(null);
@@ -142,7 +146,7 @@ export function ReviewCampaignRetryPanel({ businessId }: { businessId: string })
   }
 
   async function retryOnce(resume = false) {
-    if (pending.current || !(resume ? canResume : canRetry) || !inspection) return;
+    if (pending.current || !(resume ? canResume : canRetry || (canRecover && accepted)) || !inspection) return;
     pending.current = true;
     setBusy("retry");
     setError(null);
@@ -153,18 +157,21 @@ export function ReviewCampaignRetryPanel({ businessId }: { businessId: string })
     const before = inspection;
     try {
       if (!resume) {
+        const recover = before.preparedRetry;
         const prepared = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            action: "prepare", businessId, ownerId: before.ownerId, accountId: before.accountId,
+            action: recover ? "reauthorize" : "prepare", businessId, ownerId: before.ownerId, accountId: before.accountId,
             originalReservationId: before.originalReservationId, originalPayloadHash: before.originalPayloadHash,
             membershipRevision: before.membershipRevision, acceptAdditionalFee: true,
+            ...(recover ? { attemptId: recover.attemptId, authorizationRevision: recover.revision } : {}),
           }),
         });
         const data = await prepared.json().catch(() => null);
         const authorization = authorizationSchema.safeParse(data?.authorization);
-        if (!prepared.ok || !authorization.success || Date.parse(authorization.data.expiresAt) <= Date.now()) {
+        if (!prepared.ok || !authorization.success || Date.parse(authorization.data.expiresAt) <= Date.now() ||
+          (recover && authorization.data.attemptId !== recover.attemptId)) {
           throw new Error("The retry authorization could not be confirmed.");
         }
         retainedAuthorization.current = { ...authorization.data, businessId, ownerId: before.ownerId,
@@ -234,15 +241,16 @@ export function ReviewCampaignRetryPanel({ businessId }: { businessId: string })
         A new submission is unavailable. {inspection.reason ? inspection.reason.replaceAll("_", " ") : "Review the existing attempt before continuing."}
       </p> : null}
     </div> : null}
-    {supportsRetry(inspection) && !retryStarted ? <div className="space-y-3">
+    {(supportsRetry(inspection) && !retryStarted) || canRecover ? <div className="space-y-3">
+      {canRecover ? <p>This retry has not started. Resume the same recorded attempt with a fresh one-use authorization.</p> : null}
       <label className="flex items-start gap-2">
         <input type="checkbox" checked={accepted} disabled={busy !== null}
           onChange={event => setAccepted(event.target.checked)}
           className="mt-0.5 h-4 w-4 accent-[#ea580c] dark:accent-[#ff914d]" />
         <span>I authorize one retry for this account and accept the possible additional Telnyx fee and duplicate campaign.</span>
       </label>
-      <button type="button" disabled={busy !== null || !canRetry} onClick={() => void retryOnce()}
-        className={`${btnPrimaryCompact} disabled:opacity-50`}>Retry campaign once</button>
+      <button type="button" disabled={busy !== null || !(canRetry || (canRecover && accepted))} onClick={() => void retryOnce()}
+        className={`${btnPrimaryCompact} disabled:opacity-50`}>{canRecover ? "Resume unused retry" : "Retry campaign once"}</button>
     </div> : null}
     {canResume ? <div className="space-y-3">
       <p>The inspected retry is still prepared and has not started. Resume the same authorization; this does not prepare another attempt.</p>

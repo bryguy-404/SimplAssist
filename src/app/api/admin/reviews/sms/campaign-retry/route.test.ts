@@ -1,12 +1,13 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ admin: vi.fn(), inspect: vi.fn(), prepare: vi.fn(), execute: vi.fn() }));
+const mocks = vi.hoisted(() => ({ admin: vi.fn(), inspect: vi.fn(), prepare: vi.fn(), reauthorize: vi.fn(), execute: vi.fn() }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/admin/auth", () => ({ getAdminUser: mocks.admin }));
 vi.mock("@/lib/reviews/campaignRetry.server", () => ({
   inspectReviewCampaignRetry: mocks.inspect,
   prepareReviewCampaignRetry: mocks.prepare,
+  reauthorizeReviewCampaignRetry: mocks.reauthorize,
   executeReviewCampaignRetry: mocks.execute,
 }));
 
@@ -25,6 +26,7 @@ const path = "/api/admin/reviews/sms/campaign-retry";
 const preparation = { action: "prepare", businessId, ownerId, accountId, originalReservationId: reservationId,
   originalPayloadHash: "a".repeat(64), membershipRevision: 2, acceptAdditionalFee: true };
 const execution = { action: "execute", businessId, attemptId, token };
+const reauthorization = { ...preparation, action: "reauthorize", attemptId, authorizationRevision: 1 };
 const inspection = { businessId, eligible: true, attempts: [] };
 const request = (body: unknown, extraHeaders: Record<string, string> = {}) => new NextRequest(`${origin}${path}`, {
   method: "POST",
@@ -39,6 +41,7 @@ beforeEach(() => {
   mocks.admin.mockResolvedValue({ id: actorId });
   mocks.inspect.mockResolvedValue(inspection);
   mocks.prepare.mockResolvedValue({ attemptId, token, expiresAt: "2026-10-06T04:15:00Z" });
+  mocks.reauthorize.mockResolvedValue({ attemptId, token, expiresAt: "2026-10-06T04:15:00.000Z" });
   mocks.execute.mockResolvedValue({ ...inspection, eligible: false });
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
@@ -77,6 +80,51 @@ describe("admin campaign retry GET", () => {
 });
 
 describe("admin campaign retry POST", () => {
+  it("reauthorizes the same attempt using the authenticated actor and the exact inspected revision", async () => {
+    const response = await POST(request(reauthorization));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ authorization: { attemptId, token, expiresAt: "2026-10-06T04:15:00.000Z" } });
+    expect(mocks.reauthorize).toHaveBeenCalledExactlyOnceWith({ ...reauthorization, actorId });
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(response.headers.get("cache-control")).toContain("no-store");
+  });
+
+  it.each([
+    { ...reauthorization, authorizationRevision: 0 }, { ...reauthorization, authorizationRevision: 1.5 },
+    { ...reauthorization, authorizationRevision: undefined }, { ...reauthorization, attemptId: "invalid" },
+    { ...reauthorization, actorId: ownerId }, { ...reauthorization, token },
+    { ...reauthorization, acceptAdditionalFee: false }, { ...reauthorization, acceptAdditionalFee: undefined },
+    { ...reauthorization, originalPayloadHash: "invalid" }, { ...reauthorization, membershipRevision: 0 },
+  ])("strictly validates reauthorization acknowledgement and compare-and-swap fields %#", async body => {
+    expect((await POST(request(body))).status).toBe(400);
+    expect(mocks.reauthorize).not.toHaveBeenCalled();
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("does not permit an ordinary session to replace the retry capability", async () => {
+    mocks.admin.mockResolvedValue(null);
+    expect((await POST(request(reauthorization))).status).toBe(404);
+    expect(mocks.reauthorize).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ host: "foreign.test" }, 404], [{ origin: "https://foreign.test" }, 403],
+    [{ "sec-fetch-site": "cross-site" }, 403], [{ "content-type": "text/plain" }, 400],
+  ] as const)("applies the same admin mutation boundary to reauthorization %#", async (headers, status) => {
+    expect((await POST(request(reauthorization, headers))).status).toBe(status);
+    expect(mocks.reauthorize).not.toHaveBeenCalled();
+  });
+
+  it("does not auto-repeat a reauthorization whose compare-and-swap revision is stale", async () => {
+    mocks.reauthorize.mockRejectedValue(new ReviewSmsError("review_sms_campaign_retry_changed"));
+    expect((await POST(request(reauthorization))).status).toBe(409);
+    expect(mocks.reauthorize).toHaveBeenCalledOnce();
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
   it("rejects a non-admin before reading malformed JSON", async () => {
     mocks.admin.mockResolvedValue(null);
     const response = await POST(new NextRequest(`${origin}${path}`, { method: "POST", body: "invalid" }));

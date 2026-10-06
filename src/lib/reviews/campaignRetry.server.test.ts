@@ -30,7 +30,9 @@ import { ReviewSmsError, type ReviewSmsAccount } from "@/lib/billing/reviewSms";
 import { serializeCampaignError } from "./campaignDiagnostics.server";
 import {
   executeReviewCampaignRetry, inspectReviewCampaignRetry, prepareReviewCampaignRetry,
+  reauthorizeReviewCampaignRetry,
   reconcileReviewCampaignAttempts, reviewCampaignRetryEnabled,
+  normalizeReviewCampaignAuthorizationTimestamp,
 } from "./campaignRetry.server";
 
 const businessId = "0e2bf188-ab53-4d3b-8e1a-7aac49125811";
@@ -54,6 +56,7 @@ let proof: { context: { membership: { revision: number } }; inventory: { records
 const execute = () => executeReviewCampaignRetry({ businessId, attemptId, token });
 const prepareInput = () => ({ businessId, ownerId, accountId, originalReservationId: reservationId,
   originalPayloadHash: hash(originalFiling), membershipRevision: 2, actorId: ownerId });
+const reauthorizeInput = () => ({ ...prepareInput(), attemptId, authorizationRevision: 1 });
 const calls = (name: string) => mocks.rpc.mock.calls.filter(([rpc]) => rpc === name);
 
 beforeEach(() => {
@@ -87,7 +90,7 @@ beforeEach(() => {
     reservation_id: reservationId, diagnostics: { historical: true }, started_at: "2026-10-06T03:12:21Z" };
   attempt = { id: attemptId, business_id: businessId, account_id: accountId, owner_id: ownerId, attempt_number: 2,
     reference_id: retryFiling.referenceId, payload_hash: hash(retryFiling), filing: { ...retryFiling }, state: "prepared",
-    original_reservation_id: reservationId, diagnostics: null, started_at: null };
+    original_reservation_id: reservationId, diagnostics: null, started_at: null, authorization_revision: 1 };
   proof = { context: { membership: { revision: 2 } }, inventory: { records: [] }, verifiedAt: "2026-10-06T04:00:00Z" };
   mocks.validate.mockImplementation(async () => ({ account, business }));
   mocks.account.mockImplementation(async () => account);
@@ -105,6 +108,7 @@ beforeEach(() => {
     if (name === "review_sms_begin_campaign_retry") return { data: { submit: true }, error: null };
     if (name === "review_sms_finish_campaign_attempt") return { data: { state: "accepted", attached: true }, error: null };
     if (name === "review_sms_authorize_campaign_retry") return { data: { attempt_id: attemptId, token, expires_at: "2026-10-06T04:15:00Z" }, error: null };
+    if (name === "review_sms_refresh_campaign_retry_authorization") return { data: { attempt_id: attemptId, token, expires_at: "2026-10-06T04:15:00.123456+00:00" }, error: null };
     throw new Error(`Unexpected mutating RPC ${name}`);
   });
   const chain = { eq: mocks.eq, then: (resolve: (value: unknown) => unknown) => mocks.release().then(resolve) };
@@ -112,6 +116,85 @@ beforeEach(() => {
   mocks.update.mockReturnValue(chain);
   mocks.eq.mockReturnValue(chain);
   mocks.release.mockResolvedValue({ error: null });
+});
+
+describe("same-attempt retry reauthorization", () => {
+  it("rotates only the unused attempt capability without preparing or submitting another campaign", async () => {
+    const before = structuredClone([original, attempt, account]);
+    await expect(reauthorizeReviewCampaignRetry(reauthorizeInput())).resolves.toEqual({
+      attemptId, token, expiresAt: "2026-10-06T04:15:00.123Z",
+    });
+    expect(mocks.rpc.mock.calls.map(([name]) => name)).toEqual([
+      "review_sms_resource_scope_safe", "review_sms_refresh_campaign_retry_authorization",
+    ]);
+    expect(calls("review_sms_refresh_campaign_retry_authorization")[0][1]).toEqual({
+      p_business: businessId, p_attempt: attemptId, p_actor: ownerId, p_expected_revision: 1,
+    });
+    expect([original, attempt, account]).toEqual(before);
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(mocks.qualify).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { attemptId: token }, { authorizationRevision: 2 }, { ownerId: token }, { accountId: token },
+    { originalReservationId: token }, { originalPayloadHash: "f".repeat(64) }, { membershipRevision: 3 },
+  ])("rejects stale or substituted authorization bindings before any mutation %#", async changed => {
+    await expect(reauthorizeReviewCampaignRetry({ ...reauthorizeInput(), ...changed }))
+      .rejects.toMatchObject({ code: "review_sms_campaign_retry_changed" });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it.each(["submitting", "unknown", "accepted", "rejected"])("cannot reauthorize an attempt already %s", async state => {
+    attempt.state = state;
+    await expect(reauthorizeReviewCampaignRetry(reauthorizeInput())).rejects.toMatchObject({ code: "review_sms_campaign_retry_changed" });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { authorization_consumed_at: "2026-10-06T04:00:00Z" }, { started_at: "2026-10-06T04:00:00Z" },
+    { finished_at: "2026-10-06T04:00:00Z" }, { claim_token: claim }, { reservation_id: reservationId },
+    { provider_campaign_id: "created-campaign" }, { response_campaign_id: "uncertain-campaign" },
+  ])("rejects any evidence that the prepared capability has been used %#", async changed => {
+    Object.assign(attempt, changed);
+    await expect(reauthorizeReviewCampaignRetry(reauthorizeInput())).rejects.toMatchObject({ code: "review_sms_campaign_retry_changed" });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { payload_hash: "f".repeat(64) },
+    { filing: { ...retryFiling, description: "Changed filing" } },
+    { filing: { ...retryFiling, referenceId } },
+  ])("rejects altered frozen filing evidence before the refresh RPC %#", async changed => {
+    Object.assign(attempt, changed);
+    await expect(reauthorizeReviewCampaignRetry(reauthorizeInput())).rejects.toMatchObject({ code: "review_sms_campaign_retry_changed" });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("refuses a refreshed capability when fresh inventory contains either campaign reference", async () => {
+    proof.inventory.records.push({ campaignId: "late-campaign", referenceId: retryFiling.referenceId });
+    await expect(reauthorizeReviewCampaignRetry(reauthorizeInput())).rejects.toMatchObject({ code: "review_sms_campaign_retry_changed" });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("returns only a revision marker for genuinely unused preparation, with no token", async () => {
+    const result = await inspectReviewCampaignRetry(businessId);
+    expect(result.eligible).toBe(false);
+    expect(result.preparedRetry).toEqual({ attemptId, revision: 1 });
+    expect(JSON.stringify(result)).not.toContain(token);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each(["submitting", "unknown", "accepted", "rejected"])("inspection does not advertise a consumed %s attempt for reauthorization", async state => {
+    attempt.state = state;
+    expect((await inspectReviewCampaignRetry(businessId)).preparedRetry).toBeNull();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
@@ -162,7 +245,7 @@ describe("review campaign retry authorization", () => {
   it("prepares only a new reference while retaining all original filing fields", async () => {
     mocks.attempts.mockResolvedValue([original]);
     const before = structuredClone(original);
-    await expect(prepareReviewCampaignRetry(prepareInput())).resolves.toEqual({ attemptId, token, expiresAt: "2026-10-06T04:15:00Z" });
+    await expect(prepareReviewCampaignRetry(prepareInput())).resolves.toEqual({ attemptId, token, expiresAt: "2026-10-06T04:15:00.000Z" });
     const args = calls("review_sms_authorize_campaign_retry")[0][1];
     expect(args.p_original_filing).toEqual(originalFiling);
     expect(args.p_retry_filing).toEqual(retryFiling);
@@ -171,6 +254,21 @@ describe("review campaign retry authorization", () => {
     expect(mocks.submit).not.toHaveBeenCalled();
     expect(mocks.from).not.toHaveBeenCalled();
   });
+
+  it("normalizes a real PostgreSQL timestamptz offset and fractional seconds in the prepare response", async () => {
+    const normalRpc = mocks.rpc.getMockImplementation()!;
+    mocks.rpc.mockImplementation(async (name: string, args: unknown) => name === "review_sms_authorize_campaign_retry"
+      ? { data: { attempt_id: attemptId, token, expires_at: "2026-10-06T04:15:00.123456+00:00" }, error: null }
+      : normalRpc(name, args));
+    await expect(prepareReviewCampaignRetry(prepareInput())).resolves.toEqual({ attemptId, token, expiresAt: "2026-10-06T04:15:00.123Z" });
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it.each(["not-a-date", "2026-10-06", "2026-10-06T04:15:00", "2026-99-06T04:15:00+00:00", null, undefined])(
+    "rejects an invalid or timezone-free authorization timestamp (%s)", value => {
+      expect(() => normalizeReviewCampaignAuthorizationTimestamp(value)).toThrow("review_sms_campaign_authorization_invalid");
+    },
+  );
 });
 
 describe("one controlled provider submission", () => {

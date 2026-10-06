@@ -35,6 +35,7 @@ const authorization = {
 const preparedInspection = { ...inspection, eligible: false, reason: "The retry is already prepared.", attempts: [
   ...inspection.attempts, { id: authorization.attemptId, referenceId: "reviews:original:r1", state: "prepared", startedAt: null, diagnostics: null },
 ] };
+const recoverableInspection = { ...preparedInspection, preparedRetry: { attemptId: authorization.attemptId, revision: 1 } };
 const fetcher = vi.fn();
 const response = (payload: unknown, ok = true) => ({ ok, json: async () => payload });
 function render() {
@@ -107,6 +108,16 @@ describe("one-use administrative campaign retry", () => {
     const html = renderToStaticMarkup(render());
     expect(html).toContain("carrier approval is still required");
     expect(html).not.toContain(authorization.token);
+  });
+
+  it("accepts PostgreSQL expiry timestamps with offset and microseconds and proceeds to execute", async () => {
+    await click("Inspect campaign status"); accept();
+    fetcher.mockResolvedValueOnce(response({ authorization: { ...authorization, expiresAt: "2099-10-06T03:12:21.123456+00:00" } }))
+      .mockResolvedValueOnce(response({ inspection: { ...inspection, eligible: false, reason: "retry_used" } }));
+    await click("Retry campaign once");
+    const posts = fetcher.mock.calls.filter(([, options]) => options?.method === "POST").map(([, options]) => JSON.parse(options.body));
+    expect(posts.map(post => post.action)).toEqual(["prepare", "execute"]);
+    expect(posts[1]).toEqual({ action: "execute", businessId, attemptId: authorization.attemptId, token: authorization.token });
   });
 
   it("blocks double clicks before React can render the busy state", async () => {
@@ -197,6 +208,76 @@ describe("one-use administrative campaign retry", () => {
     expect(fetcher.mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(2);
   });
 
+  it("requires manual inspection and fee acknowledgement before recovering and executing the same unused attempt", async () => {
+    fetcher.mockResolvedValue(response({ inspection: recoverableInspection }));
+    render();
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(button("Resume unused retry")).toBeUndefined();
+    await click("Inspect campaign status");
+    expect(button("Resume unused retry")!.props.disabled).toBe(true);
+    expect(button("Retry campaign once")).toBeUndefined();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    accept();
+    fetcher.mockResolvedValueOnce(response({ authorization: { ...authorization, expiresAt: "2099-10-06T03:12:21.123456+00:00" } }))
+      .mockResolvedValueOnce(response({ inspection: { ...recoverableInspection, preparedRetry: null,
+        attempts: preparedInspection.attempts.map(attempt => attempt.id === authorization.attemptId ? { ...attempt, state: "unknown" } : attempt),
+      } }));
+    await click("Resume unused retry");
+    const posts = fetcher.mock.calls.filter(([, options]) => options?.method === "POST").map(([, options]) => JSON.parse(options.body));
+    expect(posts).toEqual([
+      { action: "reauthorize", businessId, ownerId: inspection.ownerId, accountId: inspection.accountId,
+        originalReservationId: inspection.originalReservationId, originalPayloadHash: inspection.originalPayloadHash,
+        membershipRevision: inspection.membershipRevision, acceptAdditionalFee: true,
+        attemptId: authorization.attemptId, authorizationRevision: 1 },
+      { action: "execute", businessId, attemptId: authorization.attemptId, token: authorization.token },
+    ]);
+    expect(button("Resume unused retry")).toBeUndefined();
+    expect(button("Resume prepared retry")).toBeUndefined();
+    expect(renderToStaticMarkup(render())).not.toContain(authorization.token);
+  });
+
+  it("does not automatically reauthorize a capability lost during prepare even when automatic status refresh finds it", async () => {
+    await click("Inspect campaign status"); accept();
+    fetcher.mockRejectedValueOnce(new Error("Prepare response lost"))
+      .mockResolvedValue(response({ inspection: recoverableInspection }));
+    await click("Retry campaign once");
+    expect(button("Resume unused retry")).toBeUndefined();
+    expect(fetcher.mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(1);
+    await click("Inspect campaign status");
+    expect(button("Resume unused retry")!.props.disabled).toBe(true);
+    expect(fetcher.mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(1);
+  });
+
+  it("refuses to execute a replacement capability returned for another attempt", async () => {
+    fetcher.mockResolvedValue(response({ inspection: recoverableInspection }));
+    await click("Inspect campaign status"); accept();
+    fetcher.mockResolvedValueOnce(response({ authorization: { ...authorization, attemptId: inspection.accountId } }));
+    await click("Resume unused retry");
+    const posts = fetcher.mock.calls.filter(([, options]) => options?.method === "POST").map(([, options]) => JSON.parse(options.body));
+    expect(posts.map(post => post.action)).toEqual(["reauthorize"]);
+    expect(button("Resume unused retry")).toBeUndefined();
+    expect(renderToStaticMarkup(render())).toContain("retry outcome is not confirmed");
+  });
+
+  it.each(["submitting", "unknown", "accepted", "rejected"])("offers no lost-token recovery once the attempt is %s", async state => {
+    fetcher.mockResolvedValue(response({ inspection: { ...recoverableInspection, preparedRetry: null,
+      attempts: preparedInspection.attempts.map(attempt => attempt.id === authorization.attemptId ? { ...attempt, state } : attempt),
+    } }));
+    await click("Inspect campaign status");
+    expect(button("Resume unused retry")).toBeUndefined();
+    expect(button("Retry campaign once")).toBeUndefined();
+    expect(fetcher.mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(0);
+  });
+
+  it("stops after a stale reauthorization revision instead of executing or repeating it", async () => {
+    fetcher.mockResolvedValue(response({ inspection: recoverableInspection }));
+    await click("Inspect campaign status"); accept();
+    fetcher.mockResolvedValueOnce(response({ code: "review_sms_campaign_retry_changed" }, false));
+    await click("Resume unused retry");
+    expect(fetcher.mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(1);
+    expect(button("Resume unused retry")).toBeUndefined();
+  });
+
   it.each([
     { ...inspection, eligible: false, reason: "campaign_retry_unavailable" },
     { ...inspection, providerMatchCount: 1 },
@@ -219,6 +300,9 @@ describe("one-use administrative campaign retry", () => {
 
   it.each([
     { ...authorization, expiresAt: "2000-01-01T00:00:00.000Z" },
+    { ...authorization, expiresAt: "2000-01-01T00:00:00.123456+00:00" },
+    { ...authorization, expiresAt: "not-a-date" },
+    { ...authorization, expiresAt: "2099-10-06T03:12:21" },
     { ...authorization, token: "" },
     { ...authorization, attemptId: "invalid" },
   ])("never executes a missing, expired, or malformed authorization", async value => {

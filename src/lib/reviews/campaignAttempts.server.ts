@@ -9,6 +9,8 @@ export interface ReviewCampaignAttempt {
   filing: Record<string, unknown>; state: string; reservation_id: string | null;
   original_reservation_id: string | null; provider_campaign_id: string | null; response_campaign_id?: string | null;
   started_at: string | null; diagnostics: Record<string, unknown> | null;
+  authorization_revision?: number; authorization_consumed_at?: string | null;
+  finished_at?: string | null; claim_token?: string | null;
 }
 export async function campaignAttemptRpc<T>(name: string, args: Record<string, unknown>): Promise<T> {
   const result = await db.rpc(name, args);

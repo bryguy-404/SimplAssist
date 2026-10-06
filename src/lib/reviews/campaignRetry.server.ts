@@ -1,4 +1,5 @@
 import "server-only";
+import { z } from "zod";
 import { supabaseAdmin as db } from "@/lib/supabase/admin";
 import { telnyx } from "@/lib/messaging/client";
 import { ReviewSmsError, type ReviewSmsAccount } from "@/lib/billing/reviewSms";
@@ -64,14 +65,21 @@ export async function inspectReviewCampaignRetry(businessId: string) {
       attempts: attempts.map(t => ({id: t.id, referenceId: t.reference_id, state: t.state, startedAt: t.started_at, diagnostics: t.diagnostics})),
     };
   }
-  const existingRetry = c.attempts.some(a => a.attempt_number === 2);
-  const eligible = !existingRetry && c.matches.length === 0 && !!c.original &&
+  const existingRetry = c.attempts.find(a => a.attempt_number === 2);
+  const current = c.matches.length === 0 && !!c.original &&
     c.original.payloadHash === reviewCampaignFilingHash(c.filing) &&
     c.account.provider_attempt_count === 1 && c.account.state === "carrier_pending" &&
     !c.account.campaign_id && !c.business.telnyx_campaign_id && !c.account.provider_submitted_at &&
     !!c.account.activation_paid_at && !c.account.activation_refunded_at && !c.account.cancel_at;
+  const eligible = !existingRetry && current;
+  const preparedRetry = current && existingRetry?.state === "prepared" && !existingRetry.authorization_consumed_at &&
+    !existingRetry.started_at && !existingRetry.finished_at && !existingRetry.claim_token && !existingRetry.reservation_id &&
+    !existingRetry.provider_campaign_id && !existingRetry.response_campaign_id && existingRetry.authorization_revision
+    ? { attemptId: existingRetry.id, revision: existingRetry.authorization_revision } : null;
   return {
+    preparedRetry,
     eligible, reason: eligible ? null : c.matches.length ? "An existing campaign was found. Reconcile it before submitting anything else." :
+      preparedRetry ? "The existing retry is prepared and has not started. It can be resumed without creating another attempt." :
       existingRetry ? "The one-time retry has already been prepared or used. Inspect its recorded outcome; do not submit again." : "The account no longer matches the approved retry conditions.",
     businessId, ownerId: c.account.owner_id, accountId: c.account.id,
     originalReservationId: c.original?.id ?? null, originalPayloadHash: c.original?.payloadHash ?? null,
@@ -83,6 +91,17 @@ export async function inspectReviewCampaignRetry(businessId: string) {
 export interface PrepareCampaignRetry {
   businessId: string; ownerId: string; accountId: string; originalReservationId: string;
   originalPayloadHash: string; membershipRevision: number; actorId: string;
+}
+/** PostgreSQL timestamptz JSON uses offsets; the browser receives canonical UTC. */
+export function normalizeReviewCampaignAuthorizationTimestamp(value: unknown): string {
+  const parsed = z.string().datetime({ offset: true }).safeParse(value);
+  const timestamp = parsed.success ? Date.parse(parsed.data) : NaN;
+  if (!Number.isFinite(timestamp)) throw new ReviewSmsError("review_sms_campaign_authorization_invalid", 503);
+  return new Date(timestamp).toISOString();
+}
+export function retryAuthorizationResponse(authorization: { attempt_id: string; token: string; expires_at: string }) {
+  return { attemptId: authorization.attempt_id, token: authorization.token,
+    expiresAt: normalizeReviewCampaignAuthorizationTimestamp(authorization.expires_at) };
 }
 export async function prepareReviewCampaignRetry(input: PrepareCampaignRetry) {
   assertEnabled(input.businessId);
@@ -99,7 +118,27 @@ export async function prepareReviewCampaignRetry(input: PrepareCampaignRetry) {
     p_original_reservation: input.originalReservationId, p_expected_membership_revision: input.membershipRevision,
     p_original_filing: c.filing, p_retry_filing: retryFiling, p_retry_payload_hash: reviewCampaignFilingHash(retryFiling),
   });
-  return { attemptId: authorization.attempt_id, token: authorization.token, expiresAt: authorization.expires_at };
+  return retryAuthorizationResponse(authorization);
+}
+
+/** Replace a lost browser capability only while the SAME paid attempt is unused. */
+export async function reauthorizeReviewCampaignRetry(input: PrepareCampaignRetry & { attemptId: string; authorizationRevision: number }) {
+  assertEnabled(input.businessId);
+  const c = await context(input.businessId);
+  const attempt = c.attempts.find(t => t.id === input.attemptId && t.attempt_number === 2);
+  const retryFiling = { ...c.filing, referenceId: `${c.filing.referenceId}:r1` };
+  if (!attempt || !c.original || c.matches.length || attempt.state !== "prepared" || attempt.authorization_consumed_at ||
+    attempt.started_at || attempt.finished_at || attempt.claim_token || attempt.reservation_id || attempt.provider_campaign_id || attempt.response_campaign_id ||
+    attempt.authorization_revision !== input.authorizationRevision || c.account.owner_id !== input.ownerId || c.account.id !== input.accountId ||
+    c.original.id !== input.originalReservationId || c.original.referenceId !== c.filing.referenceId || c.original.payloadHash !== input.originalPayloadHash ||
+    reviewCampaignFilingHash(c.filing) !== input.originalPayloadHash || attempt.payload_hash !== reviewCampaignFilingHash(retryFiling) ||
+    !reviewSmsCampaignMatches(attempt.filing, retryFiling) || c.proof.context.membership.revision !== input.membershipRevision)
+    throw new ReviewSmsError("review_sms_campaign_retry_changed");
+  await scope(c.account, c.business);
+  const authorization = await campaignAttemptRpc<{attempt_id: string; token: string; expires_at: string}>("review_sms_refresh_campaign_retry_authorization", {
+    p_business: input.businessId, p_attempt: input.attemptId, p_actor: input.actorId, p_expected_revision: input.authorizationRevision,
+  });
+  return retryAuthorizationResponse(authorization);
 }
 
 async function attachObservedAttempt(t: ReviewCampaignAttempt, claim: string, campaignId: string) {

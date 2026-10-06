@@ -12,6 +12,7 @@ import { resolveLegalUrls } from "@/lib/messaging/registration/legalUrls";
 import { mapBrandStatus, mapCampaignStatus } from "@/lib/messaging/registration/statusMapper";
 import { getA2pRiskClearanceForBusiness } from "@/lib/messaging/registration/riskScreening";
 import { inspectReviewSmsKeywords, keywordProgramFromCampaign, reviewSmsKeywordProgram } from "@/lib/reviews/smsKeywords.server";
+import { serializeReviewCampaignKeywords } from "@/lib/reviews/campaignKeywords";
 import { reviewConsentUrl, reviewConsentConfirmation } from "@/lib/reviews/consentCopy";
 import { reviewOrigin } from "@/lib/reviews/domain";
 import { processReviewTextConsent } from "@/lib/reviews/consent.server";
@@ -79,9 +80,9 @@ export function buildReviewUpgradeFiling(b: Business, upgradeId: string, phone: 
     brandId:b.telnyx_brand_id!,usecase:"MIXED",subUsecases:["CUSTOMER_CARE","MARKETING"],
     description:(sharedLegalBusinessName ? `${label} is operated by ${sharedLegalBusinessName}. The registered SimplAssist brand belongs to the same legal entity. ` : "") + reviewSignupDescription(care.useCaseDescription),messageFlow:flow.messageFlow,
     sample1:samples[0],sample2:samples[1],sample3:samples[2],sample4:samples[3],sample5:samples[4],
-    subscriberOptin:true,optinKeywords:"REVIEWS",optinMessage:reviewConsentConfirmation(label),
-    subscriberOptout:true,optoutKeywords:keywords.stop.keywords.join(","),optoutMessage:keywords.stop.resp_text,
-    subscriberHelp:true,helpKeywords:keywords.info.keywords.join(","),helpMessage:keywords.info.resp_text,
+    subscriberOptin:true,optinKeywords:serializeReviewCampaignKeywords(["REVIEWS"]),optinMessage:reviewConsentConfirmation(label),
+    subscriberOptout:true,optoutKeywords:serializeReviewCampaignKeywords(keywords.stop.keywords),optoutMessage:keywords.stop.resp_text,
+    subscriberHelp:true,helpKeywords:serializeReviewCampaignKeywords(keywords.info.keywords),helpMessage:keywords.info.resp_text,
     termsAndConditions:true,privacyPolicyLink:links.privacyUrl,termsAndConditionsLink:links.termsUrl,
     autoRenewal:true,embeddedLink:true,embeddedPhone:false,numberPool:false,directLending:false,ageGated:false,
     referenceId:`upgrade:${upgradeId}`,webhookURL:`${origin}/api/messaging/registration/status`,webhookFailoverURL:`${origin}/api/messaging/registration/status`,

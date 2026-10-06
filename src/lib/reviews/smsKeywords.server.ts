@@ -4,6 +4,7 @@ import { z } from "zod";
 import { telnyx } from "@/lib/messaging/client";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { ReviewSmsError } from "@/lib/billing/reviewSms";
+import { reviewInboundOnlyAliases, serializeReviewCampaignKeywords } from "./campaignKeywords";
 
 type Operation = "start" | "stop" | "info";
 type Rule = {
@@ -23,6 +24,8 @@ const requiredKeywords: Record<Operation, string[]> = {
   start: ["START", "UNSTOP"],
   info: ["HELP", "INFO"],
 };
+const reviewStopKeywords = [...requiredKeywords.stop, "REVOKE", "OPT OUT"];
+const reviewCarrierStopKeywords = serializeReviewCampaignKeywords(reviewStopKeywords).split(",");
 
 export function reviewSmsRestoreMessage(businessName: string): string {
   const name = businessName.replace(/[\r\n]+/g, " ").trim().slice(0, 70);
@@ -44,7 +47,7 @@ export function reviewSmsKeywordProgram(
     stop: {
       country_code: "*",
       op: "stop",
-      keywords: [...requiredKeywords.stop, "REVOKE", "OPT OUT"],
+      keywords: [...reviewStopKeywords],
       resp_text: `${name}: You have been unsubscribed. No further messages will be sent.`,
     },
     start: {
@@ -86,15 +89,20 @@ export function keywordProgramFromCampaign(campaign: {
       const hostedReviews = op === "start" && declared.includes("REVIEWS");
       if (hostedReviews && !businessName?.trim())
         throw new ReviewSmsError("review_sms_keyword_copy_invalid");
+      // Reconstruct our complete review profile from its carrier-safe filing.
+      // Existing customer-care subsets keep their original keyword behavior.
+      const inboundAliases = op === "stop" && reviewCarrierStopKeywords.every((word) => declared.includes(word))
+        ? reviewInboundOnlyAliases : [];
       const keywords = Array.from(
         new Set([
           ...requiredKeywords[op],
           ...declared.filter((word) => !(op === "start" && word === "REVIEWS")),
+          ...inboundAliases,
         ]),
       );
       const supported =
         op === "stop"
-          ? [...requiredKeywords.stop, "REVOKE", "OPT OUT"]
+          ? reviewStopKeywords
           : requiredKeywords[op];
       if (keywords.some((word) => !supported.includes(word)))
         throw new ReviewSmsError("review_sms_campaign_keywords_unsupported");

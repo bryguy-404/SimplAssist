@@ -6,6 +6,7 @@ vi.mock("@/lib/messaging/registration/riskScreening", () => ({ getA2pRiskClearan
 vi.mock("@/lib/reviews/consent.server", () => ({ processReviewTextConsent: vi.fn() }));
 import { buildReviewUpgradeFiling, reviewUpgradeCandidateMatches } from "./reviewTextingProvider.server";
 import type { Business } from "@/types/database";
+import { keywordProgramFromCampaign, reviewSmsKeywordProgram } from "@/lib/reviews/smsKeywords.server";
 const upgradeId = "10000000-0000-4000-a115-000000000099";
 const business = { name: "Acme", business_type: "plumbing", email: "support@example.test", phone_number: "+15745550123", slug: "acme-test", privacy_terms_mode: "hosted", privacy_url_override: null, terms_url_override: null, authorized_rep_email: "help@example.test", telnyx_brand_id: "brand-approved" } as unknown as Business;
 beforeEach(() => { vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://simplassist.com"); });
@@ -13,6 +14,13 @@ afterEach(() => vi.unstubAllEnvs());
 const filing = () => buildReviewUpgradeFiling(business, upgradeId, "+15745550123");
 const proof = () => ({ filing: filing(), brand_id: "brand-approved", upgrade_id: upgradeId });
 describe("review conversion mixed-campaign filing", () => {
+  it("uses carrier-safe MIXED keywords while reconstructing the unchanged profile program", () => {
+    const value = filing();
+    for (const words of [value.optinKeywords, value.optoutKeywords, value.helpKeywords])
+      expect(words).toMatch(/^[A-Za-z0-9]+(?:,[A-Za-z0-9]+)*$/);
+    expect(value.optoutKeywords).toBe("STOP,STOPALL,UNSUBSCRIBE,CANCEL,END,QUIT,REVOKE");
+    expect(keywordProgramFromCampaign(value, business.name)).toEqual(reviewSmsKeywordProgram("Acme", "help@example.test"));
+  });
   it("keeps the original approved brand and exact upgrade identity", () => {
     const value = filing();
     expect(value).toMatchObject({ brandId: "brand-approved", referenceId: `upgrade:${upgradeId}`, usecase: "MIXED", subUsecases: ["CUSTOMER_CARE", "MARKETING"], embeddedLink: true, subscriberOptin: true, subscriberOptout: true, subscriberHelp: true, optinKeywords: "REVIEWS" });
@@ -38,6 +46,14 @@ describe("review conversion mixed-campaign filing", () => {
   });
 });
 describe("exact provider-campaign recovery proof", () => {
+  it("keeps frozen historical spaced declarations intact during recovery", () => {
+    const p = proof();
+    p.filing = { ...p.filing, optoutKeywords: reviewSmsKeywordProgram("Acme", "help@example.test").stop.keywords.join(",") };
+    expect(reviewUpgradeCandidateMatches({ ...p.filing }, p)).toBe(true);
+    expect(reviewUpgradeCandidateMatches({ ...filing() }, p)).toBe(false);
+    expect(p.filing.optoutKeywords).toContain("STOP ALL");
+    expect(p.filing.optoutKeywords).toContain("OPT OUT");
+  });
   it("matches the full filing independent of mixed-purpose order", () => {
     const p = proof();
     expect(reviewUpgradeCandidateMatches({ ...p.filing, subUsecases: ["MARKETING", "CUSTOMER_CARE"] }, p)).toBe(true);

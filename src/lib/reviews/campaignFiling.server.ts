@@ -6,6 +6,7 @@ import { resolveLegalUrls, type LegalUrlsBusiness } from "@/lib/messaging/regist
 import { reviewOrigin } from "./domain";
 import { reviewConsentConfirmation } from "./consentCopy";
 import { reviewSmsKeywordProgram } from "./smsKeywords.server";
+import { serializeReviewCampaignKeywords } from "./campaignKeywords";
 
 export function buildReviewCampaignFiling(a: ReviewSmsAccount,
   b: LegalUrlsBusiness & {name: string; telnyx_brand_id: string; authorized_rep_email: string},
@@ -25,13 +26,13 @@ export function buildReviewCampaignFiling(a: ReviewSmsAccount,
     sample3: `${label}: Thank you for your feedback. Our team will help with your question. Reply STOP to opt out.`,
     messageFlow: `${a.draft.consentDescription} Evidence: ${a.draft.consentEvidenceUrl}. Customers consent to review requests from ${label} using ${phone}. Up to 2 messages per completed service; message and data rates may apply. Consent is not required to purchase. Reply STOP to opt out or HELP for help. Privacy: ${links.privacyUrl}. Terms: ${links.termsUrl}.`,
     subscriberOptin: true,
-    optinKeywords: a.draft.consentMode === "hosted_keyword" ? "REVIEWS" : keywords.start.keywords.join(","),
+    optinKeywords: serializeReviewCampaignKeywords(a.draft.consentMode === "hosted_keyword" ? ["REVIEWS"] : keywords.start.keywords),
     optinMessage: a.draft.consentMode === "hosted_keyword" ? reviewConsentConfirmation(label) : keywords.start.resp_text,
     subscriberOptout: true,
-    optoutKeywords: keywords.stop.keywords.join(","),
+    optoutKeywords: serializeReviewCampaignKeywords(keywords.stop.keywords),
     optoutMessage: keywords.stop.resp_text,
     subscriberHelp: true,
-    helpKeywords: keywords.info.keywords.join(","),
+    helpKeywords: serializeReviewCampaignKeywords(keywords.info.keywords),
     helpMessage: keywords.info.resp_text,
     termsAndConditions: true,
     privacyPolicyLink: links.privacyUrl,

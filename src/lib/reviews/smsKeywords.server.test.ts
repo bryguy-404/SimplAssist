@@ -39,6 +39,7 @@ import {
   keywordProgramFromCampaign,
   reviewSmsKeywordProgram,
 } from "./smsKeywords.server";
+import { serializeReviewCampaignKeywords } from "./campaignKeywords";
 
 const businessId = "10000000-0000-4000-8000-000000000001";
 const profileId = "10000000-0000-4000-8000-000000000002";
@@ -92,6 +93,28 @@ beforeEach(() => {
 });
 
 describe("review SMS runtime keywords", () => {
+  it("keeps inbound aliases and existing profile readiness when carrier declarations omit spaces", async () => {
+    const fromCampaign = keywordProgramFromCampaign({
+      optinKeywords: "REVIEWS", optinMessage: "Consent received",
+      optoutKeywords: serializeReviewCampaignKeywords(program.stop.keywords), optoutMessage: program.stop.resp_text,
+      helpKeywords: serializeReviewCampaignKeywords(program.info.keywords), helpMessage: program.info.resp_text,
+    }, "Example Services");
+    expect(fromCampaign).toEqual(program);
+    expect(fromCampaign.stop.keywords).toEqual(["STOP", "STOPALL", "STOP ALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT", "REVOKE", "OPT OUT"]);
+    rules = Object.values(program).map(rule => ({ ...rule, id: ruleId() }));
+    expect(await inspectReviewSmsKeywords(profileId, fromCampaign)).toEqual({ ready: true, issues: [] });
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+  it("preserves existing customer-care keyword subsets and still rejects unknown additions", () => {
+    const campaign = {
+      optinKeywords: "START", optinMessage: "Messaging restored",
+      optoutKeywords: "STOP", optoutMessage: "Unsubscribed",
+      helpKeywords: "HELP", helpMessage: "Contact support",
+    };
+    expect(keywordProgramFromCampaign(campaign).stop.keywords).toEqual(["STOP", "STOPALL", "STOP ALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"]);
+    expect(() => keywordProgramFromCampaign({ ...campaign, optoutKeywords: `${serializeReviewCampaignKeywords(program.stop.keywords)},UNKNOWN` })).toThrow("review_sms_campaign_keywords_unsupported");
+  });
   it("uses one program for carrier declarations and profile confirmations", () => {
     const fromCampaign = keywordProgramFromCampaign({
       optinKeywords: program.start.keywords.join(","),

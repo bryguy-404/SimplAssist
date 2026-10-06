@@ -48,6 +48,8 @@ export function smsPriceSummary(overview: ReviewSmsOverview): string {
     return "Included with your texting plan after review-request approval";
   if (overview.eligibleSource === "grant")
     return "Texting access is managed by your account provider";
+  if (overview.price.ownerDiscountApplied)
+    return "$0/month with your verified owner discount after approval and activation";
   return `${amount(overview.price.monthlyCents)}/month added to your current plan after approval and activation`;
 }
 
@@ -370,8 +372,9 @@ export default function ReviewSmsPanel({
                 {smsPriceSummary(overview)}
               </p>
               {direct ? <p className={`mt-2 text-sm ${body}`}>
-                With the standard $15 Chat plan, that makes $35/month in total.
-                The monthly add-on begins only after approval and your payment confirmation.
+                {overview.price.ownerDiscountApplied
+                  ? "Your owner discount covers Chat and the monthly review-texting add-on. The one-time activation fee still applies."
+                  : "With the standard $15 Chat plan, that makes $35/month in total. The monthly add-on begins only after approval and your payment confirmation."}
               </p> : null}
               <p className={`mt-2 text-sm ${body}`}>
                 {overview.price.includedParts} total SMS parts per full billing
@@ -619,8 +622,9 @@ export default function ReviewSmsPanel({
               prorated to your existing billing cycle.
             </p>
             <p className={`text-sm ${body}`}>
-              Then {amount(quote.monthlyPriceCents)} per month in addition to
-              your current base plan, with 250 total SMS parts per full period.
+              {quote.ownerDiscountApplied
+                ? "Your verified owner discount keeps Chat and review texting at $0 per month, with 250 total SMS parts per full period. "
+                : `Then ${amount(quote.monthlyPriceCents)} per month in addition to your current base plan, with 250 total SMS parts per full period. `}
               Review texting does not add missed-call or AI texting features.
             </p>
             <p className={`text-xs ${body}`}>

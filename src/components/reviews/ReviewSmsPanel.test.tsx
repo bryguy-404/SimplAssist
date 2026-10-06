@@ -142,6 +142,14 @@ describe("review texting pricing and lifecycle presentation", () => {
       smsPriceSummary({ ...overview, eligibleSource: "grant" }),
     ).not.toContain("$20");
   });
+  it("shows the verified owner monthly discount while preserving the activation fee", () => {
+    const html = render({ ...overview, price: { ...overview.price, monthlyCents: 0, ownerDiscountApplied: true } });
+    expect(html).toContain("$0/month with your verified owner discount");
+    expect(html).toContain("The one-time activation fee still applies");
+    expect(html).toContain("$25.00 one-time activation");
+    expect(html).not.toContain("$35/month in total");
+    expect(html).not.toContain("$20.00/month");
+  });
   it("shows the submitted-attempt terms and requires agreement before checkout", () => {
     const account = {
       state: "draft",

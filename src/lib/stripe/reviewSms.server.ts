@@ -32,7 +32,15 @@ import {
   smsSubscriptionFingerprint,
   preserveSmsSchedulePhase,
   verifiedPaidInvoice,
+  invoiceSubscriptionId,
 } from "./smsBilling.server";
+import {
+  normalizedReviewSmsSubscription,
+  reviewSmsOwnerDiscountProofSchema,
+  reviewSmsOwnerDiscountPolicy,
+  verifyReviewSmsOwnerDiscount,
+  type ReviewSmsOwnerDiscountProof,
+} from "./reviewSmsOwnerDiscount.server";
 
 const id = (v: string | { id: string } | null | undefined) =>
   typeof v === "string" ? v : (v?.id ?? null);
@@ -53,6 +61,7 @@ const opSchema = z.object({
   invoice_id: z.string().nullable(),
   schedule_id: z.string().nullable(),
   created_at: z.string(),
+  confirmed_at: z.string().nullable().optional(),
   expires_at: z.string(),
 });
 type Operation = z.infer<typeof opSchema>;
@@ -175,10 +184,26 @@ function assertChangeable(sub: Stripe.Subscription) {
     sub.cancel_at_period_end ||
     sub.pending_update ||
     sub.schedule ||
-    sub.collection_method !== "charge_automatically" ||
-    sub.discounts.length
+    sub.collection_method !== "charge_automatically"
   )
     throw new ReviewSmsError("review_sms_subscription_not_changeable");
+}
+const retrieveReviewSubscription = (subscriptionId: string) => stripe.subscriptions.retrieve(subscriptionId, {
+  expand: ["discounts.source.coupon"],
+});
+const reviewSubscriptionFingerprint = (sub: Stripe.Subscription) => smsSubscriptionFingerprint(normalizedReviewSmsSubscription(sub));
+const ownerDiscountFingerprint = (value: unknown) => fingerprint(value ? reviewSmsOwnerDiscountProofSchema.parse(value) : null);
+async function subscriptionDiscount(sub: Stripe.Subscription, a: Pick<ReviewSmsAccount, "business_id" | "owner_id">, frozen?: unknown) {
+  const binding = { businessId: a.business_id, ownerId: a.owner_id };
+  if (!sub.discounts.length && !sub.items.data.some(item => item.discounts?.length) && !frozen && !reviewSmsOwnerDiscountPolicy(binding)) return null;
+  return verifyReviewSmsOwnerDiscount(sub, binding, await addonPrice(), frozen);
+}
+async function recordedOwnerDiscount(a: ReviewSmsAccount): Promise<ReviewSmsOwnerDiscountProof | undefined> {
+  const { data, error } = await supabaseAdmin.from("review_sms_billing_operations").select("payload")
+    .eq("account_id", a.id).eq("business_id", a.business_id).eq("owner_id", a.owner_id)
+    .eq("kind", "recurring").eq("state", "completed").order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (error) throw new ReviewSmsError("review_sms_state_unavailable", 503);
+  return data?.payload?.ownerDiscount;
 }
 function assertReplay(op: Operation) {
   if (Date.now() - Date.parse(op.created_at) >= 23 * 3600_000)
@@ -302,6 +327,15 @@ export async function reviewSmsOverview(
   if (shared && shared.membership.owner_id !== ownerId)
     throw new ReviewSmsError("review_sms_forbidden", 403);
   let activationRecoveryAvailable = false;
+  let ownerDiscountApplied = false;
+  const ownerPolicy = reviewSmsOwnerDiscountPolicy({ businessId, ownerId });
+  if (eligibleSource === "direct" && ownerPolicy) {
+    const { data: local, error } = await supabaseAdmin.from("subscriptions")
+      .select("stripe_subscription_id,stripe_customer_id").eq("business_id", businessId).maybeSingle();
+    if (error || local?.stripe_subscription_id !== ownerPolicy.subscriptionId || local.stripe_customer_id !== ownerPolicy.customerId)
+      throw new ReviewSmsError("review_sms_owner_discount_unverified");
+    ownerDiscountApplied = Boolean(await subscriptionDiscount(await retrieveReviewSubscription(ownerPolicy.subscriptionId), { business_id: businessId, owner_id: ownerId }));
+  }
   if (shared && a && !a.activation_paid_at) {
     // Presentation only: never expire or confirm an operation during a read.
     const pending = await supabaseAdmin.from("review_sms_billing_operations")
@@ -325,7 +359,8 @@ export async function reviewSmsOverview(
       activationRecoveryAvailable,
     } : null,
     price: {
-      monthlyCents: eligibleSource === "direct" ? REVIEW_SMS_ADDON_CENTS : 0,
+      monthlyCents: eligibleSource === "direct" && !ownerDiscountApplied ? REVIEW_SMS_ADDON_CENTS : 0,
+      ownerDiscountApplied,
       activationCents:
         eligibleSource === "direct" ? REVIEW_SMS_ACTIVATION_CENTS : 0,
       includedParts:
@@ -395,15 +430,17 @@ export async function createReviewSmsActivationCheckout(
     fee.type !== "one_time"
   )
     throw new ReviewSmsError("review_sms_activation_price_unavailable", 503);
-  const sub = await stripe.subscriptions.retrieve(a.source_subscription_id!);
+  const sub = await retrieveReviewSubscription(a.source_subscription_id!);
   const { reviewSms } = assertBound(sub, a);
   assertChangeable(sub);
+  const ownerDiscount = await subscriptionDiscount(sub, a);
   if (reviewSms) throw new ReviewSmsError("review_sms_already_active");
   const payload = {
     feeId, amountCents: REVIEW_SMS_ACTIVATION_CENTS,
     customerId: a.source_customer_id, subscriptionId: a.source_subscription_id,
     origin, draftFingerprint: fingerprint(a.draft),
     ...(sharedRegistration ? { sharedRegistration } : {}),
+    ...(ownerDiscount ? { ownerDiscount } : {}),
   };
   if (op && op.fingerprint !== fingerprint(payload)) {
     if (op.state === "prepared") {
@@ -580,7 +617,8 @@ function quoteFromOperation(op: Operation): ReviewSmsQuote {
     operationId: op.id,
     fingerprint: op.fingerprint,
     amountDueCents: Number(op.payload.amountDueCents),
-    monthlyPriceCents: REVIEW_SMS_ADDON_CENTS,
+    monthlyPriceCents: op.payload.ownerDiscount ? 0 : REVIEW_SMS_ADDON_CENTS,
+    ownerDiscountApplied: Boolean(op.payload.ownerDiscount),
     includedParts: Number(op.payload.includedParts),
     periodEnd: String(op.payload.periodEnd),
     expiresAt: op.expires_at,
@@ -607,9 +645,10 @@ export async function quoteReviewSmsRecurring(
   )
     throw new ReviewSmsError("review_sms_not_ready");
   await assertPaidSharedRegistration(a);
-  const sub = await stripe.subscriptions.retrieve(a.source_subscription_id!);
+  const sub = await retrieveReviewSubscription(a.source_subscription_id!);
   const { base, reviewSms } = assertBound(sub, a);
   assertChangeable(sub);
+  const ownerDiscount = await subscriptionDiscount(sub, a);
   if (reviewSms) throw new ReviewSmsError("review_sms_already_active");
   const price = await addonPrice(),
     now = Math.floor(Date.now() / 1000);
@@ -626,7 +665,7 @@ export async function quoteReviewSmsRecurring(
   if (
     preview.currency !== "usd" ||
     !Number.isSafeInteger(preview.amount_due) ||
-    preview.amount_due < 0
+    preview.amount_due < 0 || (ownerDiscount && preview.amount_due !== 0)
   )
     throw new ReviewSmsError("review_sms_quote_unavailable", 503);
   const includedParts = Math.max(
@@ -643,7 +682,8 @@ export async function quoteReviewSmsRecurring(
     priceId: price.id,
     subscriptionId: sub.id,
     customerId: a.source_customer_id,
-    sourceFingerprint: smsSubscriptionFingerprint(sub),
+    sourceFingerprint: reviewSubscriptionFingerprint(sub),
+    ...(ownerDiscount ? { ownerDiscount } : {}),
     prorationAt: now,
     amountDueCents: preview.amount_due,
     includedParts,
@@ -664,6 +704,19 @@ export async function confirmReviewSmsRecurring(
   if (op.kind !== "recurring" || op.fingerprint !== quoteFingerprint)
     throw new ReviewSmsError("review_sms_quote_changed");
   if (op.state === "completed") return { active: true };
+  if (op.state === "confirmed") {
+    // A response may have been lost after Stripe applied the update. Inspect
+    // the frozen operation's invoice before considering any provider mutation.
+    const recovered = await findRecurringInvoice(op, true);
+    if (recovered) {
+      await saveOperation(op, { invoice_id: recovered.id });
+      await reconcileReviewSmsSubscription(await retrieveReviewSubscription(a.source_subscription_id!));
+      return {
+        active: (await readReviewSmsAccount(businessId))?.state === "active",
+        paymentUrl: recovered.status === "open" && recovered.hosted_invoice_url?.startsWith("https://invoice.stripe.com/") ? recovered.hosted_invoice_url : null,
+      };
+    }
+  }
   assertReplay(op);
   if (op.state === "prepared") {
     if (
@@ -673,11 +726,13 @@ export async function confirmReviewSmsRecurring(
     )
       throw new ReviewSmsError("review_sms_not_ready");
     await assertPaidSharedRegistration(a);
-    const sub = await stripe.subscriptions.retrieve(a.source_subscription_id!);
+    const sub = await retrieveReviewSubscription(a.source_subscription_id!);
     assertBound(sub, a);
     assertChangeable(sub);
+    const ownerDiscount = await subscriptionDiscount(sub, a);
     if (
-      smsSubscriptionFingerprint(sub) !== op.payload.sourceFingerprint ||
+      reviewSubscriptionFingerprint(sub) !== op.payload.sourceFingerprint ||
+      ownerDiscountFingerprint(ownerDiscount) !== ownerDiscountFingerprint(op.payload.ownerDiscount) ||
       (await addonPrice()).id !== op.payload.priceId
     )
       throw new ReviewSmsError("review_sms_quote_changed");
@@ -697,6 +752,22 @@ export async function confirmReviewSmsRecurring(
     )
       throw new ReviewSmsError("review_sms_quote_changed");
   }
+  if (op.state === "confirmed") {
+    // A durable confirmation alone is not evidence Stripe already received the
+    // update. Preserve the promised price if a discount changed during a crash.
+    const sub = await retrieveReviewSubscription(a.source_subscription_id!);
+    const { reviewSms } = assertBound(sub, a);
+    assertChangeable(sub);
+    const discount = await subscriptionDiscount(sub, a, op.payload.ownerDiscount);
+    if (reviewSms || reviewSubscriptionFingerprint(sub) !== op.payload.sourceFingerprint ||
+      ownerDiscountFingerprint(discount) !== ownerDiscountFingerprint(op.payload.ownerDiscount))
+      throw new ReviewSmsError("review_sms_quote_changed");
+    const refreshed = await stripe.invoices.createPreview({ customer: a.source_customer_id!, subscription: sub.id,
+      subscription_details: { items: [{ price: String(op.payload.priceId), quantity: 1 }],
+        proration_date: Number(op.payload.prorationAt), proration_behavior: "always_invoice", billing_cycle_anchor: "unchanged" } });
+    if (refreshed.currency !== "usd" || refreshed.amount_due !== op.payload.amountDueCents)
+      throw new ReviewSmsError("review_sms_quote_changed");
+  }
   op = await confirm(op);
   const updated = await stripe.subscriptions.update(
     a.source_subscription_id!,
@@ -710,7 +781,11 @@ export async function confirmReviewSmsRecurring(
     },
     { idempotencyKey: `review-sms-recurring:${op.id}` },
   );
-  await saveOperation(op, { invoice_id: id(updated.latest_invoice) });
+  const invoiceId = id(updated.latest_invoice);
+  if (!invoiceId) throw new ReviewSmsError("review_sms_payment_unverified", 503);
+  const invoice = await stripe.invoices.retrieve(invoiceId);
+  verifyRecurringInvoice(invoice, op);
+  await saveOperation(op, { invoice_id: invoice.id });
   await reconcileReviewSmsSubscription(updated);
   let paymentUrl: string | null = null;
   if (updated.pending_update && id(updated.latest_invoice)) {
@@ -722,6 +797,47 @@ export async function confirmReviewSmsRecurring(
     active: (await readReviewSmsAccount(businessId))?.state === "active",
     paymentUrl,
   };
+}
+
+function verifyRecurringInvoice(invoice: Stripe.Invoice, op: Operation) {
+  assertMode(invoice.livemode);
+  const snapshot = invoice.parent?.subscription_details?.metadata;
+  const matches = invoice.lines.data.filter(line => line.pricing?.price_details?.price === op.payload.priceId &&
+    line.parent?.subscription_item_details?.proration && line.quantity === 1 && line.amount >= 0 &&
+    line.period.start === Number(op.payload.prorationAt) && iso(line.period.end) === op.payload.periodEnd);
+  if ((op.invoice_id && op.invoice_id !== invoice.id) || id(invoice.customer) !== op.payload.customerId ||
+    invoiceSubscriptionId(invoice) !== op.payload.subscriptionId || invoice.currency !== "usd" ||
+    invoice.billing_reason !== "subscription_update" || invoice.created < seconds(op.confirmed_at ?? op.created_at) - 60 ||
+    snapshot?.review_sms_operation_id !== op.id || invoice.amount_due !== op.payload.amountDueCents ||
+    invoice.lines.has_more || matches.length !== 1)
+    throw new ReviewSmsError("review_sms_payment_unverified", 503);
+}
+
+async function findRecurringInvoice(op: Operation, allowMissing = false): Promise<Stripe.Invoice | null> {
+  let invoice: Stripe.Invoice;
+  if (op.invoice_id) invoice = await stripe.invoices.retrieve(op.invoice_id);
+  else {
+    const invoices = await stripe.invoices.list({ subscription: String(op.payload.subscriptionId), customer: String(op.payload.customerId),
+      created: { gte: seconds(op.confirmed_at ?? op.created_at) - 60 }, limit: 100 });
+    const candidates = invoices.data.filter(value => value.parent?.subscription_details?.metadata?.review_sms_operation_id === op.id);
+    const matching = candidates.filter(value => { try { verifyRecurringInvoice(value, op); return true; } catch { return false; } });
+    if (!invoices.has_more && candidates.length === 0 && allowMissing) return null;
+    if (invoices.has_more || matching.length !== 1) throw new ReviewSmsError("review_sms_payment_unverified", 503);
+    invoice = matching[0];
+  }
+  verifyRecurringInvoice(invoice, op);
+  return invoice;
+}
+async function unresolvedRecurringInvoice(a: ReviewSmsAccount): Promise<{ op: Operation; invoice: Stripe.Invoice } | null> {
+  const { data, error } = await supabaseAdmin.from("review_sms_billing_operations").select("*")
+    .eq("account_id", a.id).eq("business_id", a.business_id).eq("owner_id", a.owner_id)
+    .eq("kind", "recurring").eq("state", "confirmed").maybeSingle();
+  if (error) throw new ReviewSmsError("review_sms_state_unavailable", 503);
+  if (!data || data.kind !== "recurring" || data.state !== "confirmed") return null;
+  const op = opSchema.parse(data);
+  const invoice = (await findRecurringInvoice(op))!;
+  if (!op.invoice_id) await saveOperation(op, { invoice_id: invoice.id });
+  return { op, invoice };
 }
 
 /** Version before the fresh provider read; event arrival order cannot grant access. */
@@ -744,7 +860,7 @@ export async function reconcileReviewSmsSubscription(
     p_customer: id(incoming.customer),
   });
   if (revision === null) return;
-  const sub = await stripe.subscriptions.retrieve(incoming.id);
+  const sub = await retrieveReviewSubscription(incoming.id);
   const { base, reviewSms } = assertBound(sub, a);
   if (!reviewSms || sub.status !== "active" || sub.pending_update) {
     const termExpired = Boolean(
@@ -770,8 +886,15 @@ export async function reconcileReviewSmsSubscription(
     }
     return;
   }
-  const invoice = await verifiedPaidInvoice(sub);
-  if (!invoice) return;
+  const pendingReceipt = await unresolvedRecurringInvoice(a);
+  const invoice = pendingReceipt?.invoice ?? await verifiedPaidInvoice(sub);
+  if (!invoice || invoice.status !== "paid" || !invoice.status_transitions.paid_at) return;
+  const frozenOwnerDiscount = pendingReceipt?.op.payload.ownerDiscount ?? await recordedOwnerDiscount(a);
+  if (frozenOwnerDiscount || sub.discounts.length || reviewSmsOwnerDiscountPolicy({ businessId, ownerId: a.owner_id })) {
+    await subscriptionDiscount(sub, a, frozenOwnerDiscount);
+    if (invoice.amount_due !== 0 || invoice.amount_paid !== 0)
+      throw new ReviewSmsError("review_sms_owner_discount_unverified");
+  }
   const line = invoice.lines.data.find(
     (l) =>
       l.parent?.subscription_item_details?.subscription_item === reviewSms.id &&
@@ -796,9 +919,10 @@ export async function reconcileReviewSmsSubscription(
   )
     return;
   if (line.parent?.subscription_item_details?.proration) {
-    const opId = sub.metadata.review_sms_operation_id;
+    const opId = invoice.parent?.subscription_details?.metadata?.review_sms_operation_id;
     if (!opId) return;
-    const op = await readOperation(opId, businessId, a.owner_id);
+    const op = pendingReceipt?.op ?? await readOperation(opId, businessId, a.owner_id);
+    verifyRecurringInvoice(invoice, op);
     if (
       op.kind !== "recurring" ||
       op.account_id !== a.id ||
@@ -833,10 +957,14 @@ export async function cancelReviewSmsAtPeriodEnd(
     throw new ReviewSmsError("review_sms_managed_billing");
   if (a.state === "cancel_pending") return { cancelAt: a.cancel_at };
   const pending = await pendingOperation(a, "cancel");
-  const sub = await stripe.subscriptions.retrieve(a.source_subscription_id!);
+  const sub = await retrieveReviewSubscription(a.source_subscription_id!);
   const { base, reviewSms } = assertBound(sub, a);
   if (!reviewSms) throw new ReviewSmsError("review_sms_not_active");
-  if (!pending) assertChangeable(sub);
+  let ownerDiscount: ReviewSmsOwnerDiscountProof | null = null;
+  if (!pending) {
+    assertChangeable(sub);
+    ownerDiscount = await subscriptionDiscount(sub, a, await recordedOwnerDiscount(a));
+  }
   else if (
     pending.schedule_id &&
     sub.schedule &&
@@ -851,6 +979,7 @@ export async function cancelReviewSmsAtPeriodEnd(
       basePrice: base.price.id,
       addonPrice: reviewSms.price.id,
       periodEnd: iso(base.current_period_end),
+      ...(ownerDiscount ? { ownerDiscount } : {}),
     }));
   assertReplay(op);
   if (

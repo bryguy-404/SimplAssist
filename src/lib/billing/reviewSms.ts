@@ -49,6 +49,7 @@ export type ReviewSmsQuote = {
   fingerprint: string;
   amountDueCents: number;
   monthlyPriceCents: number;
+  ownerDiscountApplied?: boolean;
   includedParts: number;
   periodEnd: string;
   expiresAt: string;
@@ -67,6 +68,7 @@ export type ReviewSmsOverview = {
   } | null;
   price: {
     monthlyCents: number;
+    ownerDiscountApplied?: boolean;
     activationCents: number;
     includedParts: number;
   };

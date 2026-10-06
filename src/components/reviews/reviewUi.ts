@@ -50,6 +50,8 @@ const REASONS: Record<string, string> = {
     "Your price quote or subscription changed. Close this window and review the activation price again.",
   review_sms_payment_in_progress:
     "Payment is still being confirmed. Check status before trying again.",
+  review_sms_owner_discount_unverified:
+    "We could not verify your owner discount. Contact support before continuing.",
   review_sms_not_ready:
     "Carrier approval or payment is still pending. Check your texting status.",
   review_sms_setup_required:

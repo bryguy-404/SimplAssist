@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   payment: vi.fn(),
   refund: vi.fn(),
   invoice: vi.fn(),
+  invoiceList: vi.fn(),
+  coupon: vi.fn(),
   setup: vi.fn(),
   entitlements: vi.fn(),
   scheduleCreate: vi.fn(),
@@ -46,7 +48,8 @@ vi.mock("./client", () => ({
   stripe: {
     subscriptions: { retrieve: mocks.retrieve, update: mocks.update },
     prices: { retrieve: mocks.price },
-    invoices: { createPreview: mocks.preview, retrieve: mocks.invoice },
+    invoices: { createPreview: mocks.preview, retrieve: mocks.invoice, list: mocks.invoiceList },
+    coupons: { retrieve: mocks.coupon },
     checkout: { sessions: { create: mocks.checkout, retrieve: mocks.checkoutGet, expire: mocks.checkoutExpire, listLineItems: mocks.checkoutLines } },
     paymentIntents: { retrieve: mocks.payment },
     refunds: { create: mocks.refund },
@@ -195,6 +198,7 @@ beforeEach(() => {
     q.update = (value: Record<string, unknown>) => {
       patch = value;
       updates.push({ table, patch: value });
+      if (table === "review_sms_billing_operations" && operation) operation = { ...operation, ...value };
       return q;
     };
     q.maybeSingle = async () => result();
@@ -223,8 +227,10 @@ beforeEach(() => {
         };
         return { data: operation, error: null };
       }
-      if (name === "review_sms_confirm_operation")
-        return { data: { ...operation, state: "confirmed" }, error: null };
+      if (name === "review_sms_confirm_operation") {
+        operation = { ...operation, state: "confirmed", confirmed_at: new Date(now).toISOString() };
+        return { data: operation, error: null };
+      }
       if (name === "review_sms_freeze_cancel") {
         operation = {
           ...operation,
@@ -245,6 +251,7 @@ beforeEach(() => {
   mocks.retrieve.mockResolvedValue(subscription());
   mocks.price.mockResolvedValue(price("price_addon", 2000));
   mocks.preview.mockResolvedValue({ currency: "usd", amount_due: 1000 });
+  mocks.invoiceList.mockResolvedValue({ data: [], has_more: false });
   mocks.setup.mockResolvedValue({});
 });
 afterEach(() => {
@@ -306,14 +313,17 @@ describe("review SMS commercial boundaries", () => {
     operation!.state = "confirmed";
     const updated = subscription(true);
     updated.pending_update = {} as never;
-    mocks.update.mockResolvedValue(updated);
-    mocks.retrieve.mockResolvedValue(updated);
-    await confirmReviewSmsRecurring(
+    updated.latest_invoice = "in_reviews";
+    mocks.invoice.mockResolvedValue({ ...paidInvoice(updated, true), status: "open" });
+    mocks.update.mockRejectedValueOnce(new Error("response lost")).mockImplementationOnce(async () => {
+      mocks.retrieve.mockResolvedValue(updated); return updated;
+    });
+    await expect(confirmReviewSmsRecurring(
       bid,
       owner,
       quote.operationId,
       quote.fingerprint,
-    );
+    )).rejects.toThrow("response lost");
     await confirmReviewSmsRecurring(
       bid,
       owner,
@@ -446,11 +456,14 @@ function paidInvoice(sub: Stripe.Subscription, prorated = false) {
     id: "in_reviews",
     livemode: false,
     customer: "cus_review",
-    parent: { subscription_details: { subscription: sub.id } },
+    parent: { subscription_details: { subscription: sub.id, metadata: { review_sms_operation_id: oid } } },
+    billing_reason: prorated ? "subscription_update" : "subscription_cycle",
+    created: Math.floor(now / 1000),
     status: "paid",
     status_transitions: { paid_at: Math.floor(now / 1000) },
     currency: "usd",
     amount_paid: prorated ? 1000 : 2000,
+    amount_due: prorated ? 1000 : 2000,
     lines: {
       has_more: false,
       data: [
@@ -470,6 +483,141 @@ function paidInvoice(sub: Stripe.Subscription, prorated = false) {
     },
   };
 }
+function ownerSubscription(withAddon = false) {
+  const sub = subscription(withAddon);
+  sub.items.data[0].price.product = "prod_chat";
+  if (withAddon) sub.items.data[1].price.product = "prod_addon";
+  sub.discounts = [{ id: "di_owner", source: { type: "coupon", coupon: "coupon_owner" }, customer: "cus_review", subscription: sub.id,
+    end: null, subscription_item: null, invoice: null, invoice_item: null, checkout_session: null } as Stripe.Discount];
+  vi.stubEnv("REVIEW_SMS_OWNER_DISCOUNT_POLICY", JSON.stringify({ businessId: bid, ownerId: owner, customerId: "cus_review", subscriptionId: "sub_review", couponId: "coupon_owner" }));
+  vi.stubEnv("STRIPE_PRICE_SMS_OVERAGE_PART", "price_overage");
+  mocks.coupon.mockResolvedValue({ id: "coupon_owner", livemode: false, percent_off: 100, amount_off: null, duration: "forever", valid: false,
+    applies_to: { products: ["prod_chat", "prod_addon"] } });
+  mocks.price.mockImplementation(async id => id === "price_activation" ? { id, product: "prod_setup", active: true, currency: "usd", unit_amount: 2500, type: "one_time" }
+    : id === "price_overage" ? { id, product: "prod_overage" } : { ...price("price_addon", 2000), product: "prod_addon" });
+  mocks.retrieve.mockResolvedValue(sub);
+  mocks.preview.mockResolvedValue({ currency: "usd", amount_due: 0 });
+  return sub;
+}
+describe("owner-discount review SMS lifecycle", () => {
+  it("keeps the one-time Checkout at $25 and does not offer coupon entry", async () => {
+    newActivation(); ownerSubscription();
+    await createReviewSmsActivationCheckout(bid, owner, "https://simplassist.com");
+    expect(operation?.payload).toMatchObject({ amountCents: 2500, ownerDiscount: { couponId: "coupon_owner" } });
+    expect(mocks.checkout.mock.calls[0][0]).toMatchObject({ mode: "payment", line_items: [{ price: "price_activation", quantity: 1 }] });
+    expect(mocks.checkout.mock.calls[0][0].allow_promotion_codes).toBeUndefined();
+    expect(mocks.checkout.mock.calls[0][0].discounts).toBeUndefined();
+  });
+  it("quotes $0 and grants only the frozen prorated allowance from the exact paid $0 invoice", async () => {
+    const original = ownerSubscription();
+    const quote = await quoteReviewSmsRecurring(bid, owner);
+    expect(quote).toMatchObject({ amountDueCents: 0, monthlyPriceCents: 0, ownerDiscountApplied: true, includedParts: 125 });
+    // PostgreSQL JSONB changes object-key order; proof equality is structural.
+    const payload = operation!.payload as Record<string, unknown>;
+    payload.ownerDiscount = Object.fromEntries(Object.entries(payload.ownerDiscount as object).reverse());
+    const updated = ownerSubscription(true);
+    updated.items.data[1].current_period_start = Math.floor(now / 1000);
+    updated.latest_invoice = "in_reviews";
+    updated.metadata.review_sms_operation_id = oid;
+    const invoice = paidInvoice(updated, true);
+    invoice.amount_due = 0; invoice.amount_paid = 0; invoice.lines.data[0].amount = 0;
+    mocks.retrieve.mockResolvedValueOnce(original).mockResolvedValue(updated);
+    mocks.update.mockResolvedValue(updated); mocks.invoice.mockResolvedValue(invoice);
+    await confirmReviewSmsRecurring(bid, owner, quote.operationId, quote.fingerprint);
+    expect(mocks.update.mock.calls[0][0]).toBe("sub_review");
+    expect(mocks.update.mock.calls[0][1]).toMatchObject({ items: [{ price: "price_addon", quantity: 1 }], billing_cycle_anchor: "unchanged", payment_behavior: "pending_if_incomplete" });
+    expect(mocks.update.mock.calls[0][1].discounts).toBeUndefined();
+    expect(mocks.rpc).toHaveBeenCalledWith("review_sms_record_paid_period", expect.objectContaining({ p_invoice: "in_reviews", p_allowance: 125 }));
+  });
+  it("refuses a nonzero owner quote before any subscription mutation", async () => {
+    ownerSubscription(); mocks.preview.mockResolvedValue({ currency: "usd", amount_due: 5 });
+    await expect(quoteReviewSmsRecurring(bid, owner)).rejects.toThrow("review_sms_quote_unavailable");
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+  it("blocks confirmation if the owner discount was removed after the quote", async () => {
+    const sub = ownerSubscription();
+    const quote = await quoteReviewSmsRecurring(bid, owner);
+    sub.discounts = [];
+    await expect(confirmReviewSmsRecurring(bid, owner, quote.operationId, quote.fingerprint)).rejects.toThrow("review_sms_owner_discount_unverified");
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+  it("does not charge after a confirmed-before-provider crash and removed owner discount", async () => {
+    const sub = ownerSubscription();
+    const quote = await quoteReviewSmsRecurring(bid, owner);
+    operation!.state = "confirmed";
+    sub.discounts = [];
+    vi.stubEnv("REVIEW_SMS_OWNER_DISCOUNT_POLICY", "");
+    await expect(confirmReviewSmsRecurring(bid, owner, quote.operationId, quote.fingerprint)).rejects.toThrow("review_sms_owner_discount_unverified");
+    expect(mocks.invoiceList).toHaveBeenCalled();
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+  it("uses the frozen discount to recover an unsubmitted confirmed update after new starts are disabled", async () => {
+    ownerSubscription(); const quote = await quoteReviewSmsRecurring(bid, owner); operation!.state = "confirmed";
+    const updated = ownerSubscription(true); updated.items.data[1].current_period_start = Math.floor(now / 1000);
+    updated.latest_invoice = "in_reviews";
+    const invoice = paidInvoice(updated, true); invoice.amount_due = 0; invoice.amount_paid = 0; invoice.lines.data[0].amount = 0;
+    mocks.retrieve.mockResolvedValue(ownerSubscription());
+    vi.stubEnv("REVIEW_SMS_OWNER_DISCOUNT_POLICY", "");
+    mocks.update.mockImplementationOnce(async () => { mocks.retrieve.mockResolvedValue(updated); return updated; });
+    mocks.invoice.mockResolvedValue(invoice);
+    await confirmReviewSmsRecurring(bid, owner, quote.operationId, quote.fingerprint);
+    expect(mocks.update).toHaveBeenCalledTimes(1);
+    expect(mocks.rpc).toHaveBeenCalledWith("review_sms_record_paid_period", expect.objectContaining({ p_allowance: 125 }));
+  });
+  it("inspects an already-created invoice before attempting another provider update", async () => {
+    ownerSubscription(); const quote = await quoteReviewSmsRecurring(bid, owner); operation!.state = "confirmed";
+    const updated = ownerSubscription(true); updated.items.data[1].current_period_start = Math.floor(now / 1000);
+    updated.latest_invoice = "in_unrelated";
+    const invoice = paidInvoice(updated, true); invoice.amount_due = 0; invoice.amount_paid = 0; invoice.lines.data[0].amount = 0;
+    mocks.invoiceList.mockResolvedValue({ data: [invoice, paidInvoice(updated)], has_more: false });
+    mocks.invoice.mockResolvedValue(invoice);
+    await confirmReviewSmsRecurring(bid, owner, quote.operationId, quote.fingerprint);
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(mocks.rpc).toHaveBeenCalledWith("review_sms_record_paid_period", expect.objectContaining({ p_invoice: "in_reviews" }));
+  });
+  it("does not forget an owner's frozen discount after both live discount and new-start policy disappear", async () => {
+    ownerSubscription(); await quoteReviewSmsRecurring(bid, owner); operation!.state = "completed";
+    const sub = subscription(true); sub.latest_invoice = "in_reviews";
+    vi.stubEnv("REVIEW_SMS_OWNER_DISCOUNT_POLICY", "");
+    mocks.retrieve.mockResolvedValue(sub); mocks.invoice.mockResolvedValue(paidInvoice(sub));
+    await expect(reconcileReviewSmsSubscription(sub)).rejects.toThrow("review_sms_owner_discount_unverified");
+    expect(mocks.rpc.mock.calls.some(([name]) => name === "review_sms_record_paid_period")).toBe(false);
+  });
+  it("renews a paid zero-total owner invoice with gross item evidence", async () => {
+    const sub = ownerSubscription(true); sub.latest_invoice = "in_reviews";
+    const invoice = paidInvoice(sub); invoice.amount_due = 0; invoice.amount_paid = 0;
+    mocks.invoice.mockResolvedValue(invoice);
+    await reconcileReviewSmsSubscription(sub);
+    expect(mocks.rpc).toHaveBeenCalledWith("review_sms_record_paid_period", expect.objectContaining({ p_allowance: 250, p_item: "si_addon" }));
+  });
+  it("retains the owner discount in both cancellation phases", async () => {
+    account.state = "active"; ownerSubscription(true);
+    mocks.scheduleCreate.mockResolvedValue(cancellationSchedule()); mocks.scheduleUpdate.mockResolvedValue(cancellationSchedule());
+    await cancelReviewSmsAtPeriodEnd(bid, owner);
+    const phases = mocks.scheduleUpdate.mock.calls[0][1].phases;
+    expect(phases[0].discounts).toEqual([{ discount: "di_owner" }]);
+    expect(phases[1].discounts).toEqual([{ discount: "di_owner" }]);
+    expect(phases[1].items).toHaveLength(1);
+  });
+  it.each(["operation", "invoice", "amount", "customer", "reason", "created", "unpaid"])("cannot grant zero-dollar access from mismatched %s evidence", async kind => {
+    ownerSubscription(); await quoteReviewSmsRecurring(bid, owner); operation!.state = "confirmed"; operation!.invoice_id = "in_reviews";
+    const sub = ownerSubscription(true); sub.latest_invoice = "in_unrelated";
+    sub.items.data[1].current_period_start = Math.floor(now / 1000);
+    const invoice = paidInvoice(sub, true); invoice.amount_due = 0; invoice.amount_paid = 0; invoice.lines.data[0].amount = 0;
+    if (kind === "operation") invoice.parent.subscription_details.metadata.review_sms_operation_id = "other";
+    if (kind === "invoice") invoice.id = "in_other";
+    if (kind === "amount") invoice.amount_due = 1;
+    if (kind === "customer") invoice.customer = "cus_other";
+    if (kind === "reason") invoice.billing_reason = "subscription_cycle";
+    if (kind === "created") invoice.created -= 120;
+    if (kind === "unpaid") invoice.status = "open";
+    mocks.invoice.mockResolvedValue(invoice);
+    if (kind === "unpaid") await reconcileReviewSmsSubscription(sub);
+    else await expect(reconcileReviewSmsSubscription(sub)).rejects.toThrow("review_sms_payment_unverified");
+    expect(mocks.invoice).toHaveBeenCalledWith("in_reviews");
+    expect(mocks.rpc.mock.calls.some(([name]) => name === "review_sms_record_paid_period")).toBe(false);
+  });
+});
 describe("review SMS payment and cancellation recovery", () => {
   it("uses the dedicated activation price with a provider-valid frozen expiry", async () => {
     account.state = "draft";
@@ -572,6 +720,7 @@ describe("review SMS payment and cancellation recovery", () => {
     sub.items.data[1].current_period_start = Math.floor(now / 1000);
     mocks.retrieve.mockResolvedValue(sub);
     mocks.invoice.mockResolvedValue(paidInvoice(sub, true));
+    mocks.invoiceList.mockResolvedValue({ data: [paidInvoice(sub, true)], has_more: false });
     await reconcileReviewSmsSubscription(sub);
     expect(mocks.rpc).toHaveBeenCalledWith(
       "review_sms_record_paid_period",

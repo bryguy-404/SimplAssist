@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   inspectKeywords: vi.fn(),
   ensureKeywords: vi.fn(),
   keywordProgram: vi.fn(),
+  assignment: vi.fn(), readiness: vi.fn(), journalQuery: vi.fn(),
+  acceptedReference: null as string | null,
   providerProfile: vi.fn(),
   profileOwnership: true,
   business: {} as Record<string, unknown>,
@@ -38,13 +40,18 @@ vi.mock("@/lib/supabase/admin", () => ({
     from: (table: string) => {
       const chain: Record<string, unknown> = {};
       for (const method of ["select", "update", "eq", "is", "gte", "limit"])
-        chain[method] = () => chain;
+        chain[method] = (...args: unknown[]) => {
+          if (table === "review_sms_campaign_attempts") mocks.journalQuery(method, ...args);
+          return chain;
+        };
       chain.maybeSingle = chain.single = async () => ({
         data:
           table === "businesses"
             ? mocks.business
             : table === "phone_numbers"
               ? { id: "phone-id", phone_number: "+15745550111" }
+              : table === "review_sms_campaign_attempts" && mocks.acceptedReference
+                ? { reference_id: mocks.acceptedReference }
               : table === "telnyx_registration_events" && mocks.profileOwnership
                 ? { id: "profile-created-event" }
                 : null,
@@ -96,10 +103,10 @@ vi.mock("@/lib/onboarding/rejectionGuard.server", () => ({
   assertNoCarrierRejectionForBusiness: vi.fn(),
 }));
 vi.mock("@/lib/messaging/registration/phoneNumberAssignment", () => ({
-  ensureCampaignAssignmentForBusiness: vi.fn(),
+  ensureCampaignAssignmentForBusiness: mocks.assignment,
 }));
 vi.mock("@/lib/messaging/lookup", () => ({
-  getSmsReadinessForBusiness: async () => ({ smsReady: true }),
+  getSmsReadinessForBusiness: mocks.readiness,
 }));
 vi.mock("@/lib/messaging/registration/legalUrls", () => ({
   resolveLegalUrls: () => ({
@@ -133,6 +140,8 @@ beforeEach(() => {
   vi.stubEnv("REVIEWS_SMS_PROVISIONING_ENABLED", "1");
   vi.stubEnv("TELNYX_PROTECTED_MESSAGING_PROFILE_ID", "protected-profile");
   mocks.profileOwnership = true;
+  mocks.acceptedReference = null;
+  mocks.readiness.mockResolvedValue({ smsReady: true });
   mocks.campaignList.mockResolvedValue({page:1,totalRecords:0,records:[]});
   mocks.campaignSubmit.mockResolvedValue({ campaignId: "created-campaign" });
   mocks.inspectKeywords.mockResolvedValue({ ready: true, issues: [] });
@@ -397,6 +406,49 @@ describe("review SMS provider authority", () => {
     await expect(
       refreshReviewSmsProviderReadiness(businessId),
     ).rejects.toMatchObject({ code: "review_sms_campaign_mismatch" });
+    expect(mocks.inspectKeywords).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+  it("recovers the accepted third reference and waits for carrier approval and asynchronous assignment before readiness", async () => {
+    mocks.acceptedReference = "reviews:account:r2";
+    mocks.account.mockResolvedValue({
+      id: "account", business_id: businessId, billing_source: "direct", campaign_id: "campaign",
+      provider_submitted_at: "2026-01-01T00:00:00Z", provider_attempt_count: 3, state: "carrier_pending",
+    });
+    const campaign = { campaignId: "campaign", brandId: "brand", referenceId: "reviews:account:r2", usecase: "MARKETING", embeddedLink: true };
+    mocks.campaign.mockResolvedValue({ ...campaign, campaignStatus: "MNO_PENDING" });
+    await refreshReviewSmsProviderReadiness(businessId);
+    expect(mocks.journalQuery.mock.calls).toEqual([
+      ["select", "reference_id"], ["eq", "business_id", businessId], ["eq", "account_id", "account"],
+      ["eq", "provider_campaign_id", "campaign"], ["eq", "state", "accepted"],
+    ]);
+    expect(mocks.assignment).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+
+    mocks.campaign.mockResolvedValue({ ...campaign, campaignStatus: "MNO_PROVISIONED" });
+    mocks.readiness.mockResolvedValueOnce({ smsReady: false, reason: "assignment_pending" });
+    await refreshReviewSmsProviderReadiness(businessId);
+    expect(mocks.inspectKeywords).toHaveBeenCalledOnce();
+    expect(mocks.assignment).toHaveBeenCalledExactlyOnceWith(businessId, { force: true, reason: "review_sms_ready" });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+
+    await refreshReviewSmsProviderReadiness(businessId);
+    expect(mocks.assignment).toHaveBeenCalledTimes(2);
+    expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith("review_sms_record_provider_ready", {
+      p_business: businessId, p_campaign: "campaign", p_profile: "tenant-profile", p_phone: "phone-id",
+      p_forbidden_profiles: ["protected-profile"],
+    });
+    expect(mocks.campaignSubmit).not.toHaveBeenCalled();
+  });
+  it("rejects an older reference when the journal records the accepted third campaign", async () => {
+    mocks.acceptedReference = "reviews:account:r2";
+    mocks.account.mockResolvedValue({
+      id: "account", business_id: businessId, billing_source: "direct", campaign_id: "campaign",
+      provider_submitted_at: "2026-01-01T00:00:00Z", provider_attempt_count: 3, state: "carrier_pending",
+    });
+    mocks.campaign.mockResolvedValue({ campaignId: "campaign", brandId: "brand", referenceId: "reviews:account:r1", usecase: "MARKETING", embeddedLink: true, campaignStatus: "MNO_PROVISIONED" });
+    await expect(refreshReviewSmsProviderReadiness(businessId)).rejects.toMatchObject({ code: "review_sms_campaign_mismatch" });
+    expect(mocks.assignment).not.toHaveBeenCalled();
     expect(mocks.inspectKeywords).not.toHaveBeenCalled();
     expect(mocks.rpc).not.toHaveBeenCalled();
   });

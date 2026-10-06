@@ -98,6 +98,18 @@ describe("campaign failure diagnostics", () => {
     expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThanOrEqual(14_000);
   });
 
+  it("retains the authorized corrected reference while rejecting other suffixes or private text", () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const businessId = "10000000-0000-4000-a100-000000000001";
+    const error = serializeCampaignError(new Error("Invalid campaign"));
+    const base = `reviews:${businessId}`;
+    for (const referenceId of [base, `${base}:r1`, `${base}:r2`, `${base}:r3`, `${base}:r2?token=PRIVATE_TOKEN`])
+      logCampaignError({ businessId, referenceId, phase: "submit", error });
+    expect(log.mock.calls.map(call => JSON.parse(call[1]).referenceId))
+      .toEqual([base, `${base}:r1`, `${base}:r2`, undefined, undefined]);
+    expect(JSON.stringify(log.mock.calls)).not.toContain("PRIVATE_TOKEN");
+  });
+
   it("does not log extra properties even when added to an already serialized diagnostic", () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const error = Object.assign(serializeCampaignError(new Error("Invalid email person@example.com; fix email")), {

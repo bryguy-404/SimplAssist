@@ -181,7 +181,7 @@ export function logCampaignError(input: CampaignErrorLogInput): void {
       return typeof value === "string" && uuid.test(value) ? [[key, value]] : [];
     }),
   );
-  const referenceId = input.referenceId && /^(?:reviews|upgrade):[0-9a-f-]{36}(?::r1)?$/i.test(input.referenceId)
+  const referenceId = input.referenceId && /^(?:reviews|upgrade):[0-9a-f-]{36}(?::r[12])?$/i.test(input.referenceId)
     ? input.referenceId : undefined;
   const payloadHash = input.payloadHash && /^[a-f0-9]{64}$/.test(input.payloadHash) ? input.payloadHash : undefined;
   // Reapply the field allowlist so unexpected properties added by a caller can

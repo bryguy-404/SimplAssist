@@ -73,6 +73,34 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("one-use administrative campaign retry", () => {
+  it("requires acknowledgement for one corrected application and never automatically repeats it", async () => {
+    const corrected = { ...inspection, eligible: false, correctedEligible: true, reason: null };
+    fetcher.mockResolvedValueOnce(response({ inspection: corrected }));
+    await click("Inspect campaign status");
+    expect(button("Submit corrected campaign once")!.props.disabled).toBe(true);
+    expect(button("Retry campaign once")).toBeUndefined();
+    accept();
+    fetcher.mockResolvedValueOnce(response({ authorization }))
+      .mockResolvedValueOnce(response({ inspection: { ...corrected, correctedEligible: false, reason: "used" } }));
+    await click("Submit corrected campaign once");
+    expect(JSON.parse(fetcher.mock.calls[1][1].body)).toMatchObject({ action: "prepare_corrected", businessId, acceptAdditionalFee: true });
+    expect(JSON.parse(fetcher.mock.calls[2][1].body)).toEqual({ action: "execute", businessId, attemptId: authorization.attemptId, token: authorization.token });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(button("Submit corrected campaign once")).toBeUndefined();
+  });
+
+  it("only inspects after losing a corrected submission response", async () => {
+    const corrected = { ...inspection, eligible: false, correctedEligible: true };
+    fetcher.mockResolvedValueOnce(response({ inspection: corrected }));
+    await click("Inspect campaign status"); accept();
+    fetcher.mockResolvedValueOnce(response({ authorization })).mockRejectedValueOnce(new Error("Lost response"))
+      .mockResolvedValueOnce(response({ inspection: { ...corrected, correctedEligible: false } }));
+    await click("Submit corrected campaign once");
+    expect(fetcher.mock.calls.filter(([, options]) => options.method === "POST")).toHaveLength(2);
+    expect(fetcher.mock.calls[3][1]).toEqual({ cache: "no-store" });
+    expect(button("Submit corrected campaign once")).toBeUndefined();
+  });
+
   it("does nothing on render and explains duplicate risk, provider fee, and unchanged Stripe billing", () => {
     const html = renderToStaticMarkup(render());
     expect(fetcher).not.toHaveBeenCalled();

@@ -1,12 +1,13 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ admin: vi.fn(), inspect: vi.fn(), prepare: vi.fn(), reauthorize: vi.fn(), execute: vi.fn() }));
+const mocks = vi.hoisted(() => ({ admin: vi.fn(), inspect: vi.fn(), prepare: vi.fn(), corrected: vi.fn(), reauthorize: vi.fn(), execute: vi.fn() }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/admin/auth", () => ({ getAdminUser: mocks.admin }));
 vi.mock("@/lib/reviews/campaignRetry.server", () => ({
   inspectReviewCampaignRetry: mocks.inspect,
   prepareReviewCampaignRetry: mocks.prepare,
+  prepareCorrectedReviewCampaignRetry: mocks.corrected,
   reauthorizeReviewCampaignRetry: mocks.reauthorize,
   executeReviewCampaignRetry: mocks.execute,
 }));
@@ -41,6 +42,7 @@ beforeEach(() => {
   mocks.admin.mockResolvedValue({ id: actorId });
   mocks.inspect.mockResolvedValue(inspection);
   mocks.prepare.mockResolvedValue({ attemptId, token, expiresAt: "2026-10-06T04:15:00Z" });
+  mocks.corrected.mockResolvedValue({ attemptId, token, expiresAt: "2026-10-06T04:15:00Z" });
   mocks.reauthorize.mockResolvedValue({ attemptId, token, expiresAt: "2026-10-06T04:15:00.000Z" });
   mocks.execute.mockResolvedValue({ ...inspection, eligible: false });
 });
@@ -80,6 +82,35 @@ describe("admin campaign retry GET", () => {
 });
 
 describe("admin campaign retry POST", () => {
+  it("uses a distinct corrected preparation action and the authenticated admin without submitting", async () => {
+    const input = { ...preparation, action: "prepare_corrected" };
+    const result = await POST(request(input));
+    expect(result.status).toBe(200);
+    expect(mocks.corrected).toHaveBeenCalledExactlyOnceWith({ ...input, actorId });
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { acceptAdditionalFee: false }, { acceptAdditionalFee: undefined }, { actorId: ownerId },
+    { membershipRevision: 0 }, { originalPayloadHash: "invalid" }, { filing: { arbitrary: true } },
+  ])("rejects invalid corrected preparation fields %#", async extra => {
+    expect((await POST(request({ ...preparation, action: "prepare_corrected", ...extra }))).status).toBe(400);
+    expect(mocks.corrected).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("denies corrected preparation without an admin session", async () => {
+    mocks.admin.mockResolvedValue(null);
+    expect((await POST(request({ ...preparation, action: "prepare_corrected" }))).status).toBe(404);
+    expect(mocks.corrected).not.toHaveBeenCalled();
+  });
+
+  it("denies cross-origin corrected preparation", async () => {
+    expect((await POST(request({ ...preparation, action: "prepare_corrected" }, { origin: "https://foreign.test" }))).status).toBe(403);
+    expect(mocks.corrected).not.toHaveBeenCalled();
+  });
+
   it("reauthorizes the same attempt using the authenticated actor and the exact inspected revision", async () => {
     const response = await POST(request(reauthorization));
     expect(response.status).toBe(200);

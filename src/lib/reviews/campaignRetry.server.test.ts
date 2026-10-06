@@ -31,6 +31,7 @@ import { serializeCampaignError } from "./campaignDiagnostics.server";
 import {
   executeReviewCampaignRetry, inspectReviewCampaignRetry, prepareReviewCampaignRetry,
   reauthorizeReviewCampaignRetry,
+  prepareCorrectedReviewCampaignRetry,
   reconcileReviewCampaignAttempts, reviewCampaignRetryEnabled,
   normalizeReviewCampaignAuthorizationTimestamp,
 } from "./campaignRetry.server";
@@ -442,6 +443,205 @@ describe("reconciliation has no paid endpoint", () => {
     await expect(reconcileReviewCampaignAttempts(account, claim)).rejects.toMatchObject({ code: "review_sms_campaign_recovery_required" });
     expect(mocks.retrieve).toHaveBeenCalledTimes(2);
     expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+});
+
+describe("one corrected keyword submission", () => {
+  const correctedAttemptId = "40000000-0000-4000-a100-000000000003";
+  const historical = { ...originalFiling, optoutKeywords: "STOP,STOPALL,STOP ALL,UNSUBSCRIBE,CANCEL,END,QUIT,REVOKE,OPT OUT" };
+  const corrected = { ...originalFiling, optoutKeywords: "STOP,STOPALL,UNSUBSCRIBE,CANCEL,END,QUIT,REVOKE" };
+  const correctedFiling = { ...corrected, referenceId: `${referenceId}:r2` };
+  const diagnostic = {
+    phase: "submit", status: 400, requestId: "req_keyword_10015",
+    providerErrors: [{ code: "10015", title: "Bad Request", detail: "Keywords must be alphanumeric comma(,) separated without space." }],
+  };
+  const input = () => ({ ...prepareInput(), originalPayloadHash: hash(historical) });
+  let correction: Record<string, unknown>;
+  beforeEach(() => {
+    account.provider_attempt_count = 2;
+    Object.assign(original, { filing: { ...historical }, payload_hash: hash(historical) });
+    Object.assign(attempt, {
+      filing: { ...historical, referenceId: `${referenceId}:r1` }, payload_hash: hash({ ...historical, referenceId: `${referenceId}:r1` }),
+      state: "unknown", diagnostics: structuredClone(diagnostic), authorization_consumed_at: "2026-10-06T04:00:00Z",
+      started_at: "2026-10-06T04:00:00Z", finished_at: "2026-10-06T04:00:01Z", reservation_id: "retry-reservation",
+    });
+    correction = {
+      id: correctedAttemptId, business_id: businessId, account_id: accountId, owner_id: ownerId, attempt_number: 3,
+      reference_id: `${referenceId}:r2`, payload_hash: hash(correctedFiling), filing: { ...correctedFiling }, state: "prepared",
+      original_reservation_id: reservationId, predecessor_attempt_id: attemptId, authorization_revision: 1,
+    };
+    mocks.filing.mockReturnValue({ ...corrected });
+    mocks.reservation.mockResolvedValue({ id: reservationId, referenceId, payloadHash: hash(historical) });
+    const normalRpc = mocks.rpc.getMockImplementation()!;
+    mocks.rpc.mockImplementation(async (name, args) => name === "review_sms_authorize_corrected_campaign_retry" || name === "review_sms_refresh_campaign_retry_authorization"
+      ? { data: { attempt_id: correctedAttemptId, token, expires_at: "2026-10-06T04:15:00.123456+00:00" }, error: null }
+      : normalRpc(name, args));
+  });
+  const withPreparedCorrection = () => mocks.attempts.mockImplementation(async () => [original, attempt, correction]);
+
+  it("advertises an exact known keyword correction without provider or database mutations", async () => {
+    const state = await inspectReviewCampaignRetry(businessId);
+    expect(state).toMatchObject({ eligible: false, correctedEligible: true, preparedRetry: null, originalPayloadHash: hash(historical) });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it("authorizes only the keyword-corrected third reference while preserving both frozen attempts and payment", async () => {
+    const before = structuredClone([original, attempt, account]);
+    await expect(prepareCorrectedReviewCampaignRetry(input())).resolves.toEqual({ attemptId: correctedAttemptId, token, expiresAt: "2026-10-06T04:15:00.123Z" });
+    expect(mocks.rpc.mock.calls).toEqual([
+      ["review_sms_resource_scope_safe", expect.any(Object)],
+      ["review_sms_authorize_corrected_campaign_retry", {
+        p_business: businessId, p_account: accountId, p_owner: ownerId, p_actor: ownerId,
+        p_prior_attempt: attemptId, p_expected_membership_revision: 2,
+        p_corrected_filing: correctedFiling, p_corrected_payload_hash: hash(correctedFiling),
+      }],
+    ]);
+    expect([original, attempt, account]).toEqual(before);
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(calls("review_sms_authorize_campaign_retry")).toHaveLength(0);
+  });
+
+  it("compares frozen JSONB filings structurally regardless of property order", async () => {
+    original.filing = Object.fromEntries(Object.entries(historical).reverse());
+    attempt.filing = Object.fromEntries(Object.entries({ ...historical, referenceId: `${referenceId}:r1` }).reverse());
+    await expect(prepareCorrectedReviewCampaignRetry(input())).resolves.toMatchObject({ attemptId: correctedAttemptId });
+  });
+
+  it.each([
+    { status: 503 }, { status: "400" }, { phase: "verify_and_attach" }, { requestId: "" },
+    { providerErrors: [{ ...diagnostic.providerErrors[0], code: "10016" }] },
+    { providerErrors: [{ ...diagnostic.providerErrors[0], title: "Other error" }] },
+    { providerErrors: [{ ...diagnostic.providerErrors[0], detail: "Different validation failure" }] },
+    { providerErrors: [...diagnostic.providerErrors, { code: "other" }] },
+  ])("refuses any diagnostic outside the exact observed HTTP400 keyword failure %#", async changed => {
+    attempt.diagnostics = { ...diagnostic, ...changed };
+    await expect(prepareCorrectedReviewCampaignRetry(input())).rejects.toMatchObject({ code: "review_sms_campaign_retry_changed" });
+    expect((await inspectReviewCampaignRetry(businessId)).correctedEligible).toBe(false);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { state: "accepted" }, { state: "submitting" }, { authorization_consumed_at: null },
+    { started_at: null }, { finished_at: null }, { provider_campaign_id: "campaign" }, { response_campaign_id: "campaign" },
+    { payload_hash: "changed" }, { original_reservation_id: "other" }, { owner_id: "other" },
+    { filing: { ...historical, referenceId: `${referenceId}:r1`, description: "Changed message" } },
+  ])("refuses changed or uncertain predecessor evidence %#", async changed => {
+    Object.assign(attempt, changed);
+    await expect(prepareCorrectedReviewCampaignRetry(input())).rejects.toMatchObject({ code: "review_sms_campaign_retry_changed" });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { description: "New marketing copy" }, { optoutKeywords: "STOP,END" }, { brandId: "other" },
+    { webhookURL: "https://different.example/callback" },
+  ])("rejects any current filing change beyond the selected keyword correction %#", async changed => {
+    mocks.filing.mockReturnValue({ ...corrected, ...changed });
+    await expect(prepareCorrectedReviewCampaignRetry(input())).rejects.toMatchObject({ code: "review_sms_campaign_retry_changed" });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([referenceId, `${referenceId}:r1`, `${referenceId}:r2`])("refuses a matching existing campaign for %s", async match => {
+    proof.inventory.records.push({ campaignId: "existing", referenceId: match });
+    await expect(prepareCorrectedReviewCampaignRetry(input())).rejects.toMatchObject({ code: "review_sms_campaign_retry_changed" });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([1, 3, 4])("cannot authorize with provider attempt count %i", async count => {
+    account.provider_attempt_count = count;
+    await expect(prepareCorrectedReviewCampaignRetry(input())).rejects.toMatchObject({ code: "review_sms_campaign_retry_changed" });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { ownerId: token }, { accountId: token }, { originalReservationId: token },
+    { originalPayloadHash: "f".repeat(64) }, { membershipRevision: 3 },
+  ])("rejects changed corrected-preparation bindings before mutation %#", async changed => {
+    await expect(prepareCorrectedReviewCampaignRetry({ ...input(), ...changed })).rejects.toMatchObject({ code: "review_sms_campaign_retry_changed" });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { state: "cancel_pending" }, { activation_paid_at: null }, { activation_refunded_at: "2026-10-06T04:00:00Z" },
+    { cancel_at: "2026-10-06T04:00:00Z" }, { campaign_id: "existing" }, { provider_submitted_at: "2026-10-06T04:00:00Z" },
+  ])("does not revive canceled, refunded, unpaid, or already-submitted service %#", async changed => {
+    Object.assign(account, changed);
+    await expect(prepareCorrectedReviewCampaignRetry(input())).rejects.toMatchObject({ code: "review_sms_campaign_retry_changed" });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("cannot create another authorization once ordinal3 exists; it exposes only unused same-attempt recovery", async () => {
+    withPreparedCorrection();
+    await expect(prepareCorrectedReviewCampaignRetry(input())).rejects.toMatchObject({ code: "review_sms_campaign_retry_changed" });
+    expect(await inspectReviewCampaignRetry(businessId)).toMatchObject({ correctedEligible: false, preparedRetry: { attemptId: correctedAttemptId, revision: 1 } });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    await expect(reauthorizeReviewCampaignRetry({ ...input(), attemptId: correctedAttemptId, authorizationRevision: 1 }))
+      .resolves.toMatchObject({ attemptId: correctedAttemptId });
+    expect(calls("review_sms_refresh_campaign_retry_authorization")).toHaveLength(1);
+    expect(calls("review_sms_authorize_corrected_campaign_retry")).toHaveLength(0);
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("executes only the frozen corrected filing through the separately authorized database fence", async () => {
+    withPreparedCorrection();
+    mocks.retrieve.mockResolvedValue({ ...correctedFiling, campaignId: "created-campaign" });
+    const before = structuredClone([original, attempt, account]);
+    await executeReviewCampaignRetry({ businessId, attemptId: correctedAttemptId, token });
+    expect(calls("review_sms_begin_campaign_retry")[0][1]).toMatchObject({ p_attempt: correctedAttemptId, p_token: token });
+    expect(mocks.submit).toHaveBeenCalledExactlyOnceWith(correctedFiling, { maxRetries: 0, timeout: 10000 });
+    expect(calls("review_sms_finish_campaign_attempt")[0][1]).toMatchObject({ p_attempt: correctedAttemptId, p_outcome: "accepted", p_provider_campaign_id: "created-campaign" });
+    expect([original, attempt, account]).toEqual(before);
+  });
+
+  it("rejects tampered prepared correction filing before scope, claim, or submission", async () => {
+    withPreparedCorrection();
+    correction.filing = { ...correctedFiling, optoutKeywords: "STOP" };
+    await expect(executeReviewCampaignRetry({ businessId, attemptId: correctedAttemptId, token })).rejects.toMatchObject({ code: "review_sms_campaign_retry_changed" });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(mocks.qualify).not.toHaveBeenCalled();
+  });
+
+  it("does not POST when the corrected one-use database fence declines submission", async () => {
+    withPreparedCorrection();
+    const normalRpc = mocks.rpc.getMockImplementation()!;
+    mocks.rpc.mockImplementation(async (name, args) => name === "review_sms_begin_campaign_retry" ? { data: { submit: false }, error: null } : normalRpc(name, args));
+    await executeReviewCampaignRetry({ businessId, attemptId: correctedAttemptId, token });
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it.each([referenceId, `${referenceId}:r1`, `${referenceId}:r2`])("blocks late inventory evidence for %s before consuming the corrected capability", async match => {
+    withPreparedCorrection();
+    mocks.shared.mockResolvedValueOnce(proof).mockResolvedValueOnce({ ...proof, inventory: { records: [{ campaignId: "late", referenceId: match }] } });
+    await expect(executeReviewCampaignRetry({ businessId, attemptId: correctedAttemptId, token })).rejects.toMatchObject({ code: "review_sms_campaign_recovery_required" });
+    expect(calls("review_sms_begin_campaign_retry")).toHaveLength(0);
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it.each(["submitting", "unknown", "accepted", "rejected"])("replaying a %s correction only inspects", async state => {
+    withPreparedCorrection();
+    correction.state = state;
+    account.provider_attempt_count = 3;
+    expect(await executeReviewCampaignRetry({ businessId, attemptId: correctedAttemptId, token })).toMatchObject({ eligible: false, correctedEligible: false, preparedRetry: null });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("recovers the accepted corrected campaign with starts disabled and no paid call", async () => {
+    withPreparedCorrection();
+    vi.stubEnv("REVIEWS_SMS_CAMPAIGN_RETRY_BUSINESS_IDS", "");
+    correction.state = "unknown";
+    account.provider_attempt_count = 3;
+    mocks.inventory.mockResolvedValue({ records: [{ campaignId: "corrected-campaign", referenceId: `${referenceId}:r2` }] });
+    mocks.retrieve.mockResolvedValue({ ...correctedFiling, campaignId: "corrected-campaign" });
+    await expect(reconcileReviewCampaignAttempts(account, claim)).resolves.toBe(true);
+    expect(calls("review_sms_finish_campaign_attempt")[0][1]).toMatchObject({ p_attempt: correctedAttemptId, p_outcome: "accepted" });
     expect(mocks.submit).not.toHaveBeenCalled();
   });
 });

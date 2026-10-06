@@ -1,5 +1,6 @@
 import "server-only";
 import { z } from "zod";
+import { isDeepStrictEqual } from "node:util";
 import { supabaseAdmin as db } from "@/lib/supabase/admin";
 import { telnyx } from "@/lib/messaging/client";
 import { ReviewSmsError, type ReviewSmsAccount } from "@/lib/billing/reviewSms";
@@ -43,8 +44,54 @@ async function context(businessId: string) {
   const attempts = await readReviewCampaignAttempts(businessId);
   const filing = buildReviewCampaignFiling(account, business, proof.context);
   const matches = proof.inventory.records.filter(c =>
-    c.referenceId === filing.referenceId || c.referenceId === `${filing.referenceId}:r1`);
+    [filing.referenceId, `${filing.referenceId}:r1`, `${filing.referenceId}:r2`].includes(c.referenceId ?? ""));
   return { account, business, proof, original, attempts, filing, matches };
+}
+
+type RetryContext = Awaited<ReturnType<typeof context>>;
+const originalOptoutKeywords = "STOP,STOPALL,STOP ALL,UNSUBSCRIBE,CANCEL,END,QUIT,REVOKE,OPT OUT";
+const correctedOptoutKeywords = "STOP,STOPALL,UNSUBSCRIBE,CANCEL,END,QUIT,REVOKE";
+const keywordRejectionDetail = "Keywords must be alphanumeric comma(,) separated without space.";
+function correctedRetryEvidence(c: RetryContext) {
+  const originals = c.attempts.filter(t => t.attempt_number === 1);
+  const priors = c.attempts.filter(t => t.attempt_number === 2);
+  if (originals.length !== 1 || priors.length !== 1 || c.attempts.filter(t => t.attempt_number === 3).length > 1 ||
+    c.attempts.some(t => t.attempt_number < 1 || t.attempt_number > 3)) return null;
+  const first = originals[0], prior = priors[0];
+  const diagnostics = prior.diagnostics;
+  const errors = diagnostics?.providerErrors;
+  const exactKeywordRejection = diagnostics?.phase === "submit" && diagnostics.status === 400 && Array.isArray(errors) &&
+    typeof diagnostics.requestId === "string" && !!diagnostics.requestId.trim() && errors.length === 1 &&
+    errors[0]?.code === "10015" && errors[0]?.title === "Bad Request" && errors[0]?.detail === keywordRejectionDetail;
+  const historical = { ...c.filing, optoutKeywords: originalOptoutKeywords };
+  const correctedFiling = { ...c.filing, referenceId: `${c.filing.referenceId}:r2` };
+  if (!c.original || c.original.referenceId !== c.filing.referenceId || !exactKeywordRejection ||
+    c.filing.optoutKeywords !== correctedOptoutKeywords || c.original.payloadHash !== first.payload_hash ||
+    c.original.payloadHash !== reviewCampaignFilingHash(historical) || first.reservation_id !== c.original.id ||
+    first.reference_id !== c.filing.referenceId || first.state !== "unknown" ||
+    prior.reference_id !== `${c.filing.referenceId}:r1` || prior.original_reservation_id !== c.original.id ||
+    prior.state !== "unknown" || !prior.authorization_consumed_at || !prior.started_at || !prior.finished_at ||
+    !isDeepStrictEqual(first.filing, historical) ||
+    !isDeepStrictEqual(prior.filing, { ...historical, referenceId: prior.reference_id }) ||
+    prior.payload_hash !== reviewCampaignFilingHash({ ...historical, referenceId: prior.reference_id }) ||
+    [first, prior].some(t => t.business_id !== c.account.business_id || t.account_id !== c.account.id || t.owner_id !== c.account.owner_id ||
+      t.provider_campaign_id || t.response_campaign_id)) return null;
+  return { first, prior, correctedFiling };
+}
+function unusedPreparedAttempt(attempt: ReviewCampaignAttempt | undefined) {
+  return !!attempt && attempt.state === "prepared" && !attempt.authorization_consumed_at &&
+    !attempt.started_at && !attempt.finished_at && !attempt.claim_token && !attempt.reservation_id &&
+    !attempt.provider_campaign_id && !attempt.response_campaign_id && !!attempt.authorization_revision;
+}
+function currentAccount(c: RetryContext, count: number) {
+  return c.matches.length === 0 && c.account.provider_attempt_count === count && c.account.state === "carrier_pending" &&
+    !c.account.campaign_id && !c.business.telnyx_campaign_id && !c.account.provider_submitted_at &&
+    !!c.account.activation_paid_at && !c.account.activation_refunded_at && !c.account.cancel_at;
+}
+function samePreparationIdentity(c: RetryContext, input: PrepareCampaignRetry) {
+  return !!c.original && c.account.owner_id === input.ownerId && c.account.id === input.accountId &&
+    c.original.id === input.originalReservationId && c.original.payloadHash === input.originalPayloadHash &&
+    c.proof.context.membership.revision === input.membershipRevision;
 }
 
 export async function inspectReviewCampaignRetry(businessId: string) {
@@ -58,7 +105,7 @@ export async function inspectReviewCampaignRetry(businessId: string) {
   try { c = await context(businessId); }
   catch {
     return {
-      eligible: false, reason: "Current registration could not be verified. Recorded attempts are shown below; no retry is permitted.",
+      eligible: false, correctedEligible: false, preparedRetry: null, reason: "Current registration could not be verified. Recorded attempts are shown below; no retry is permitted.",
       businessId, ownerId: account.owner_id, accountId: account.id,
       originalReservationId: null, originalPayloadHash: null, membershipRevision: null,
       state: account.state, providerMatchCount: 0,
@@ -66,19 +113,24 @@ export async function inspectReviewCampaignRetry(businessId: string) {
     };
   }
   const existingRetry = c.attempts.find(a => a.attempt_number === 2);
+  const existingCorrection = c.attempts.find(a => a.attempt_number === 3);
   const current = c.matches.length === 0 && !!c.original &&
     c.original.payloadHash === reviewCampaignFilingHash(c.filing) &&
     c.account.provider_attempt_count === 1 && c.account.state === "carrier_pending" &&
     !c.account.campaign_id && !c.business.telnyx_campaign_id && !c.account.provider_submitted_at &&
     !!c.account.activation_paid_at && !c.account.activation_refunded_at && !c.account.cancel_at;
   const eligible = !existingRetry && current;
-  const preparedRetry = current && existingRetry?.state === "prepared" && !existingRetry.authorization_consumed_at &&
-    !existingRetry.started_at && !existingRetry.finished_at && !existingRetry.claim_token && !existingRetry.reservation_id &&
-    !existingRetry.provider_campaign_id && !existingRetry.response_campaign_id && existingRetry.authorization_revision
-    ? { attemptId: existingRetry.id, revision: existingRetry.authorization_revision } : null;
+  const correction = correctedRetryEvidence(c);
+  const correctedCurrent = !!correction && currentAccount(c, 2);
+  const correctedEligible = correctedCurrent && !existingCorrection;
+  const preparedCorrection = correctedCurrent && unusedPreparedAttempt(existingCorrection) &&
+    existingCorrection!.payload_hash === reviewCampaignFilingHash(correction!.correctedFiling) &&
+    isDeepStrictEqual(existingCorrection!.filing, correction!.correctedFiling);
+  const prepared = preparedCorrection ? existingCorrection : current && unusedPreparedAttempt(existingRetry) ? existingRetry : undefined;
+  const preparedRetry = prepared ? { attemptId: prepared.id, revision: prepared.authorization_revision! } : null;
   return {
     preparedRetry,
-    eligible, reason: eligible ? null : c.matches.length ? "An existing campaign was found. Reconcile it before submitting anything else." :
+    eligible, correctedEligible, reason: eligible || correctedEligible ? null : c.matches.length ? "An existing campaign was found. Reconcile it before submitting anything else." :
       preparedRetry ? "The existing retry is prepared and has not started. It can be resumed without creating another attempt." :
       existingRetry ? "The one-time retry has already been prepared or used. Inspect its recorded outcome; do not submit again." : "The account no longer matches the approved retry conditions.",
     businessId, ownerId: c.account.owner_id, accountId: c.account.id,
@@ -121,18 +173,36 @@ export async function prepareReviewCampaignRetry(input: PrepareCampaignRetry) {
   return retryAuthorizationResponse(authorization);
 }
 
+/** One separately authorized correction of the exact recorded keyword rejection. */
+export async function prepareCorrectedReviewCampaignRetry(input: PrepareCampaignRetry) {
+  assertEnabled(input.businessId);
+  const c = await context(input.businessId);
+  const correction = correctedRetryEvidence(c);
+  if (!correction || !samePreparationIdentity(c, input) || !currentAccount(c, 2) || c.attempts.some(t => t.attempt_number === 3))
+    throw new ReviewSmsError("review_sms_campaign_retry_changed");
+  await scope(c.account, c.business);
+  const authorization = await campaignAttemptRpc<{attempt_id: string; token: string; expires_at: string}>("review_sms_authorize_corrected_campaign_retry", {
+    p_business: input.businessId, p_account: input.accountId, p_owner: input.ownerId, p_actor: input.actorId,
+    p_prior_attempt: correction.prior.id, p_expected_membership_revision: input.membershipRevision,
+    p_corrected_filing: correction.correctedFiling, p_corrected_payload_hash: reviewCampaignFilingHash(correction.correctedFiling),
+  });
+  return retryAuthorizationResponse(authorization);
+}
+
 /** Replace a lost browser capability only while the SAME paid attempt is unused. */
 export async function reauthorizeReviewCampaignRetry(input: PrepareCampaignRetry & { attemptId: string; authorizationRevision: number }) {
   assertEnabled(input.businessId);
   const c = await context(input.businessId);
-  const attempt = c.attempts.find(t => t.id === input.attemptId && t.attempt_number === 2);
-  const retryFiling = { ...c.filing, referenceId: `${c.filing.referenceId}:r1` };
+  const attempt = c.attempts.find(t => t.id === input.attemptId && [2, 3].includes(t.attempt_number));
+  const correction = attempt?.attempt_number === 3 ? correctedRetryEvidence(c) : null;
+  const retryFiling = correction?.correctedFiling ?? { ...c.filing, referenceId: `${c.filing.referenceId}:r1` };
+  const sourceValid = attempt?.attempt_number === 3 ? !!correction && currentAccount(c, 2) : reviewCampaignFilingHash(c.filing) === input.originalPayloadHash;
   if (!attempt || !c.original || c.matches.length || attempt.state !== "prepared" || attempt.authorization_consumed_at ||
     attempt.started_at || attempt.finished_at || attempt.claim_token || attempt.reservation_id || attempt.provider_campaign_id || attempt.response_campaign_id ||
     attempt.authorization_revision !== input.authorizationRevision || c.account.owner_id !== input.ownerId || c.account.id !== input.accountId ||
     c.original.id !== input.originalReservationId || c.original.referenceId !== c.filing.referenceId || c.original.payloadHash !== input.originalPayloadHash ||
-    reviewCampaignFilingHash(c.filing) !== input.originalPayloadHash || attempt.payload_hash !== reviewCampaignFilingHash(retryFiling) ||
-    !reviewSmsCampaignMatches(attempt.filing, retryFiling) || c.proof.context.membership.revision !== input.membershipRevision)
+    !sourceValid || attempt.payload_hash !== reviewCampaignFilingHash(retryFiling) ||
+    !isDeepStrictEqual(attempt.filing, retryFiling) || c.proof.context.membership.revision !== input.membershipRevision)
     throw new ReviewSmsError("review_sms_campaign_retry_changed");
   await scope(c.account, c.business);
   const authorization = await campaignAttemptRpc<{attempt_id: string; token: string; expires_at: string}>("review_sms_refresh_campaign_retry_authorization", {
@@ -185,12 +255,18 @@ export async function executeReviewCampaignRetry(input: {businessId: string; att
   const a = await readReviewSmsAccount(input.businessId);
   if (!a) throw new ReviewSmsError("review_sms_campaign_retry_changed");
   const attempts = await readReviewCampaignAttempts(input.businessId);
-  const attempt = attempts.find(t => t.id === input.attemptId && t.attempt_number === 2 && t.account_id === a.id && t.owner_id === a.owner_id);
+  const attempt = attempts.find(t => t.id === input.attemptId && [2, 3].includes(t.attempt_number) && t.account_id === a.id && t.owner_id === a.owner_id);
   if (!attempt) throw new ReviewSmsError("review_sms_campaign_retry_changed");
   // Replayed POSTs only inspect. They cannot call the carrier again.
   if (attempt.state !== "prepared") return inspectReviewCampaignRetry(input.businessId);
   const c = await context(input.businessId);
   if (c.matches.length) throw new ReviewSmsError("review_sms_campaign_recovery_required");
+  if (attempt.attempt_number === 3) {
+    const correction = correctedRetryEvidence(c);
+    if (!correction || !currentAccount(c, 2) || !isDeepStrictEqual(attempt.filing, correction.correctedFiling) ||
+      attempt.payload_hash !== reviewCampaignFilingHash(correction.correctedFiling))
+      throw new ReviewSmsError("review_sms_campaign_retry_changed");
+  }
   await scope(c.account, c.business);
   const claim = await campaignAttemptRpc<string | null>("review_sms_claim_provisioning", { p_business: input.businessId });
   if (!claim) throw new ReviewSmsError("review_sms_provisioning_busy");
@@ -202,7 +278,7 @@ export async function executeReviewCampaignRetry(input: {businessId: string; att
     if (qualification.usecase !== "MARKETING") throw new ReviewSmsError("review_sms_campaign_qualification_changed");
     // Repeat the read immediately before the one-use fence, after any slow preflight.
     const fresh = await inspectSharedCampaignRetry(input.businessId, a.owner_id);
-    if (fresh.inventory.records.some(r => attempts.some(t => t.reference_id === r.referenceId)))
+    if (fresh.inventory.records.some(r => [c.filing.referenceId, `${c.filing.referenceId}:r1`, `${c.filing.referenceId}:r2`].includes(r.referenceId ?? "")))
       throw new ReviewSmsError("review_sms_campaign_recovery_required");
     assertEnabled(input.businessId);
     const reserved = await campaignAttemptRpc<{submit: boolean}>("review_sms_begin_campaign_retry", {

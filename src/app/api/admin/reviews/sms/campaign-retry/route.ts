@@ -3,13 +3,16 @@ import { z } from "zod";
 import { getAdminUser } from "@/lib/admin/auth";
 import { adminMutationJson, authorizeAdminMutation, readAdminMutationJson } from "@/lib/admin/adminMutation.server";
 import { ReviewSmsError } from "@/lib/billing/reviewSms";
-import { inspectReviewCampaignRetry, prepareReviewCampaignRetry, reauthorizeReviewCampaignRetry, executeReviewCampaignRetry } from "@/lib/reviews/campaignRetry.server";
+import { inspectReviewCampaignRetry, prepareReviewCampaignRetry, prepareCorrectedReviewCampaignRetry, reauthorizeReviewCampaignRetry, executeReviewCampaignRetry } from "@/lib/reviews/campaignRetry.server";
 import { serializeCampaignError, logCampaignError } from "@/lib/reviews/campaignDiagnostics.server";
 
 export const maxDuration = 60;
 const businessId = z.string().uuid();
 const actions = z.discriminatedUnion("action", [
   z.object({ action: z.literal("prepare"), businessId, ownerId: z.string().uuid(), accountId: z.string().uuid(),
+    originalReservationId: z.string().uuid(), originalPayloadHash: z.string().regex(/^[a-f0-9]{64}$/),
+    membershipRevision: z.number().int().positive(), acceptAdditionalFee: z.literal(true) }).strict(),
+  z.object({ action: z.literal("prepare_corrected"), businessId, ownerId: z.string().uuid(), accountId: z.string().uuid(),
     originalReservationId: z.string().uuid(), originalPayloadHash: z.string().regex(/^[a-f0-9]{64}$/),
     membershipRevision: z.number().int().positive(), acceptAdditionalFee: z.literal(true) }).strict(),
   z.object({ action: z.literal("reauthorize"), businessId, ownerId: z.string().uuid(), accountId: z.string().uuid(),
@@ -44,6 +47,7 @@ export async function POST(request: NextRequest) {
   if (!parsed.success) return adminMutationJson({ error: "Invalid retry request" }, { status: 400 });
   try {
     const input = parsed.data;
+    if (input.action === "prepare_corrected") return adminMutationJson({ authorization: await prepareCorrectedReviewCampaignRetry({ ...input, actorId: authorized.admin.id }) });
     if (input.action === "prepare") return adminMutationJson({ authorization: await prepareReviewCampaignRetry({ ...input, actorId: authorized.admin.id }) });
     if (input.action === "reauthorize") return adminMutationJson({ authorization: await reauthorizeReviewCampaignRetry({ ...input, actorId: authorized.admin.id }) });
     return adminMutationJson({ inspection: await executeReviewCampaignRetry(input) });

@@ -13,6 +13,7 @@ import {
 const endpoint = "/api/admin/reviews/sms/campaign-retry";
 const inspectionSchema = z.object({
   eligible: z.boolean(),
+  correctedEligible: z.boolean().optional(),
   reason: z.string().nullable(),
   businessId: z.string().uuid(),
   ownerId: z.string().uuid().nullable(),
@@ -89,7 +90,7 @@ async function readInspection(response: Response, businessId: string): Promise<I
 }
 
 function supportsRetry(inspection: Inspection | null): boolean {
-  return Boolean(inspection?.eligible && inspection.ownerId && inspection.accountId &&
+  return Boolean((inspection?.eligible || inspection?.correctedEligible) && inspection.ownerId && inspection.accountId &&
     inspection.originalReservationId && inspection.originalPayloadHash &&
     inspection.membershipRevision && inspection.providerMatchCount === 0);
 }
@@ -162,7 +163,7 @@ export function ReviewCampaignRetryPanel({ businessId }: { businessId: string })
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            action: recover ? "reauthorize" : "prepare", businessId, ownerId: before.ownerId, accountId: before.accountId,
+            action: recover ? "reauthorize" : before.correctedEligible ? "prepare_corrected" : "prepare", businessId, ownerId: before.ownerId, accountId: before.accountId,
             originalReservationId: before.originalReservationId, originalPayloadHash: before.originalPayloadHash,
             membershipRevision: before.membershipRevision, acceptAdditionalFee: true,
             ...(recover ? { attemptId: recover.attemptId, authorizationRevision: recover.revision } : {}),
@@ -243,6 +244,7 @@ export function ReviewCampaignRetryPanel({ businessId }: { businessId: string })
     </div> : null}
     {(supportsRetry(inspection) && !retryStarted) || canRecover ? <div className="space-y-3">
       {canRecover ? <p>This retry has not started. Resume the same recorded attempt with a fresh one-use authorization.</p> : null}
+      {inspection?.correctedEligible ? <p>Telnyx rejected the prior keyword format. This submits the corrected format once and preserves both earlier attempts.</p> : null}
       <label className="flex items-start gap-2">
         <input type="checkbox" checked={accepted} disabled={busy !== null}
           onChange={event => setAccepted(event.target.checked)}
@@ -250,7 +252,7 @@ export function ReviewCampaignRetryPanel({ businessId }: { businessId: string })
         <span>I authorize one retry for this account and accept the possible additional Telnyx fee and duplicate campaign.</span>
       </label>
       <button type="button" disabled={busy !== null || !(canRetry || (canRecover && accepted))} onClick={() => void retryOnce()}
-        className={`${btnPrimaryCompact} disabled:opacity-50`}>{canRecover ? "Resume unused retry" : "Retry campaign once"}</button>
+        className={`${btnPrimaryCompact} disabled:opacity-50`}>{canRecover ? "Resume unused retry" : inspection?.correctedEligible ? "Submit corrected campaign once" : "Retry campaign once"}</button>
     </div> : null}
     {canResume ? <div className="space-y-3">
       <p>The inspected retry is still prepared and has not started. Resume the same authorization; this does not prepare another attempt.</p>

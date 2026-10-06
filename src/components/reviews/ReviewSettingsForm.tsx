@@ -102,10 +102,10 @@ export default function ReviewSettingsForm({
   return (
     <section className={`${card} p-5 sm:p-7`} aria-labelledby={`${id}-heading`}>
       <h2 id={`${id}-heading`} className={`text-lg font-semibold ${ink}`}>
-        Review settings
+        Google review settings
       </h2>
       <p className={`mt-1 text-sm ${body}`}>
-        Set up your business details and choose how review requests should work.
+        Add your Google review link and choose how invitations and reminders are sent.
       </p>
       <form onSubmit={save} className="mt-6 space-y-6">
         <fieldset disabled={busy} className="space-y-5 disabled:opacity-60">

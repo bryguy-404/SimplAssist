@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
+import Image from "next/image";
 import { Mail, Pause, Play, Plus, RefreshCw } from "lucide-react";
 import type { ReviewCampaignList, ReviewOverview } from "@/lib/reviews/types";
 import {
@@ -114,10 +115,19 @@ export default function ReviewsWorkspace({
     <div className="space-y-6">
       <header className="flex flex-col justify-between gap-4 xl:flex-row xl:items-center">
         <div>
-          <h1 className={`text-2xl font-bold ${ink}`}>Reviews</h1>
-          <p className={`mt-1 text-sm ${body}`}>
-            Turn completed work into an invitation for honest Google feedback.
-          </p>
+          <Image
+            src="/brands/google-wordmark-transparent.png"
+            alt="Google"
+            width={108}
+            height={37}
+            className="mb-5 h-auto w-[108px]"
+          />
+          <div>
+            <h1 className={`text-2xl font-bold ${ink}`}>Reviews</h1>
+            <p className={`mt-1 text-sm ${body}`}>
+              Invite customers to share their experience.
+            </p>
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
@@ -239,7 +249,7 @@ export default function ReviewsWorkspace({
             </p>
           ) : !overview.eligibility.ready ? (
             <p className={`rounded-2xl p-4 text-sm ${statusWarning}`}>
-              Finish your review settings below to start requesting reviews.
+              Finish your Google review settings below to start sending requests.
             </p>
           ) : !overview.eligibility.sendingEnabled ||
             !overview.eligibility.enabled ? (
@@ -336,6 +346,9 @@ export default function ReviewsWorkspace({
           ) : null}
         </>
       ) : null}
+      <p className={`text-xs ${body}`}>
+        Google and the Google logo are trademarks of Google LLC.
+      </p>
     </div>
   );
 }

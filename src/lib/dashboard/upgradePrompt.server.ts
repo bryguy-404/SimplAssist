@@ -24,10 +24,9 @@ export async function getDashboardUpgradePrompt(businessId: string, ownerId: str
     const b = business.data, s = subscription.data;
     if (!b || !s || b.owner_id !== ownerId || b.deleted_at || b.operations_suspended_at || b.billing_mode !== "stripe" || b.partner_id || b.partner_plan || b.billing_pilot || b.billing_comped || b.billing_exempt || !b.onboarding_completed_at || s.status !== "active" || s.cancel_at_period_end || !s.stripe_subscription_id || !s.stripe_customer_id || !(Date.parse(s.current_period_start) <= Date.now() && Date.parse(s.current_period_end) > Date.now())) return null;
     if (!["chat_only", "sms_and_chat"].includes(s.plan)) return null;
-    const [prefs, settings, email, review, upgrade, pending, pendingReview, activation, growthActivation] = await Promise.all([
+    const [prefs, settings, review, upgrade, pending, pendingReview, activation, growthActivation] = await Promise.all([
       supabaseAdmin.from("dashboard_upgrade_preferences").select("offer_key,dismissal_count,snoozed_until,hidden_at,revision").eq("business_id", businessId),
       supabaseAdmin.from("review_settings").select("google_review_url,reply_to_verified_at,paused").eq("business_id", businessId).maybeSingle(),
-      supabaseAdmin.from("review_email_outbox").select("id").eq("business_id", businessId).eq("kind", "initial").not("enrollment_id", "is", null).not("accepted_at", "is", null).limit(1),
       supabaseAdmin.from("review_sms_accounts").select("id,state,billing_source").eq("business_id", businessId).maybeSingle(),
       supabaseAdmin.from("chat_texting_upgrades").select("state,source_mode,activated_at").eq("business_id", businessId).neq("state", "abandoned").maybeSingle(),
       supabaseAdmin.from("sms_billing_operations").select("id").eq("business_id", businessId).in("state", ["prepared", "confirming", "pending", "scheduled"]).limit(1),
@@ -35,7 +34,7 @@ export async function getDashboardUpgradePrompt(businessId: string, ownerId: str
       supabaseAdmin.from("review_sms_billing_operations").select("completed_at").eq("business_id", businessId).eq("kind", "recurring").eq("state", "completed").not("completed_at", "is", null).order("completed_at", { ascending: true }).limit(1).maybeSingle(),
       supabaseAdmin.from("sms_billing_operations").select("applied_at").eq("business_id", businessId).eq("stripe_subscription_id", s.stripe_subscription_id).eq("target_plan", "sms_and_chat").eq("state", "applied").order("applied_at", { ascending: false }).limit(1).maybeSingle(),
     ]);
-    if ([prefs, settings, email, review, upgrade, pending, pendingReview, activation, growthActivation].some(result => result.error)) return null;
+    if ([prefs, settings, review, upgrade, pending, pendingReview, activation, growthActivation].some(result => result.error)) return null;
     const featurePaused = Boolean(b.texting_paused_at || b.telnyx_submission_disabled || b.active_telnyx_release_run_id || settings.data?.paused);
     const hasPending = Boolean(s.pending_plan || pending.data?.length || pendingReview.data?.length);
     let growthEligible = false, voiceEligible = false;
@@ -55,7 +54,6 @@ export async function getDashboardUpgradePrompt(businessId: string, ownerId: str
       reviewAccount: review.data,
       reviewEnabled: isReviewSmsEnabled(businessId) && isEmailReviewsEnabledForBusiness(businessId),
       reviewSettingsReady: Boolean(settings.data?.google_review_url && settings.data?.reply_to_verified_at),
-      hasAcceptedReviewEmail: Boolean(email.data?.length),
       reviewActivatedAt: activation.data?.completed_at ?? null,
       growthActivatedAt: [upgrade.data?.activated_at, growthActivation.data?.applied_at]
         .filter((value): value is string => typeof value === "string" && Number.isFinite(Date.parse(value)))

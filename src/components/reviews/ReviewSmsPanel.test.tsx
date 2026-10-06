@@ -43,13 +43,37 @@ beforeEach(() => {
   harness.hashTarget.mockClear();
 });
 describe("review texting pricing and lifecycle presentation", () => {
+  it("explains the upgrade before exposing registration or payment actions", () => {
+    const html = render(overview);
+    expect(html).toContain("right from a text message");
+    expect(html).toContain("$20.00/month added to your current plan");
+    expect(html).toContain("$35/month in total");
+    expect(html).toContain("$25.00 one-time activation");
+    expect(html).toContain("250 total SMS parts");
+    expect(html).toContain("carrier approval");
+    expect(html).toContain("confirm the prorated monthly");
+    expect(html).toContain("Customers need to agree");
+    expect(html).toMatch(/<button[^>]*aria-expanded="false"[^>]*>Start texting setup<\/button>/);
+    expect(html).not.toContain("Save approval details");
+    expect(html).not.toContain('name="ein"');
+    expect(html).not.toContain("Pay $25.00");
+    expect(html).not.toContain("Check status");
+  });
+  it("opens the form only after choosing to start, without offering payment yet", () => {
+    const html = render(overview, [false, true]);
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain('id="review-sms-registration"');
+    expect(html).toContain("Back to overview");
+    expect(html).toContain("Save approval details");
+    expect(html).not.toContain("Pay $25.00");
+  });
   it("locks staged shared legal details before a provider brand is attached", () => {
     const html = render({ ...overview,
       sharedRegistration: { status: "approved", legalBusinessName: "Example Operator LLC", identityVersion: 1 },
       setup: { missing: [], fields: { identityLocked: false, representativeEditable: true, hasEin: false, legalBusinessName: "STALE_NAME",
         publicAddressVisibility: "city_state", address: "100 Private Street", city: "South Bend", state: "IN", zip: "46601",
         entityType: "llc", authorizedRepName: "Owner", authorizedRepEmail: "owner@example.test", authorizedRepPhone: "+15745550123" } },
-    });
+    }, [false, true]);
     expect(html).toContain("Uses your existing legal registration");
     expect(html).toContain("Example Operator LLC");
     expect(html).not.toContain("STALE_NAME");
@@ -71,7 +95,7 @@ describe("review texting pricing and lifecycle presentation", () => {
     const html = render({ ...overview,
       sharedRegistration: { status: "active", legalBusinessName: "Example LLC", identityVersion: 1 },
       setup: { missing: [], fields: { publicAddressVisibility: "full" } },
-    });
+    }, [false, true]);
     expect(html).toContain("registered business address is used for carrier approval");
     expect(html).not.toContain("show only the city and state");
     for (const name of ["authorizedRepName", "authorizedRepEmail", "authorizedRepPhone"]) {

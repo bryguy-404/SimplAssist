@@ -49,7 +49,6 @@ export type UpgradePromptSnapshot = {
   reviewAccount: { state: string; billing_source: string } | null;
   reviewEnabled: boolean;
   reviewSettingsReady: boolean;
-  hasAcceptedReviewEmail: boolean;
   reviewActivatedAt: string | null;
   growthActivatedAt: string | null;
   growthEligible: boolean;
@@ -80,7 +79,7 @@ export function chooseDashboardUpgradePrompt(s: UpgradePromptSnapshot, now = Dat
   if (s.reviewPaymentPending && s.reviewEnabled) return progress("review_texting", "A review texting payment is in progress", "Check its status before starting another change.", REVIEW_TEXTING_SETTINGS_HREF);
   if (s.featurePaused || (a && ["cancel_pending", "release_pending", "released"].includes(a.state))) return null;
   let key: UpgradeOfferKey | null = null;
-  if (s.plan === "chat_only" && !a && s.reviewEnabled && s.reviewSettingsReady && s.hasAcceptedReviewEmail) key = "review_texting";
+  if (s.plan === "chat_only" && !a && s.reviewEnabled && s.reviewSettingsReady) key = "review_texting";
   else if (s.plan === "chat_only" && a?.state === "active" && a.billing_source === "direct" && s.growthEligible && mature(s.reviewActivatedAt, now)) key = "growth";
   else if (s.plan === "sms_and_chat" && s.voiceEligible && mature(s.growthActivatedAt, now)) key = "voice";
   if (!key) return null;

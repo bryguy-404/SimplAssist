@@ -320,11 +320,12 @@ export default function ReviewSmsPanel({
             Text review requests
           </h2>
           <p className={`mt-1 text-sm ${body}`}>
-            Add text invitations after your business and review-request use case
-            are approved.
+            {direct && !account
+              ? "Give customers an easy way to open your Google review link, right from a text message."
+              : "Add text invitations after your business and review-request use case are approved."}
           </p>
         </div>
-        <button
+        {account || registrationUnavailable ? <button
           type="button"
           disabled={busy || !overview?.enabled}
           onClick={() => perform("refresh")}
@@ -332,7 +333,7 @@ export default function ReviewSmsPanel({
         >
           <RefreshCw className="h-3.5 w-3.5" />
           Check status
-        </button>
+        </button> : null}
       </div>
       {error && !quote && !cancelOpen ? (
         <p
@@ -369,7 +370,7 @@ export default function ReviewSmsPanel({
                 {smsPriceSummary(overview)}
               </p>
               {direct ? <p className={`mt-2 text-sm ${body}`}>
-                On the current $15 Chat plan, that makes $35/month in total.
+                With the standard $15 Chat plan, that makes $35/month in total.
                 The monthly add-on begins only after approval and your payment confirmation.
               </p> : null}
               <p className={`mt-2 text-sm ${body}`}>
@@ -409,18 +410,49 @@ export default function ReviewSmsPanel({
                 ) : null}
               </div>
             ) : null}
-            {!registrationUnavailable && (!account || editing) && overview.eligibleSource !== "grant" ? (
-              <SmsSetupForm
-                key={`${editing ? "edit" : "new"}-${overview.sharedRegistration?.identityVersion ?? "standalone"}`}
-                overview={overview}
-                onSaved={async () => {
-                  await load();
-                  setEditing(false);
-                  setNotice(
-                    "Approval details saved. No registration charge has been made.",
-                  );
-                }}
-              />
+            {direct && !account && !registrationUnavailable ? (
+              <div className="space-y-3">
+                <h3 className={`text-sm font-semibold ${ink}`}>Before your first text</h3>
+                <p className={`text-sm ${body}`}>
+                  We’ll help you choose a texting number and submit your business
+                  and review-text program for carrier approval. Once approved
+                  and your number is ready, you’ll confirm the prorated monthly
+                  price before texting is activated. Your renewal date stays the same.
+                </p>
+                <p className={`text-sm ${body}`}>
+                  Customers need to agree to receive review texts. Your setup
+                  includes a permission page and opt-out handling. You can keep
+                  using web chat and email reviews while approval is pending.
+                </p>
+                <button
+                  type="button"
+                  aria-expanded={editing}
+                  aria-controls={editing ? "review-sms-registration" : undefined}
+                  onClick={() => setEditing(!editing)}
+                  className={editing ? btnSecondaryInline : btnPrimaryInline}
+                >
+                  {editing ? "Back to overview" : "Start texting setup"}
+                </button>
+                {!editing ? <p className={`text-xs ${body}`}>
+                  Explore the setup first. Nothing is charged or submitted for
+                  carrier approval until you confirm the activation payment.
+                </p> : null}
+              </div>
+            ) : null}
+            {!registrationUnavailable && (editing || (!account && !direct)) && overview.eligibleSource !== "grant" ? (
+              <div id="review-sms-registration">
+                <SmsSetupForm
+                  key={`${editing ? "edit" : "new"}-${overview.sharedRegistration?.identityVersion ?? "standalone"}`}
+                  overview={overview}
+                  onSaved={async () => {
+                    await load();
+                    setEditing(false);
+                    setNotice(
+                      "Approval details saved. No registration charge has been made.",
+                    );
+                  }}
+                />
+              </div>
             ) : null}
             {overview.eligibleSource === "grant" ? (
               <p className={`text-sm ${body}`}>

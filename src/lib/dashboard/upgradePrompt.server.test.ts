@@ -38,7 +38,7 @@ beforeEach(() => {
     businesses: { id: businessId, owner_id: ownerId, billing_mode: "stripe", partner_id: null, partner_plan: null, billing_pilot: false, billing_comped: false, billing_exempt: false, deleted_at: null, operations_suspended_at: null, texting_paused_at: null, onboarding_completed_at: "2026-09-01T12:00:00Z", telnyx_submission_disabled: false, active_telnyx_release_run_id: null },
     subscriptions: { plan: "chat_only", status: "active", stripe_subscription_id: "sub", stripe_customer_id: "customer", current_period_start: "2026-10-01T12:00:00Z", current_period_end: "2026-11-01T12:00:00Z", cancel_at_period_end: false, pending_plan: null, created_at: "2026-09-01T12:00:00Z" },
     dashboard_upgrade_preferences: [], review_settings: { google_review_url: "https://g.page/r/test/review", reply_to_verified_at: "2026-09-01T12:00:00Z", paused: false },
-    review_email_outbox: [{ id: "real-email" }], review_sms_accounts: null, chat_texting_upgrades: null,
+    review_sms_accounts: null, chat_texting_upgrades: null,
     sms_billing_operations: [], review_sms_billing_operations: [], review_activation: { completed_at: "2026-09-10T12:00:00Z" }, growth_activation: null,
   };
   setupQueries();
@@ -51,11 +51,14 @@ describe("read-only upgrade discovery", () => {
     vi.stubEnv("DASHBOARD_UPGRADE_PROMPTS_ENABLED", "0"); expect(await get()).toBeNull(); expect(mocks.from).not.toHaveBeenCalled();
     vi.stubEnv("DASHBOARD_UPGRADE_PROMPTS_ENABLED", "1"); mocks.excluded.mockReturnValue(true); expect(await get()).toBeNull(); expect(mocks.from).not.toHaveBeenCalled();
   });
-  it("uses narrow reads for first invitation and excludes test previews", async () => {
+  it("offers texting after review setup without reading email history or starting setup", async () => {
     expect(await get()).toMatchObject({ offerKey: "review_texting" });
-    expect(calls.find(call => call.table === "review_email_outbox")?.filters).toEqual(expect.arrayContaining([["eq", "kind", "initial"], ["not", "enrollment_id", "is", null], ["not", "accepted_at", "is", null]]));
+    expect(calls.some(call => call.table === "review_email_outbox")).toBe(false);
     expect(calls.every(call => !call.filters.some(f => ["insert", "update", "delete", "upsert"].includes(String(f[0]))))).toBe(true);
     expect(mocks.upgradeState).not.toHaveBeenCalled(); expect(mocks.smsReadiness).not.toHaveBeenCalled();
+  });
+  it.each([{ google_review_url: null }, { google_review_url: "" }, { reply_to_verified_at: null }])("waits for a saved review link and verified reply-to address", async values => {
+    patch("review_settings", values); expect(await get()).toBeNull();
   });
   it.each([{ owner_id: "other" }, { billing_mode: "comped" }, { partner_id: "partner" }, { partner_plan: "full" }, { billing_pilot: true }, { billing_comped: true }, { billing_exempt: true }, { operations_suspended_at: "now" }, { deleted_at: "now" }, { onboarding_completed_at: null }])("suppresses unsafe or managed businesses", async values => {
     patch("businesses", values); expect(await get()).toBeNull(); expect(mocks.from).toHaveBeenCalledTimes(2);

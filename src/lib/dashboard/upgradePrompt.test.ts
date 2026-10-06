@@ -5,15 +5,15 @@ const weekAgo = new Date(now - 7 * 86400_000).toISOString();
 export const baseSnapshot: UpgradePromptSnapshot = {
   plan: "chat_only", eligibleBusiness: true, featurePaused: false, pendingBilling: false, reviewPaymentPending: false,
   textingUpgrade: null, reviewAccount: null, reviewEnabled: true, reviewSettingsReady: true,
-  hasAcceptedReviewEmail: true, reviewActivatedAt: weekAgo, growthActivatedAt: weekAgo,
+  reviewActivatedAt: weekAgo, growthActivatedAt: weekAgo,
   growthEligible: true, voiceEligible: true, preferences: [],
 };
 const choose = (patch: Partial<UpgradePromptSnapshot> = {}) => chooseDashboardUpgradePrompt({ ...baseSnapshot, ...patch }, now);
 const pref = (patch: Partial<UpgradePromptPreference> = {}): UpgradePromptPreference => ({ offer_key: "review_texting", dismissal_count: 1, snoozed_until: null, hidden_at: null, revision: 1, ...patch });
 describe("dashboard upgrade selection", () => {
-  it("offers review texting only after real email use and complete setup", () => {
+  it("offers review texting after complete review setup without requiring an email send", () => {
     expect(choose()).toMatchObject({ kind: "offer", offerKey: "review_texting", href: "/reviews?tab=settings#review-sms" });
-    for (const patch of [{ hasAcceptedReviewEmail: false }, { reviewSettingsReady: false }, { reviewEnabled: false }, { eligibleBusiness: false }, { featurePaused: true }]) expect(choose(patch)).toBeNull();
+    for (const patch of [{ reviewSettingsReady: false }, { reviewEnabled: false }, { eligibleBusiness: false }, { featurePaused: true }]) expect(choose(patch)).toBeNull();
   });
   it("waits seven days after paid review activation before Growth", () => {
     const reviewAccount = { state: "active", billing_source: "direct" };

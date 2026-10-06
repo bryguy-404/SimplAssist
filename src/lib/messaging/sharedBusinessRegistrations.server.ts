@@ -10,6 +10,7 @@ import {
   type ExistingBrandProviderIdentity,
 } from "./registration/identity";
 import { sharedBrandObservedStatus } from "./sharedBrandEvents.server";
+import { readReviewCampaignInventory } from "@/lib/reviews/campaignInventory.server";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SOURCE_BUSINESS = "ea848911-ef72-44a6-8cf3-c47b3959be26";
@@ -247,6 +248,15 @@ interface ReservationRow {
 export async function readSharedCampaignReservation(businessId: string, operationId: string) {
   const r = checked(await db.from("shared_brand_campaign_reservations").select("id,business_id,operation_id,reference_id,payload_hash,provider_campaign_id").eq("business_id", businessId).eq("operation_id", operationId).maybeSingle()) as ReservationRow | null;
   return r ? { id: r.id, payloadHash: r.payload_hash, referenceId: r.reference_id, providerCampaignId: r.provider_campaign_id } : null;
+}
+/** Read-only evidence for the explicitly approved retry; no admission or resources. */
+export async function inspectSharedCampaignRetry(businessId: string, ownerId: string) {
+  const context = await validateSharedRegistrationProof({ businessId, ownerId, requireActive: true });
+  if (!context) throw new SharedRegistrationError("shared_membership_missing");
+  const inspection = await inspectProvider(context.registration.telnyx_brand_id, context.registration.legal_identity, context.registration);
+  const inventory = await readReviewCampaignInventory(context.registration.telnyx_brand_id);
+  if (inventory.records.length !== inspection.campaignCount) throw new SharedRegistrationError("shared_provider_inventory_changed");
+  return { context, inventory, verifiedAt: inspection.verifiedAt };
 }
 export async function reserveSharedCampaignSubmission(args: {
   businessId: string; operationId: string; referenceId: string; purpose: "review_initial" | "review_upgrade";

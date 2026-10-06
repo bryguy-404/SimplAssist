@@ -1,6 +1,9 @@
 import "server-only";
 import { reviewShared } from "@/lib/billing/sharedRegistrationErrors.server";
-import { createHash } from "node:crypto";
+import { buildReviewCampaignFiling, reviewCampaignFilingHash, reviewSmsCampaignMatches } from "./campaignFiling.server";
+export { reviewSmsCampaignMatches } from "./campaignFiling.server";
+import { campaignAttemptRpc, captureReviewCampaignFailure, reviewCampaignReference } from "./campaignAttempts.server";
+import { readReviewCampaignInventory } from "./campaignInventory.server";
 import { z } from "zod";
 import { adminUserIds } from "@/lib/admin/allowlist";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -38,7 +41,7 @@ import {
 import { resolveLegalUrls } from "@/lib/messaging/registration/legalUrls";
 import { reviewOrigin } from "./domain";
 import { generateSlug } from "@/lib/util/slug.shared";
-import { reviewConsentUrl, reviewConsentDescription, reviewConsentConfirmation } from "./consentCopy";
+import { reviewConsentUrl, reviewConsentDescription } from "./consentCopy";
 import {
   ensureReviewSmsKeywords,
   inspectReviewSmsKeywords,
@@ -474,6 +477,8 @@ export async function continueReviewSmsProvisioning(businessId: string) {
   if (typeof claim !== "string") return;
   try {
     await assertClaim(a, claim);
+    const { reconcileReviewCampaignAttempts } = await import("./campaignRetry.server");
+    if (await reconcileReviewCampaignAttempts(a, claim)) return;
     if (await reviewShared(readSharedRegistrationContext(businessId))) {
       const proof = await readPaidReviewSmsSharedRegistrationProof(a);
       if (!proof) throw new ReviewSmsError("review_sms_shared_registration_required");
@@ -602,12 +607,6 @@ export async function continueReviewSmsProvisioning(businessId: string) {
       throw new ReviewSmsError("review_sms_state_unavailable", 503);
   }
 }
-/** Telnyx's campaign retrieve omits callback URLs; all customer-visible filing
- * fields must still match before adopting an ambiguous shared-brand outcome. */
-export function reviewSmsCampaignMatches(candidate: Record<string, unknown>, filing: Record<string, unknown>) {
-  return Object.entries(filing).filter(([key]) => !["webhookURL", "webhookFailoverURL"].includes(key))
-    .every(([key, value]) => candidate[key] === value);
-}
 async function submitReviewSmsCampaign(a: ReviewSmsAccount, claim: string) {
   const b = await business(a.business_id);
   if (b.telnyx_campaign_id) {
@@ -616,53 +615,14 @@ async function submitReviewSmsCampaign(a: ReviewSmsAccount, claim: string) {
     return;
   }
   const shared = await reviewShared(readSharedRegistrationContext(a.business_id));
-  const links = resolveLegalUrls(b);
-  const phone = String(a.draft.phoneNumber);
-  const label = String(b.name).slice(0, 70);
-  const keywords = reviewSmsKeywordProgram(label, b.authorized_rep_email);
-  const payload = {
-    brandId: b.telnyx_brand_id,
-    usecase: "MARKETING",
-    description: shared
-      ? `${label} is operated by ${shared.registration.legal_business_name}. The registered SimplAssist brand belongs to the same legal entity. ${label} sends marketing review requests to its own customers after completed services, with their permission. One invitation and at most one reminder; human staff handle replies.`
-      : `${label} requests honest Google reviews after completed services. One invitation and at most one reminder are sent only with the customer's permission. Human staff handle replies.`,
-    sample1: `${label}: Thank you for choosing us. Please share an honest review: ${reviewOrigin()}/r/example Reply STOP to opt out.`,
-    sample2: `${label}: A quick reminder: you can share your experience at ${reviewOrigin()}/r/example Reply STOP to opt out.`,
-    sample3: `${label}: Thank you for your feedback. Our team will help with your question. Reply STOP to opt out.`,
-    messageFlow: `${a.draft.consentDescription} Evidence: ${a.draft.consentEvidenceUrl}. Customers consent to review requests from ${label} using ${phone}. Up to 2 messages per completed service; message and data rates may apply. Consent is not required to purchase. Reply STOP to opt out or HELP for help. Privacy: ${links.privacyUrl}. Terms: ${links.termsUrl}.`,
-    subscriberOptin: true,
-    optinKeywords: a.draft.consentMode === "hosted_keyword" ? "REVIEWS" : keywords.start.keywords.join(","),
-    optinMessage: a.draft.consentMode === "hosted_keyword" ? reviewConsentConfirmation(label) : keywords.start.resp_text,
-    subscriberOptout: true,
-    optoutKeywords: keywords.stop.keywords.join(","),
-    optoutMessage: keywords.stop.resp_text,
-    subscriberHelp: true,
-    helpKeywords: keywords.info.keywords.join(","),
-    helpMessage: keywords.info.resp_text,
-    termsAndConditions: true,
-    privacyPolicyLink: links.privacyUrl,
-    termsAndConditionsLink: links.termsUrl,
-    autoRenewal: true,
-    embeddedLink: true,
-    embeddedPhone: false,
-    numberPool: false,
-    directLending: false,
-    ageGated: false,
-    referenceId: `reviews:${a.id}`,
-    webhookURL: `${reviewOrigin()}/api/messaging/registration/status`,
-    webhookFailoverURL: `${reviewOrigin()}/api/messaging/registration/status`,
-  };
-  const payloadHash = createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+  const payload = buildReviewCampaignFiling(a, b, shared);
+  const payloadHash = reviewCampaignFilingHash(payload);
   let reservation = shared ? await reviewShared(readSharedCampaignReservation(a.business_id, a.id)) : null;
   if (reservation && (reservation.payloadHash !== payloadHash || reservation.referenceId !== payload.referenceId))
     throw new ReviewSmsError("review_sms_campaign_recovery_required");
   // Exact-reference recovery happens before the one-time paid-submit fences.
-  const matches = [];
-  for await (const c of telnyx.messaging10dlc.campaign.list(
-    { brandId: b.telnyx_brand_id }, { maxRetries: 0, timeout: 10000 },
-  )) {
-    if (c.referenceId === payload.referenceId) matches.push(c);
-  }
+  const { records } = await readReviewCampaignInventory(b.telnyx_brand_id);
+  const matches = records.filter(c => c.referenceId === payload.referenceId);
   if (matches.length > 1) throw new ReviewSmsError("review_sms_campaign_recovery_required");
   let campaignId = matches[0]?.campaignId;
   if (!campaignId) {
@@ -684,10 +644,31 @@ async function submitReviewSmsCampaign(a: ReviewSmsAccount, claim: string) {
         "review_sms_reserve_campaign_submission", { p_business: a.business_id, p_claim: claim },
       );
       if (error || reserved !== true) throw new ReviewSmsError("review_sms_submission_requires_support");
+      // A durable journal entry is required before any new paid HTTP request.
+      const attempt = await campaignAttemptRpc<{ attempt_id: string; submit: boolean }>("review_sms_begin_campaign_attempt", {
+        p_business: a.business_id, p_claim: claim, p_reference: payload.referenceId,
+        p_payload_hash: payloadHash, p_filing: payload, p_reservation: reservation?.id ?? null,
+      });
+      if (!attempt.submit) throw new ReviewSmsError("review_sms_campaign_recovery_required");
+      let responseCampaignId: string | null = null;
+      let phase = "submit";
       try {
         const response = await telnyx.messaging10dlc.campaignBuilder.submit(payload, { maxRetries: 0, timeout: 10000 });
-        campaignId = response.campaignId;
+        if (!response || typeof response.campaignId !== "string" || !response.campaignId.trim())
+          throw new ReviewSmsError("review_sms_campaign_response_invalid");
+        responseCampaignId = response.campaignId;
+        phase = "verify_and_attach";
+        const candidate = await telnyx.messaging10dlc.campaign.retrieve(responseCampaignId, { maxRetries: 0, timeout: 10000 });
+        const attached = await campaignAttemptRpc<{attached: boolean}>("review_sms_finish_campaign_attempt", {
+          p_attempt: attempt.attempt_id, p_claim: claim, p_outcome: "accepted",
+          p_provider_campaign_id: responseCampaignId, p_provider_filing: candidate, p_diagnostics: null,
+        });
+        if (!attached.attached) throw new ReviewSmsError("review_sms_campaign_save_recovery_required", 503);
+        return;
       } catch (error) {
+        const { campaignPrivateValues } = await import("./campaignRetry.server");
+        await captureReviewCampaignFailure({ businessId: a.business_id, attemptId: attempt.attempt_id, claim, error, phase,
+          sensitiveValues: campaignPrivateValues(b), responseCampaignId });
         if (reservation) await reviewShared(settleSharedCampaignSubmission({ businessId: a.business_id, reservationId: reservation.id, payloadHash, outcome: "uncertain" })).catch(() => {});
         throw error;
       }
@@ -743,7 +724,7 @@ export async function refreshReviewSmsProviderReadiness(businessId: string) {
   );
   if (
     campaign.brandId !== b.telnyx_brand_id ||
-    campaign.referenceId !== `reviews:${a.id}` ||
+    campaign.referenceId !== await reviewCampaignReference(businessId, a.id, a.campaign_id) ||
     campaign.usecase !== "MARKETING" ||
     campaign.embeddedLink !== true
   )

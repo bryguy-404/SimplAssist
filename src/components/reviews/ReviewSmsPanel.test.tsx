@@ -207,6 +207,49 @@ describe("review texting pricing and lifecycle presentation", () => {
       }),
     ).toContain("Cancel before submission and refund activation");
   });
+  it.each([
+    { campaign_id: null, provider_submitted_at: null },
+    { campaign_id: "campaign-example", provider_submitted_at: null },
+    { campaign_id: null, provider_submitted_at: "2026-10-06T03:12:00Z" },
+  ])("does not claim carrier review without both a saved campaign and submission confirmation", evidence => {
+    const html = render({ ...overview, account: {
+      state: "carrier_pending", draft: {}, provider_attempt_count: 0, last_error: null, ...evidence,
+    } as ReviewSmsAccount });
+    expect(html).toContain("Preparing texting registration");
+    expect(html).toContain("application submission has not yet been confirmed");
+    expect(html).toContain("Email reviews remain available");
+    expect(html).toContain("not automatically charge an additional application fee");
+    expect(html).not.toContain("Carrier approval in progress");
+    expect(html).not.toContain("business registration is being reviewed");
+  });
+  it("marks an uncertain failed submission as needing attention without claiming carrier review", () => {
+    const html = render({ ...overview, account: {
+      state: "carrier_pending", draft: {}, provider_attempt_count: 1, last_error: "review_sms_reconciliation_needed",
+      campaign_id: null, provider_submitted_at: null,
+    } as ReviewSmsAccount });
+    expect(html).toContain("Texting setup needs attention");
+    expect(html).toContain("application submission has not yet been confirmed");
+    expect(html).not.toContain("Carrier approval in progress");
+    expect(html).not.toContain("business registration is being reviewed");
+  });
+  it("keeps a submission without an error in preparation until confirmation arrives", () => {
+    const html = render({ ...overview, account: {
+      state: "carrier_pending", draft: {}, provider_attempt_count: 1, last_error: null,
+      campaign_id: null, provider_submitted_at: null,
+    } as ReviewSmsAccount });
+    expect(html).toContain("Preparing texting registration");
+    expect(html).not.toContain("Texting setup needs attention");
+  });
+  it("shows actual carrier review only with the confirmed campaign and submission timestamp", () => {
+    const html = render({ ...overview, account: {
+      state: "carrier_pending", draft: {}, provider_attempt_count: 1, last_error: null,
+      campaign_id: "campaign-example", provider_submitted_at: "2026-10-06T03:12:00Z",
+    } as ReviewSmsAccount });
+    expect(html).toContain("Carrier approval in progress");
+    expect(html).toContain("business registration is being reviewed");
+    expect(html).not.toContain("application submission has not yet been confirmed");
+    expect(html).not.toContain("Preparing texting registration");
+  });
 });
 
 describe("shared activation start and recovery presentation", () => {

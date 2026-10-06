@@ -30,7 +30,7 @@ const ENDPOINT = "/api/reviews/sms";
 const STATES: Record<ReviewSmsState, string> = {
   draft: "Setup saved",
   activation_pending: "Activation payment pending",
-  carrier_pending: "Carrier approval in progress",
+  carrier_pending: "Preparing texting registration",
   ready_unpaid: "Approved — finish activation",
   active: "Text review requests active",
   cancel_pending: "Cancellation scheduled",
@@ -301,6 +301,12 @@ export default function ReviewSmsPanel({
   const account = overview?.account;
   const direct = overview?.eligibleSource === "direct";
   const state = account?.state;
+  const campaignSubmissionConfirmed = Boolean(account?.campaign_id && account.provider_submitted_at);
+  const stateLabel = account && state === "carrier_pending"
+    ? campaignSubmissionConfirmed ? "Carrier approval in progress"
+      : account.provider_attempt_count > 0 && account.last_error ? "Texting setup needs attention"
+        : STATES.carrier_pending
+    : account ? STATES[account.state] : null;
   const registrationUnavailable = overview?.sharedRegistration?.status === "revoked";
   const activationRecovery = !account?.activation_paid_at && overview?.sharedRegistration?.activationRecoveryAvailable === true;
   const newActivationAllowed = !overview?.sharedRegistration || overview.sharedRegistration.newPaidStartsAllowed === true;
@@ -404,7 +410,7 @@ export default function ReviewSmsPanel({
                   {overview.canSend ? (
                     <CheckCircle2 className="h-4 w-4" />
                   ) : null}
-                  {STATES[account.state]}
+                  {stateLabel}
                 </p>
                 {account.last_error ? (
                   <p className={`mt-2 text-sm ${body}`}>
@@ -528,8 +534,13 @@ export default function ReviewSmsPanel({
             ) : null}
             {state === "carrier_pending" ? (
               <p className={`text-sm ${body}`}>
-                Your business registration is being reviewed. Email reviews
-                remain available. {direct ? "The monthly review-texting add-on starts only after approval and successful payment." : "Review texts activate automatically after approval and number assignment, using your plan’s existing SMS allowance."}
+                {campaignSubmissionConfirmed ? <>
+                  Your business registration is being reviewed. Email reviews
+                  remain available. {direct ? "The monthly review-texting add-on starts only after approval and successful payment." : "Review texts activate automatically after approval and number assignment, using your plan’s existing SMS allowance."}
+                </> : <>
+                  Your application submission has not yet been confirmed. Email reviews remain available.
+                  We will not automatically charge an additional application fee. Check status or contact support before starting another application.
+                </>}
               </p>
             ) : null}
             {state === "ready_unpaid" && !registrationUnavailable ? (

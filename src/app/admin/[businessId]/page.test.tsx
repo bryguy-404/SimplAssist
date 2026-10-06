@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   sharedPilotEnabled: vi.fn(),
   sharedContext: vi.fn(),
   sharedForm: vi.fn(),
+  campaignRetryPanel: vi.fn(),
+  campaignRetryEnabled: vi.fn(),
   loadHealth: vi.fn(),
   loadActivity: vi.fn(),
   results: new Map<
@@ -70,6 +72,15 @@ vi.mock("../SharedRegistrationForm", () => ({
     mocks.sharedForm(props);
     return <div>SHARED_REGISTRATION_FORM</div>;
   },
+}));
+vi.mock("@/components/admin/ReviewCampaignRetryPanel", () => ({
+  ReviewCampaignRetryPanel: (props: unknown) => {
+    mocks.campaignRetryPanel(props);
+    return <div>REVIEW_CAMPAIGN_RETRY_PANEL</div>;
+  },
+}));
+vi.mock("@/lib/reviews/campaignRetry.server", () => ({
+  reviewCampaignRetryEnabled: mocks.campaignRetryEnabled,
 }));
 vi.mock("../AdminFlagForm", () => ({
   AdminFlagForm: () => <div>ADMIN_FLAG_FORM</div>,
@@ -265,6 +276,7 @@ function storedHealth(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.campaignRetryEnabled.mockReturnValue(false);
   mocks.requireAdminUser.mockResolvedValue({ id: "admin-1", email: null });
   mocks.results = new Map([
     ["businesses", { data: storedBusiness(), error: null }],
@@ -319,6 +331,20 @@ beforeEach(() => {
 });
 
 describe("AdminBusinessPage account lifecycle rendering", () => {
+  it("does not expose campaign retry when the server admission gate is disabled", async () => {
+    const html = renderToStaticMarkup(await AdminBusinessPage({ params: { businessId: BUSINESS_ID } }));
+    expect(html).not.toContain("REVIEW_CAMPAIGN_RETRY_PANEL");
+    expect(mocks.campaignRetryPanel).not.toHaveBeenCalled();
+    expect(mocks.campaignRetryEnabled).toHaveBeenCalledWith(BUSINESS_ID);
+  });
+
+  it("renders the one-use campaign retry only for the exact configured business without passing private data", async () => {
+    mocks.campaignRetryEnabled.mockImplementation((id: string) => id === BUSINESS_ID);
+    const html = renderToStaticMarkup(await AdminBusinessPage({ params: { businessId: BUSINESS_ID } }));
+    expect(html).toContain("REVIEW_CAMPAIGN_RETRY_PANEL");
+    expect(mocks.campaignRetryPanel).toHaveBeenCalledWith({ businessId: BUSINESS_ID });
+  });
+
   it("keeps private shared setup hidden and avoids its reads when admission is off", async () => {
     const html = renderToStaticMarkup(await AdminBusinessPage({ params: { businessId: BUSINESS_ID } }));
     expect(html).not.toContain("SHARED_REGISTRATION_FORM");

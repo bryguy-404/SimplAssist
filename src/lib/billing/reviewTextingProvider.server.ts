@@ -1,4 +1,5 @@
 import "server-only";
+import { reviewCampaignReference } from "@/lib/reviews/campaignAttempts.server";
 import { createHash } from "node:crypto";
 import { supabaseAdmin as db } from "@/lib/supabase/admin";
 import { telnyx } from "@/lib/messaging/client";
@@ -117,7 +118,7 @@ export async function prepareReviewTextingProvider(businessId: string, ownerId: 
   await upgradeShared(assertSharedRegistrationForNewStart({ businessId, ownerId, proof: shared?.proof }));
   if (!(await getA2pRiskClearanceForBusiness(businessId)).cleared) throw new TextingUpgradeError("review_upgrade_risk_review_required");
   const old = await telnyx.messaging10dlc.campaign.retrieve(c.business.telnyx_campaign_id!,options);
-  if (old.brandId!==c.business.telnyx_brand_id || old.referenceId!==`reviews:${c.account.id}` || old.usecase!=="MARKETING" || mapCampaignStatus(old).dbStatus!=="approved") throw new TextingUpgradeError("review_upgrade_source_campaign_invalid");
+  if (old.brandId!==c.business.telnyx_brand_id || old.referenceId!==await reviewCampaignReference(businessId,c.account.id,c.business.telnyx_campaign_id!) || old.usecase!=="MARKETING" || mapCampaignStatus(old).dbStatus!=="approved") throw new TextingUpgradeError("review_upgrade_source_campaign_invalid");
   const filing = buildReviewUpgradeFiling(c.business,c.upgrade.id,c.phone,shared?.context.registration.legal_business_name);
   if (!(await inspectReviewSmsKeywords(c.business.telnyx_messaging_profile_id!,keywordProgramFromCampaign(filing,c.business.name))).ready) throw new TextingUpgradeError("review_upgrade_keywords_changed");
   await rpc("review_texting_provider_prepare",{p_business:businessId,p_owner:ownerId,p_filing:filing,p_hash:createHash("sha256").update(JSON.stringify(filing)).digest("hex"),p_forbidden_profiles:forbiddenProfiles()});

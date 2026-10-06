@@ -12,6 +12,8 @@ import { BusinessPartnerBillingForm } from "../BusinessPartnerBillingForm";
 import { A2pApproveForm } from "../A2pApproveForm";
 import { ExistingTelnyxBrandForm } from "../ExistingTelnyxBrandForm";
 import { SharedRegistrationForm, type SharedRegistrationAccounts } from "../SharedRegistrationForm";
+import { ReviewCampaignRetryPanel } from "@/components/admin/ReviewCampaignRetryPanel";
+import { reviewCampaignRetryEnabled } from "@/lib/reviews/campaignRetry.server";
 import { getExistingTelnyxBrandLinkState } from "@/lib/messaging/registration/existingBrand";
 import { readSharedRegistrationContext, sharedRegistrationPilotEnabled } from "@/lib/messaging/sharedBusinessRegistrations.server";
 import {
@@ -469,6 +471,11 @@ export default async function AdminBusinessPage({
           }
         />
       </section>
+
+      {reviewCampaignRetryEnabled(business.id) ?
+        <DetailsCard title="Review texting campaign retry">
+          <ReviewCampaignRetryPanel key={business.id} businessId={business.id} />
+        </DetailsCard> : null}
 
       {sharedRegistrationAccounts ? <DetailsCard title="Private shared registration" open>
         <SharedRegistrationForm

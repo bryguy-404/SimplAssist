@@ -12,6 +12,10 @@ const PUBLIC_COMPLIANCE_PAGE_MAX_DOM_NODES = 50_000;
 const PUBLIC_COMPLIANCE_PAGE_MAX_DOM_DEPTH = 256;
 const PUBLIC_COMPLIANCE_PAGE_MAX_DERIVED_TEXT_LENGTH = 2_200_000;
 const VETTED_NEXT_THEMES_BOOTSTRAP_SHA256 = new Set([
+  // Light-default bootstraps (production build and direct server render).
+  "2fcc63a7b7e5aa35b4459ca209e3390472a9fdb5951b695483adb3b6516ddc33",
+  "bd0b177340f526f609edc7de2b397518ab2df04b53c3bf82bb539ab697920143",
+  // Retain the system-default variants for pages served during rollout.
   // next build production-minified output (Next 14.2.35).
   "c9afcb6ed47807709be72af67988b6e04600a8222877f3bbac307ffb0799c080",
   // RootLayout direct server render used by the integration test

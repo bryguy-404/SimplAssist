@@ -99,7 +99,7 @@ export default async function RootLayout({
         <BrandProvider requestBrand={requestBrand}>
           <ThemeProvider
             attribute="class"
-            defaultTheme="system"
+            defaultTheme="light"
             enableSystem
             disableTransitionOnChange
           >

@@ -388,7 +388,7 @@ describe("/c/[slug] compliance page", () => {
         createHash("sha256").update(match[1].trim()).digest("hex")
     );
     expect(inlineScriptHashes).toEqual([
-      "71df87a674ac2da133d6529604d9fe93ec4e7b59b6a796607e3a3236f1f2f5e5",
+      "bd0b177340f526f609edc7de2b397518ab2df04b53c3bf82bb539ab697920143",
     ]);
 
     vi.stubGlobal(

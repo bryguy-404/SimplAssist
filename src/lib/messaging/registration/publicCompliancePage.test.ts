@@ -1195,11 +1195,11 @@ describe("verifyPublishedCompliancePage", () => {
       );
     });
 
-    it("accepts only the vetted Next static, Flight-data, and theme bootstraps", async () => {
+    it.each(["system", "light"])("accepts the vetted Next static, Flight-data, and %s-default theme bootstraps", async (defaultTheme) => {
       const scripts = [
         '<script src="/_next/static/chunks/app/(public)/c/%5Bslug%5D/page-abcd1234.js" async></script>',
         '<script>self.__next_f.push([1,"serialized flight data"])</script>',
-        `<script>${NEXT_THEMES_SCRIPT}</script>`,
+        `<script>${NEXT_THEMES_SCRIPT.replace('"class","theme","system"', `"class","theme","${defaultTheme}"`)}</script>`,
       ].join("");
       vi.mocked(fetch).mockResolvedValue(
         htmlResponse(validHtml().replace("</head>", `${scripts}</head>`))

@@ -83,6 +83,36 @@ export function isSameOriginWidgetPreview(
   request: Request,
   origin: NormalizedWidgetOrigin,
 ): boolean {
-  const requestOrigin = normalizeWidgetOrigin(new URL(request.url).origin);
+  const requestOrigin = resolveWidgetRequestOrigin(request);
   return requestOrigin?.origin === origin.origin;
+}
+
+/**
+ * Railway terminates TLS and Next.js may expose an internal request URL.
+ * Use the actual Host (never X-Forwarded-Host) and the edge's single protocol.
+ * This only identifies the request origin; preview routes must still enforce
+ * authenticated workspace ownership, entitlement, and traffic controls.
+ */
+export function resolveWidgetRequestOrigin(
+  request: Request,
+): NormalizedWidgetOrigin | null {
+  const rawHost = request.headers.get("host");
+  const hostname = normalizeHostHeader(rawHost);
+  if (!rawHost || !hostname) return null;
+
+  const forwardedProtocol = request.headers.get("x-forwarded-proto");
+  let protocol: string;
+  if (forwardedProtocol !== null) {
+    if (forwardedProtocol !== "https" && forwardedProtocol !== "http") return null;
+    protocol = `${forwardedProtocol}:`;
+  } else {
+    // Without an explicit proxy protocol, only a URL with the same host can
+    // supply the scheme. Do not infer HTTPS for an internal/public mismatch.
+    const url = new URL(request.url);
+    if (normalizeHostHeader(url.host) !== hostname) return null;
+    protocol = url.protocol;
+  }
+
+  const requestOrigin = normalizeWidgetOrigin(`${protocol}//${rawHost}`);
+  return requestOrigin?.hostname === hostname ? requestOrigin : null;
 }

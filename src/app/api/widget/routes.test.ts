@@ -315,6 +315,7 @@ function postRequest(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        Host: "localhost",
         Origin: "http://localhost",
         Authorization: "Bearer test-token",
         [WIDGET_EDGE_ORIGIN_HEADER]: EDGE_SECRET,
@@ -2973,6 +2974,65 @@ describe("widget attribution responses", () => {
 });
 
 describe("owner-only widget preview", () => {
+  function proxiedPreviewRequest(path: "chat" | "end", origin = "https://simplassist.com") {
+    return new NextRequest(
+      `http://railway.internal:8080/api/widget/${path}?businessId=${BUSINESS_ID}&sessionId=preview-proxy-test`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Host: "simplassist.com",
+          "X-Forwarded-Proto": "https",
+          Origin: origin,
+        },
+        body: JSON.stringify({
+          businessId: BUSINESS_ID,
+          sessionId: "preview-proxy-test",
+          preview: true,
+          ...(path === "chat" ? {
+            message: "What services do you offer?",
+            clientMessageId: "00000000-0000-4000-8000-000000000003",
+          } : {}),
+        }),
+      },
+    );
+  }
+
+  it.each(["chat", "end"] as const)("allows authenticated %s preview behind Railway's proxy", async (path) => {
+    queueDatabaseResults({ data: { id: "widget-1", is_active: false }, error: null });
+    const response = await (path === "chat" ? postChat : postEnd)(proxiedPreviewRequest(path));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject(path === "chat"
+      ? { available: true, response: "How can I help?" }
+      : { available: true, success: true });
+    expect(mocks.requireWorkspaceRouteAccess).toHaveBeenCalledOnce();
+    expect(mocks.acquireWidgetTraffic).toHaveBeenCalledWith(
+      expect.objectContaining({ endpoint: `preview_${path}`, originHostname: "simplassist.com" }),
+    );
+    expect(mocks.verifyWidgetToken).not.toHaveBeenCalled();
+  });
+
+  it.each(["chat", "end"] as const)("rejects cross-origin %s previews before auth or AI", async (path) => {
+    const response = await (path === "chat" ? postChat : postEnd)(
+      proxiedPreviewRequest(path, "https://evil.example"),
+    );
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "origin_not_allowed" });
+    expect(mocks.requireWorkspaceRouteAccess).not.toHaveBeenCalled();
+    expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+  });
+
+  it.each(["chat", "end"] as const)("still requires authentication for a proxied %s preview", async (path) => {
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: false,
+      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    });
+    const response = await (path === "chat" ? postChat : postEnd)(proxiedPreviewRequest(path));
+    expect(response.status).toBe(401);
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+  });
+
   it("requires an authenticated owner", async () => {
     mocks.requireWorkspaceRouteAccess.mockResolvedValue({
       ok: false,

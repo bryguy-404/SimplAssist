@@ -71,7 +71,9 @@ describe("widget origin policy", () => {
   });
 
   it("permits the preview bypass only on the endpoint's own exact origin", () => {
-    const request = new Request("https://app.alphadogagency.ai/api/widget/chat");
+    const request = new Request("https://app.alphadogagency.ai/api/widget/chat", {
+      headers: { Host: "app.alphadogagency.ai" },
+    });
     expect(
       isSameOriginWidgetPreview(
         request,
@@ -84,5 +86,37 @@ describe("widget origin policy", () => {
         normalizeWidgetOrigin("https://simplassist.com")!,
       ),
     ).toBe(false);
+  });
+
+  it.each(["simplassist.com", "app.alphadogagency.ai", "localhost:3000"])(
+    "recognizes the exact public preview origin behind a proxy: %s",
+    (host) => {
+      const request = new Request("http://railway.internal:8080/api/widget/chat", {
+        headers: { Host: host, "X-Forwarded-Proto": "https" },
+      });
+      expect(isSameOriginWidgetPreview(request, normalizeWidgetOrigin(`https://${host}`)!))
+        .toBe(true);
+      for (const origin of ["https://evil.example", `http://${host}`, "http://railway.internal:8080"]) {
+        expect(isSameOriginWidgetPreview(request, normalizeWidgetOrigin(origin)!))
+          .toBe(false);
+      }
+    },
+  );
+
+  it.each([
+    {},
+    { Host: "simplassist.com" },
+    { Host: "simplassist.com", "X-Forwarded-Proto": "https,http" },
+    { Host: "simplassist.com", "X-Forwarded-Proto": "" },
+    { Host: "https://simplassist.com", "X-Forwarded-Proto": "https" },
+    { Host: "simplassist.com,evil.example", "X-Forwarded-Proto": "https" },
+    { Host: "simplassist.com:8443", "X-Forwarded-Proto": "https" },
+    { Host: "evil.example", "X-Forwarded-Host": "simplassist.com", "X-Forwarded-Proto": "https" },
+  ])("rejects ambiguous or mismatched proxy preview headers %j", (headers) => {
+    const request = new Request("http://railway.internal:8080/api/widget/chat", {
+      headers: headers as HeadersInit,
+    });
+    expect(isSameOriginWidgetPreview(request, normalizeWidgetOrigin("https://simplassist.com")!))
+      .toBe(false);
   });
 });

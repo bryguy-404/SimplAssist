@@ -18,6 +18,7 @@ import {
 } from "@/lib/theme-v2/theme";
 import { AuthPasswordFieldV2, LoadingDot } from "@/lib/theme-v2/ui";
 import { SignupConfirmation } from "./SignupConfirmation";
+import { trackMarketingEvent } from "@/lib/analytics/marketing";
 
 const signupSchema = z
   .object({
@@ -67,6 +68,9 @@ export default function PublicSignupForm() {
       return;
     }
 
+    // This is an accepted request, not a verified account or paid customer.
+    // Do not pass form fields or the auth response into analytics.
+    trackMarketingEvent("signup_request_submitted");
     setSuccess(true);
   }
 

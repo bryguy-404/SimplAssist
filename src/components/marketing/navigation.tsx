@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ThemeToggleV2 } from "@/lib/theme-v2/ui";
 import { btnPrimary, btnSecondary, card, navLink, navShell } from "@/lib/theme-v2/theme";
 import { FeatureMenu } from "./feature-menu";
+import { AnalyticsSettingsButton } from "./website-analytics";
 
 export function MarketingHeader() {
   return (
@@ -43,6 +44,7 @@ export function MarketingFooter() {
           <Link href="/#pricing" className={navLink}>Pricing</Link>
           <Link href="/support" className={navLink}>Support</Link>
           <Link href="/privacy" className={navLink}>Privacy</Link>
+          <AnalyticsSettingsButton className={navLink} />
           <Link href="/terms" className={navLink}>Terms</Link>
           <Link href="/login" className={navLink}>Log In</Link>
         </nav>

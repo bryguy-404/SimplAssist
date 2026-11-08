@@ -7,6 +7,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { ToastProvider } from "@/components/ui/Toast";
 import { buildBrandCssProperties } from "@/lib/branding/cssVariables.server";
 import { getRequestBrand } from "@/lib/branding/requestBrand.server";
+import { WebsiteAnalytics } from "@/components/marketing/website-analytics";
 
 const socialPreview = {
   url: "/social-preview.png",
@@ -105,6 +106,10 @@ export default async function RootLayout({
           >
             <BrandPreviewBanner />
             <ToastProvider>{children}</ToastProvider>
+            {requestBrand.source === "default" && !requestBrand.isPreview &&
+              process.env.GOOGLE_ANALYTICS_MEASUREMENT_ID ? (
+                <WebsiteAnalytics measurementId={process.env.GOOGLE_ANALYTICS_MEASUREMENT_ID} />
+              ) : null}
           </ThemeProvider>
         </BrandProvider>
       </body>

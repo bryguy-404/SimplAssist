@@ -3,6 +3,7 @@ import { LegalDocLayout } from "@/components/legal/LegalDocLayout";
 import { LegalSection } from "@/components/legal/legal-section";
 import { body, inlineLink } from "@/lib/theme-v2/theme";
 import { SUPPORT_EMAIL, SUPPORT_PATH } from "@/lib/support/constants";
+import { AnalyticsSettingsButton } from "@/components/marketing/website-analytics";
 
 const linkClass = `${inlineLink} underline-offset-2 hover:underline`;
 
@@ -10,11 +11,11 @@ export default function PrivacyPage() {
   return (
     <LegalDocLayout
       title="Privacy Policy"
-      lastUpdated="September 24, 2026"
+      lastUpdated="November 8, 2026"
       siblingHref="/terms"
       siblingLabel="Terms of Service"
     >
-      <p className={`-mt-8 text-sm ${body}`}>Effective date: September 24, 2026</p>
+      <p className={`-mt-8 text-sm ${body}`}>Effective date: November 8, 2026</p>
 
       <LegalSection title="1. Introduction">
         <p>
@@ -196,6 +197,35 @@ export default function PrivacyPage() {
           own privacy policy.
         </p>
       </LegalSection>
+
+      <div id="website-analytics" className="scroll-mt-6">
+        <LegalSection title="8A. Website Analytics and Cookies">
+          <p className="mb-4">
+            With your permission, we use Google Analytics on SimplAssist&apos;s marketing,
+            support, legal, and public signup pages to understand visits, referring websites,
+            demo interactions, and signup requests. Google processes cookie identifiers,
+            device and browser information, approximate location, and these website events
+            to produce reports for us. We do not enable advertising personalization or Google signals.
+          </p>
+          <p className="mb-4">
+            The Google Analytics tag loads only after you choose &ldquo;Allow analytics.&rdquo;
+            We remember your choice in your browser for up to 180 days. Choosing &ldquo;No
+            thanks&rdquo; does not affect your ability to use SimplAssist. You can change your
+            choice below or through &ldquo;Analytics preferences&rdquo; in the website footer.
+            Withdrawing permission stops collection and removes our Google Analytics cookies
+            from this browser; it does not remove information already collected by Google.
+          </p>
+          <p className="mb-4">
+            We do not send signup form contents, customer conversations, call recordings,
+            private dashboard activity, or URL query parameters to Google Analytics. Analytics
+            is disabled on customer-hosted pages and partner websites. Learn more about{" "}
+            <a href="https://policies.google.com/technologies/partner-sites" className={linkClass}>
+              how Google uses information from sites that use its services
+            </a>.
+          </p>
+          <AnalyticsSettingsButton className={linkClass} />
+        </LegalSection>
+      </div>
 
       <LegalSection title="9. Contact Us">
         <p>

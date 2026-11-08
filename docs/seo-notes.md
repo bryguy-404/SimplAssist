@@ -6,6 +6,7 @@
   redirects to `/` and must not be used in canonical metadata or new public links.
 - The curated corporate sitemap contains exactly `/`,
   `/ai-chatbot-for-small-business`, `/ai-receptionist-for-small-business`,
+  `/ai-receptionist-for-plumbing-and-hvac`,
   `/support`, `/support/setup-fee`, `/privacy`, and `/terms`.
 - Public customer pages at `/c/[slug]` and their privacy/terms children may be
   indexed, but are intentionally omitted from the corporate sitemap.
@@ -26,7 +27,7 @@ content is ever served in production, and `noindex` is authoritative for Google.
 
 ## Rules for future SEO work
 
-1. **Sitemap** (`src/app/sitemap.ts`): keep the explicit seven-entry corporate
+1. **Sitemap** (`src/app/sitemap.ts`): keep the explicit eight-entry corporate
    allowlist above. Never include `/c/*`, `/demo/*`, or `/home-v2`, and never
    generate the sitemap by crawling the route tree (gated and customer-owned
    routes exist in the tree and would leak into it).

@@ -6,6 +6,7 @@ const SITEMAP_PATHS = [
   "",
   "/ai-chatbot-for-small-business",
   "/ai-receptionist-for-small-business",
+  "/ai-receptionist-for-plumbing-and-hvac",
   "/support",
   "/support/setup-fee",
   "/privacy",

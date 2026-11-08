@@ -44,6 +44,7 @@ export function FeatureMenu() {
             <span className="mt-1 block text-xs leading-5 text-stone-600 dark:text-stone-300">{detail}</span>
           </Link>
         ))}
+        <Link href="/ai-receptionist-for-plumbing-and-hvac" onClick={() => ref.current?.removeAttribute("open")} className="block rounded-xl px-4 py-3 text-sm font-semibold text-stone-700 hover:bg-stone-200/60 dark:text-stone-200 dark:hover:bg-white/10">For plumbing &amp; HVAC</Link>
         <Link href="/#pricing" onClick={() => ref.current?.removeAttribute("open")} className="block rounded-xl px-4 py-3 text-sm font-semibold text-stone-700 hover:bg-stone-200/60 dark:text-stone-200 dark:hover:bg-white/10">Compare all plans</Link>
       </div>
     </details>

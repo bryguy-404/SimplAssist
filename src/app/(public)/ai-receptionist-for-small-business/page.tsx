@@ -10,12 +10,14 @@ import { accentText, body, btnPrimary, btnSecondary, card, ink, inlineLink, tile
 const path = "/ai-receptionist-for-small-business";
 const title = "AI Receptionist for Small Business | SimplAssist Voice";
 const plan = SUBSCRIPTION_PLANS.full;
-const description = `SimplAssist Voice answers calls, captures details, and helps book appointments. Try the live AI receptionist demo. Full Suite: $${plan.price}/month.`;
+const description = `An AI answering service for small businesses. Handle service questions, collect caller details, and book with Google Calendar. Hear the demo. Full Suite: $${plan.price}/month.`;
 export const metadata = featureMetadata(path, title, description);
 
 export default function VoicePage() {
   const available = isPlanAvailable("full");
   const faqs = [
+    { question: "Can I use SimplAssist for after-hours or unanswered calls?", answer: "Voice answers calls that reach your assigned SimplAssist number while Voice mode is enabled and your account has available minutes. If you want calls from an existing business number to reach it only after hours, when busy, or when unanswered, that routing depends on your phone provider's forwarding options. Confirm and test those rules before using it with customers. Your saved business hours tell the AI about your business; they do not configure your phone provider's forwarding." },
+    { question: "Will I still be able to talk to customers myself?", answer: "Yes. You can keep handling customer conversations personally and use SimplAssist for calls you choose to route to it. Review saved transcripts, recordings, and contact details in your dashboard, then follow up yourself. SimplAssist does not currently transfer a live call to a person or guarantee that your team will call back." },
     { question: "How does an AI receptionist work during a call?", answer: "With Full Suite active and Voice mode enabled, SimplAssist greets callers as your business's AI assistant and explains the call recording. It listens to what the caller needs, answers using your saved business information, and can ask follow-up questions or collect contact details. If calendar booking is connected and enabled, it can help book an appointment after confirming the details." },
     { question: "What can SimplAssist answer about my business?", answer: "You provide your services, hours, FAQs, and other business information. SimplAssist uses those saved details and your AI instructions during the conversation. Test your setup with common customer questions and keep the information up to date. The assistant should not invent an answer when the information is missing." },
     { question: "Can SimplAssist book appointments over the phone?", answer: "Yes. When Google Calendar is connected and booking is enabled, SimplAssist can check availability and help the caller book a time. It confirms the appointment details with the caller before completing the booking." },
@@ -32,7 +34,7 @@ export default function VoicePage() {
           <p className={`mb-4 text-sm font-bold ${accentText}`}>SIMPLASSIST VOICE · FULL SUITE</p>
           <h1 className={featureHeading}>An AI receptionist for your <span className={accentText}>small business.</span></h1>
           <p className={`mt-6 text-2xl font-bold ${ink}`}>SimplAssist can talk. Your callers can just ask.</p>
-          <p className={`mt-4 max-w-xl text-lg leading-8 ${body}`}>When you can&apos;t pick up, give callers a natural, back-and-forth conversation. SimplAssist answers questions, collects their details, and helps book appointments using your business information.</p>
+          <p className={`mt-4 max-w-xl text-lg leading-8 ${body}`}>On a job, helping a customer, or finished for the day? SimplAssist is an AI answering service that handles service questions, collects caller details, and helps book appointments with a connected Google Calendar.</p>
           <div className="mt-7 flex flex-wrap gap-3"><a href="#voice-demo" className={btnPrimary}>Hear SimplAssist for yourself</a><a href="#voice-plan" className={btnSecondary}>See Full Suite</a></div>
           <p className={`mt-4 text-sm leading-6 ${body}`}>Phone conversations in English. Full Suite is ${plan.price}/month with {plan.includedVoiceMinutes} included voice minutes per billing month.</p>
         </div>
@@ -45,6 +47,25 @@ export default function VoicePage() {
           </ul>
           <p className={`mt-6 border-t border-stone-200 pt-5 text-sm leading-6 dark:border-white/10 ${body}`}>Set up your business information and enable Voice mode before using it with your callers.</p>
         </div>
+      </section>
+
+      <section className="py-14 sm:py-20">
+        <h2 className={sectionHeading}>Help with the calls you can&apos;t get to.</h2>
+        <p className={`mt-5 max-w-3xl leading-7 ${body}`}>Use your business information to give callers a useful first response. You decide which calls reach your SimplAssist number, and your team decides how to follow up.</p>
+        <div className="mt-8 grid gap-5 md:grid-cols-3">
+          {[
+            { title: "While you're serving a customer", text: "Let a new caller explain what they need and leave their contact details. You can review the saved conversation when you're free." },
+            { title: "After the workday", text: "Answer questions about your hours, services, and other saved details. Collect a request for your team to review when they return." },
+            { title: "When someone wants to book", text: "With Google Calendar connected and booking enabled, help callers choose an available appointment. Your calendar needs to reflect the times you can actually offer." },
+          ].map(({ title: heading, text }) => (
+            <article key={heading} className={`${card} p-6 sm:p-8`}>
+              <h3 className={`text-xl font-bold ${ink}`}>{heading}</h3>
+              <p className={`mt-3 leading-7 ${body}`}>{text}</p>
+            </article>
+          ))}
+        </div>
+        <p className={`mt-5 text-sm leading-6 ${body}`}>After-hours or unanswered-call forwarding from your existing line depends on your phone provider. Confirm the routing during setup; business hours saved in SimplAssist do not switch forwarding on or off.</p>
+        <Link href="/ai-receptionist-for-plumbing-and-hvac" className={`${inlineLink} mt-5 inline-block underline underline-offset-4`}>See how a plumbing or HVAC business could use SimplAssist</Link>
       </section>
 
       <FeatureSteps title="What happens when someone calls?" steps={[

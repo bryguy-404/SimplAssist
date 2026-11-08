@@ -39,6 +39,7 @@ export function MarketingFooter() {
           <Link href="/#missed-call-text-back" className={navLink}>Missed-call text back</Link>
           <Link href="/ai-chatbot-for-small-business" className={navLink}>Website chat</Link>
           <Link href="/ai-receptionist-for-small-business" className={navLink}>SimplAssist Voice</Link>
+          <Link href="/ai-receptionist-for-plumbing-and-hvac" className={navLink}>Plumbing &amp; HVAC</Link>
           <Link href="/#pricing" className={navLink}>Pricing</Link>
           <Link href="/support" className={navLink}>Support</Link>
           <Link href="/privacy" className={navLink}>Privacy</Link>

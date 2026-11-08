@@ -57,6 +57,10 @@ describe("marketing analytics boundaries", () => {
     expect(events[1][2]).toMatchObject({ method: "email" });
     expect(JSON.stringify(calls())).not.toMatch(/private@example|secret|private\+query/);
     expect(calls().find((call) => call[0] === "config")?.[2]).toMatchObject({ send_page_view: false, allow_google_signals: false, allow_ad_personalization_signals: false });
+    const globalDefaults = calls().findIndex((call) => call[0] === "set");
+    const initialize = calls().findIndex((call) => call[0] === "js");
+    expect(globalDefaults).toBeLessThan(initialize);
+    expect(calls()[globalDefaults][1]).toMatchObject({ send_page_view: false, page_location: "https://simplassist.com/", allow_google_signals: false });
     Object.assign(window.location, { pathname: "/signup" });
     analytics.trackMarketingPageView();
     expect(calls().filter((call) => call[1] === "page_view")).toHaveLength(2);

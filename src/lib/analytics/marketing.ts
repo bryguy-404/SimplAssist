@@ -130,16 +130,21 @@ export function startMarketingAnalytics(measurementId: string): boolean {
       ad_user_data: "denied", ad_personalization: "denied",
     });
     window.gtag("consent", "update", { analytics_storage: "granted" });
-    window.gtag("js", new Date());
-    window.gtag("set", marketingPageContext(window.location.pathname, document.referrer));
-    window.gtag("config", measurementId, {
+    const settings = {
+      ...marketingPageContext(window.location.pathname, document.referrer),
       send_page_view: false,
       allow_google_signals: false,
       allow_ad_personalization_signals: false,
       cookie_domain: "simplassist.com",
       cookie_expires: CONSENT_MAX_AGE_MS / 1000,
       cookie_flags: "SameSite=Lax;Secure",
-    });
+    };
+    // New unified Google tags initialize without waiting for legacy config.
+    // Apply global defaults before initialization; the destination tag's UI
+    // configuration also disables automatic page views and advertising.
+    window.gtag("set", settings);
+    window.gtag("js", new Date());
+    window.gtag("config", measurementId, settings);
   } else {
     window.gtag?.("consent", "update", { analytics_storage: "granted" });
   }

@@ -11,6 +11,7 @@
 - Business objectives: generate leads and understand website traffic.
 - Google account sharing options were left off. Enhanced measurement is **off** to prevent automatic form, URL/history, and content collection.
 - No advertising account links, Google signals, user IDs, or user-provided data collection were enabled.
+- Google's unified tag container is `GTM-5M78HTDM`. Its destination settings must disable `send_page_view`, `allow_google_signals`, and `allow_ad_personalization_signals`; legacy on-page `config` is insufficient for this new container's initialization. In-page global defaults are queued before initialization as well.
 - User explicitly authorized acceptance of Analytics Terms of Service and Data Processing Terms during setup.
 
 ## Website behavior
@@ -40,9 +41,12 @@ Page views are sent manually once per pathname transition; query strings and has
 - Tests cover no consent, denied/expired/unavailable consent, private and partner exclusion, safe URLs/referrers, page-view deduplication, and revocation.
 - No real signup, payment, or telephone call is performed as a verification step.
 - Live deployment and Google report verification are recorded after publishing.
+- The first live check received demo and signup-click events, and identified extra automatic page views from Google's new container defaults. Those initial test views are setup traffic, not customer activity. Follow-up verification checks one view per navigation with automatic destination page views disabled.
 
 ## Review
 
 First review: **December 8, 2026**. Compare Search Console clicks/impressions with Analytics acquisition sources, landing pages, demo interactions, and signup requests. Small samples and consent choices limit conclusions. Analytics starts collecting after installation; it cannot reconstruct historical visits. Use the application database and billing system for verified customers and revenue.
 
 Official references: [GA4 setup](https://support.google.com/analytics/answer/14183469), [manual page views](https://developers.google.com/analytics/devguides/collection/ga4/views), [basic consent mode](https://developers.google.com/tag-platform/security/concepts/consent-mode), [consent implementation](https://developers.google.com/tag-platform/security/guides/consent).
+
+Google's current [unified tag initialization behavior](https://support.google.com/analytics/answer/18411054) and [privacy settings](https://developers.google.com/tag-platform/security/guides/privacy) explain the destination-level settings above.

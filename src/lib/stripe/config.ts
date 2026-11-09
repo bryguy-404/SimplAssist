@@ -116,7 +116,7 @@ export const SUBSCRIPTION_PLANS: Record<
       "Everything in SMS + Web Chat",
       "AI voice answering in English",
       "100 included voice minutes/billing month",
-      "Voice contact capture, signup texts, and calendar booking",
+      "Voice contact capture, website link texts, and calendar booking",
       "Call transcripts and recordings",
       "Custom AI rules and guardrails",
       "2,500 included SMS parts/month",

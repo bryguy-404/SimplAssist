@@ -23,7 +23,7 @@ export const COMPLIANCE_LOCK_COPY = registrationLockCopy(
 );
 
 export const GOAL_SIGNUP_LOCK_COPY = registrationLockCopy(
-  "Contact support to change your goal to signup",
+  "Contact support to change your goal to directing customers to a website",
   " because your current goal was filed with your carrier registration."
 );
 

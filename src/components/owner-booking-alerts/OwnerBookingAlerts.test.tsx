@@ -47,7 +47,7 @@ describe('owner booking alert enrollment', () => {
     expect(html.match(/<button[^>]*type="submit"[^>]*>/)?.[0]).not.toContain('disabled=""');
     expect(html).not.toContain('active calendar booking before alerts can resume');
     expect(html).not.toContain('a connected calendar, and direct booking enabled are needed');
-    expect(html).toContain('sends a sign-up link to a caller');
+    expect(html).toContain('sends a website link to a caller');
   });
 
   it('explains the two account setups when alerts are paused', () => {
@@ -55,7 +55,7 @@ describe('owner booking alert enrollment', () => {
       enabled: true, recipient: '+15745550123', eligible: false, status: 'paused',
     })} />);
     expect(html).toContain('Business texts are paused');
-    expect(html).toContain('For sign-up alerts, use Full Suite with the sign-up goal and a sign-up link');
+    expect(html).toContain('For website-link alerts, use Full Suite with the website-link goal and a website link');
     expect(html).toContain('For booking alerts, choose the booking goal');
     expect(html).toContain('Turn off business texts');
     expect(html).not.toContain('Business texts are on');
@@ -217,7 +217,7 @@ describe('booking alert dashboard invitation', () => {
   it('identifies the SimplAssist program and links directly to the setting', () => {
     const html = renderToStaticMarkup(<BookingAlertNudgeContent />);
     expect(html).toContain('SimplAssist can text your mobile');
-    expect(html).toContain('confirms a booking or sends a sign-up link to a caller');
+    expect(html).toContain('confirms a booking or sends a website link to a caller');
     expect(html).toContain('href="/settings#booking-alerts"');
     expect(html).toContain('aria-label="Dismiss business alert setup"');
     expect(html).not.toContain('call forwarding');

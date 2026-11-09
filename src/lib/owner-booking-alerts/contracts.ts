@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+// Keep the versioned enrollment disclosure unchanged when relabeling the existing
+// signup event as a website-link event in product copy. Stored consent stays valid.
 export const OWNER_BOOKING_ALERT_CONSENT_VERSION = '2026-09-24-v2';
 export const OWNER_BOOKING_ALERT_DISCLOSURE = 'I agree to receive automated SimplAssist business-alert texts about confirmed bookings and sign-up links sent to callers at the mobile number I provide for this business. A sign-up-link alert does not confirm completed registration. Message frequency varies. Message and data rates may apply. Reply STOP to stop alerts or HELP for help. Consent is optional and is not a condition of purchase. If this number receives SimplAssist business alerts for multiple businesses, STOP stops all of those alerts.';
 export const OWNER_BOOKING_ALERT_PRIVACY_URL = 'https://simplassist.com/privacy';
@@ -53,7 +55,7 @@ export function bookingAlertMessage(input: { businessName: string; startsAt: str
 /** Records a provider-accepted caller text, never a completed registration or delivery guarantee. */
 export function signupLinkAlertMessage(input: { businessName: string; dashboardUrl: string }): string {
   const name = alertMessageContext(input.businessName, input.dashboardUrl);
-  return `SimplAssist: ${name} sent a sign-up link to a caller. View details: ${input.dashboardUrl} Reply STOP to opt out; HELP for help.`;
+  return `SimplAssist: ${name} sent a website link to a caller. View details: ${input.dashboardUrl} Reply STOP to opt out; HELP for help.`;
 }
 
 export const OWNER_ALERT_ENROLLMENT_MESSAGE = 'SimplAssist business alerts are enabled for this business. Message frequency varies. Msg & data rates may apply. Reply STOP to stop alerts or HELP for help.';

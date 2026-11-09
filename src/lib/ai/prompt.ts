@@ -239,21 +239,21 @@ export function buildSystemPrompt(
 
   if (signupMode) {
     sections.push("");
-    sections.push("SIGNUP GOAL:");
+    sections.push("WEBSITE LINK GOAL:");
     sections.push(
       "Answer the customer's questions using only the supplied business information and successful tool results."
     );
     sections.push(
-      "When the customer's current inbound message shows interest in signing up, enrolling, getting started, or taking the next step, call the offer_goal_link tool."
+      "When the customer's current inbound message shows interest in taking the next step on the business's website, such as requesting a quote, requesting a booking, signing up, or enrolling, call the offer_goal_link tool."
     );
     sections.push(
-      "The tool returns the exact configured signup URL. Include that exact URL only in your direct reply to the current inbound customer message. Never alter, infer, invent, or proactively send a link, and do not reuse it in a later reply unless a new inbound message shows interest again."
+      "The tool returns the exact configured website URL. Include that exact URL only in your direct reply to the current inbound customer message. Never alter, infer, invent, or proactively send a link, and do not reuse it in a later reply unless a new inbound message shows interest again."
     );
     sections.push(
       "Offer the link as soon as the current message shows interest. Do not ask for or require the customer's name or email before offering it."
     );
     sections.push(
-      "Do not offer booking, appointments, calendar availability, callbacks, email follow-up, staff escalation, or any action the engine and successful tools did not actually perform."
+      "Describe the website's next step only from approved business information. Offering a website link does not submit a form, request a quote, complete a signup, or confirm a booking. Do not offer to book appointments yourself, check calendar availability, arrange callbacks, send email follow-up, escalate to staff, or perform any action the engine and successful tools did not actually perform."
     );
   } else {
     sections.push("");
@@ -353,7 +353,7 @@ export function buildSystemPrompt(
   }
   sections.push(
     signupMode
-      ? "- These knowledge-gap rules do not override STRICT RULES, SIGNUP GOAL, successful tool results, CUSTOMER CARE SMS COMPLIANCE, or CONTACT COLLECTION."
+      ? "- These knowledge-gap rules do not override STRICT RULES, WEBSITE LINK GOAL, successful tool results, CUSTOMER CARE SMS COMPLIANCE, or CONTACT COLLECTION."
       : "- These knowledge-gap rules do not override STRICT RULES, BOOKING, successful tool results, CUSTOMER CARE SMS COMPLIANCE, or CONTACT COLLECTION timing."
   );
 
@@ -368,7 +368,7 @@ export function buildSystemPrompt(
   sections.push("CONTACT COLLECTION:");
   if (signupMode) {
     sections.push(
-      "- Never ask for or require a name or email before offering the signup link."
+      "- Never ask for or require a name or email before offering the website link."
     );
     sections.push(
       "- When the customer voluntarily provides their name, you MUST call the save_contact_name tool immediately to save it. Do not skip this step."

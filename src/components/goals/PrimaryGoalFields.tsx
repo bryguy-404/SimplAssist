@@ -87,7 +87,7 @@ export function PrimaryGoalFields({
           type="url"
           id="goal_url"
           name="goal_url"
-          aria-label="goal_url"
+          aria-label="Website link"
           placeholder="https://"
           minLength={9}
           maxLength={2048}

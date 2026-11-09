@@ -14,9 +14,9 @@ describe("customer call evidence", () => {
     expect(callReviewStatus("closed", "technical_failure").tone).toBe("warning");
   });
   it.each([
-    ["accepted", "Signup text sent"], ["delivered", "Signup text delivered"],
-    ["delivery_failed", "Signup text delivery failed"], ["sending_failed", "Signup text delivery failed"],
-    ["expired", "Signup text delivery failed"], ["cancelled", "Signup text delivery failed"],
+    ["accepted", "Website link text sent"], ["delivered", "Website link text delivered"],
+    ["delivery_failed", "Website link text delivery failed"], ["sending_failed", "Website link text delivery failed"],
+    ["expired", "Website link text delivery failed"], ["cancelled", "Website link text delivery failed"],
   ])("labels signup %s independently of action success", (deliveryStatus, label) => {
     const result = actionReviewStatus(action({ kind: "signup", result: { providerMessageId: "provider-message", deliveryStatus, summary: "Signup completed" } }), true);
     expect(result.label).toBe(label);
@@ -24,7 +24,7 @@ describe("customer call evidence", () => {
   });
   it.each([{}, { providerMessageId: "" }, { providerMessageId: "   ", deliveryStatus: "delivered" }, { deliveryStatus: "delivered" }])("requires provider acceptance evidence before claiming a signup text was sent: %j", (result) => {
     const review = actionReviewStatus(action({ kind: "signup", result }), true);
-    expect(review.label).toBe("Signup text result needs review");
+    expect(review.label).toBe("Website link text result needs review");
     expect(review.detail).toContain("Do not repeat");
   });
   it("preserves pending, uncertain and failed results without promising completion", () => {

@@ -17,7 +17,7 @@ export function BookingAlertNudgeContent({ busy = false, error = null, onDismiss
       </div>
       <div>
         <h2 className={`font-semibold ${ink}`}>Want updates sent to your phone?</h2>
-        <p className={`mt-1 text-sm ${bodyFaint}`}>SimplAssist can text your mobile when it confirms a booking or sends a sign-up link to a caller.</p>
+        <p className={`mt-1 text-sm ${bodyFaint}`}>SimplAssist can text your mobile when it confirms a booking or sends a website link to a caller.</p>
         <Link href="/settings#booking-alerts" className={`mt-3 inline-flex items-center gap-2 text-sm ${inlineLink}`}>
           Set up business alerts <ArrowRight className="h-4 w-4" aria-hidden="true" />
         </Link>

@@ -192,7 +192,7 @@ describe("GoalSettingsForm", () => {
       );
       expect(visibleText).toContain(GOAL_SIGNUP_LOCK_COPY.message);
       expect(visibleText).toContain(
-        "Contact support to change your goal to signup because your current goal was filed with your carrier registration."
+        "Contact support to change your goal to directing customers to a website because your current goal was filed with your carrier registration."
       );
       expect(markup).not.toContain(renderedCopy(PRIMARY_GOAL_COPY.helper));
     }

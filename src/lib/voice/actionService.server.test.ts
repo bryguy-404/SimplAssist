@@ -311,10 +311,14 @@ const confirm: ActionDecision = {
   confirmationEventIds: ["yes"],
 };
 describe("voice signup execution", () => {
-  it("proposes without sending, then sends once only to the calling number", async () => {
-    expect((await runVoiceDecision(sid, propose)).confirmationActionId).toBe(
-      aid,
-    );
+  it.each([
+    { name: "SimplAssist", url: "https://simplassist.com/signup" },
+    { name: "Moving Company", url: "https://moving.example/quote" },
+  ])("asks permission, then sends the configured website link once for $name", async ({ name, url }) => {
+    Object.assign(tables.businesses[0], { name, goal_url: url });
+    const proposal = await runVoiceDecision(sid, propose);
+    expect(proposal.confirmationActionId).toBe(aid);
+    expect(proposal.text).toContain("May I text the website link to the number you're calling from, ending in 0101?");
     expect(m.send).not.toHaveBeenCalled();
     const result = await runVoiceDecision(sid, confirm);
     expect(result.text).toContain("not yet confirmed");
@@ -322,7 +326,7 @@ describe("voice signup execution", () => {
       expect.objectContaining({
         to: "+15555550101",
         from: "+15555550102",
-        text: expect.stringContaining("https://simplassist.com/signup"),
+        text: `${name}: Here's the website link you requested on our call: ${url}\nReply STOP to opt out.`,
       }),
     );
     await runVoiceDecision(sid, confirm);
@@ -690,7 +694,7 @@ describe("saved-contact signup continuation", () => {
     expect(result.text).toContain("contact details were saved");
     expect(result.text).toContain(String(next.readback));
     expect(result.text).toContain(
-      "If the caller has declined signup or is finished",
+      "If the caller has declined the website link or is finished",
     );
     expect(result.text).toContain("Wait for a fresh clear reply");
     expect(result.confirmationActionId).toBe(next.id);

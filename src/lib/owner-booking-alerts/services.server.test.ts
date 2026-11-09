@@ -193,7 +193,7 @@ describe('owner signup-link alert dispatch', () => {
     await expect(runOwnerBookingAlerts()).resolves.toMatchObject({ processed: 1, accepted: 1 });
     expect(mocks.from).not.toHaveBeenCalledWith('calendar_bookings');
     expect(mocks.send).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ from: control.sender, to: row.recipient, messaging_profile_id: control.messaging_profile_id,
-      text: expect.stringMatching(/^SimplAssist: Solar Works sent a sign-up link to a caller\. View details: https:\/\/simplassist\.com\/booking-alerts\/open\/[A-Za-z0-9_-]{43} Reply STOP/) }), { maxRetries: 0, timeout: 5000 });
+      text: expect.stringMatching(/^SimplAssist: Solar Works sent a website link to a caller\. View details: https:\/\/simplassist\.com\/booking-alerts\/open\/[A-Za-z0-9_-]{43} Reply STOP/) }), { maxRetries: 0, timeout: 5000 });
     expect(mocks.rpc).toHaveBeenCalledWith('begin_owner_booking_alert_send', expect.objectContaining({ p_link_token_digest: expect.stringMatching(/^[a-f0-9]{64}$/) }));
   });
   it.each([null, { ...source, status: 'uncertain' }, { ...source, sms_provider_message_id: null }, { ...source, sms_accepted_at: null },

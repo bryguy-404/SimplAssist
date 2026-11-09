@@ -67,11 +67,11 @@ const NEW_CAMPAIGN_ID = "CMNNEW1";
 const CAP_MESSAGE =
   "This Telnyx brand is at Telnyx's campaign cap: it already has 5 campaigns, the maximum allowed per brand. SimplAssist cannot create the additional campaign required for this account. Use a different eligible brand or contact Telnyx Support before approving this link.";
 const SIGNUP_GOAL_URL_INVALID_MESSAGE =
-  "Add a valid HTTPS signup link for your primary goal before retrying SMS registration.";
+  "Add a valid HTTPS website link for your primary goal before retrying SMS registration.";
 const SIGNUP_SAMPLE_TOO_LONG_MESSAGE =
-  "The signup link is too long for a carrier campaign sample. Add a shorter direct HTTPS signup link before retrying SMS registration.";
+  "The website link is too long for a carrier campaign sample. Add a shorter direct HTTPS website link before retrying SMS registration.";
 const SIGNUP_SAMPLE_PERSIST_FAILED_MESSAGE =
-  "We couldn't save the required signup-link campaign sample. No campaign was submitted; please try again.";
+  "We couldn't save the required website-link campaign sample. No campaign was submitted; please try again.";
 
 const baseBusiness = {
   id: BUSINESS_ID,
@@ -344,7 +344,7 @@ describe("goal-aware signup campaign filing", () => {
     "Sample five",
   ];
   const generatedSignupSample =
-    "Thanks for contacting Acme Camps. To sign up, visit https://signup.example.com/enroll. Reply STOP to opt out.";
+    "Thanks for contacting Acme Camps. Here's the website link you requested: https://signup.example.com/enroll. Reply STOP to opt out.";
 
   it("persists paid-upgrade generated copy through the guarded registration RPC", async () => {
     business = { ...business, name: "Acme Camps", primary_goal: "signup", goal_url: normalizedGoalUrl, sample_messages: [...storedSamples] };

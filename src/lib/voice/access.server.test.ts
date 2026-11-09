@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn(), ready: vi.fn() }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/admin", () => ({ supabaseAdmin: { rpc: mocks.rpc, from: mocks.from } }));
@@ -11,11 +11,13 @@ const summary = {
 };
 function setSummary(changes: Record<string, unknown> = {}) { mocks.rpc.mockResolvedValue({ data: { ...summary, ...changes }, error: null }); }
 beforeEach(() => {
+  vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-09-17T12:00:00Z"));
   vi.clearAllMocks(); setSummary(); mocks.ready.mockResolvedValue(true);
   const query = { select: vi.fn(), eq: vi.fn(), is: vi.fn(), maybeSingle: vi.fn() };
   query.select.mockReturnValue(query); query.eq.mockReturnValue(query); query.is.mockReturnValue(query);
   query.maybeSingle.mockResolvedValue({ data: { timezone: "America/Indiana/Indianapolis" }, error: null }); mocks.from.mockReturnValue(query);
 });
+afterEach(() => vi.restoreAllMocks());
 describe("safe owner voice projection", () => {
   it.each([null, { emergency_stop: false }, { enabled: false, emergency_stop: false }])("public rollout does not require a business allowlist %#", async (data) => {
     mocks.from().maybeSingle.mockResolvedValueOnce({ data: { enabled: true, emergency_stop: false }, error: null }).mockResolvedValueOnce({ data, error: null });

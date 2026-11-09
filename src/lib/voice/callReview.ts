@@ -129,11 +129,11 @@ export function actionReviewStatus(action: Pick<ReviewActionRow, "kind" | "statu
     return { label: "Booking text result needs review", detail: "Do not send another copy while the result is uncertain.", tone: "warning" };
   }
   if (action.kind === "signup") {
-    if (!reviewText(record(action.result).providerMessageId, 200)) return { label: "Signup text result needs review", detail: "Provider acceptance could not be verified. Do not repeat the request.", tone: "warning" };
+    if (!reviewText(record(action.result).providerMessageId, 200)) return { label: "Website link text result needs review", detail: "Provider acceptance could not be verified. Do not repeat the request.", tone: "warning" };
     const delivery = record(action.result).deliveryStatus;
-    if (delivery === "delivered") return { label: "Signup text delivered", detail: "The link was delivered. This does not confirm a completed signup.", tone: "success" };
-    if (["delivery_failed", "sending_failed", "expired", "cancelled"].includes(String(delivery))) return { label: "Signup text delivery failed", detail: "The text was accepted for sending but was not delivered. Signup is not confirmed.", tone: "warning" };
-    return { label: "Signup text sent", detail: "Accepted for sending; delivery is not yet confirmed. Signup is not confirmed.", tone: "neutral" };
+    if (delivery === "delivered") return { label: "Website link text delivered", detail: "The link was delivered. This does not confirm a completed signup, submitted request, or booking.", tone: "success" };
+    if (["delivery_failed", "sending_failed", "expired", "cancelled"].includes(String(delivery))) return { label: "Website link text delivery failed", detail: "The text was accepted for sending but was not delivered. A signup, request, or booking is not confirmed.", tone: "warning" };
+    return { label: "Website link text sent", detail: "Accepted for sending; delivery is not yet confirmed. A signup, request, or booking is not confirmed.", tone: "neutral" };
   }
   if (action.kind === "contact") return { label: "Contact details captured", detail: "Confirmed details were saved with this call. Existing contact details are kept when they differ.", tone: "success" };
   if (action.kind === "booking_request") return { label: "Appointment request saved", detail: "Saved for owner review; this request alone is not an appointment confirmation.", tone: "neutral" };
@@ -147,5 +147,5 @@ export function actionReviewStatus(action: Pick<ReviewActionRow, "kind" | "statu
 }
 
 export function actionReviewTitle(kind: string): string {
-  return ({ contact: "Contact details", signup: "Signup link", booking: "Appointment", booking_request: "Appointment request", booking_review_text: "Review text", booking_confirmation_text: "Confirmation text" } as Record<string, string>)[kind] || "Call action";
+  return ({ contact: "Contact details", signup: "Website link", booking: "Appointment", booking_request: "Appointment request", booking_review_text: "Review text", booking_confirmation_text: "Confirmation text" } as Record<string, string>)[kind] || "Call action";
 }

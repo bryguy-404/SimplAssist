@@ -7,7 +7,7 @@ const fixture = (): VoiceCallReview => ({
   call: { label: "Call ended", detail: "Action results show what was completed.", tone: "neutral" },
   contact: { id: "contact", name: "Stored name", phone: "+15555550101", email: "stored@example.test" },
   confirmedContact: { name: "Call name", phone: "+15555550101", email: "call@example.test", conflicts: ["name", "email"] },
-  actions: [{ id: "action", title: "Signup link", label: "Signup text delivered", detail: "This does not confirm a completed signup.", tone: "success", confirmedAt: null, smsConversationId: "sms", leadId: "lead" }],
+  actions: [{ id: "action", title: "Website link", label: "Website link text delivered", detail: "This does not confirm a completed signup, submitted request, or booking.", tone: "success", confirmedAt: null, smsConversationId: "sms", leadId: "lead" }],
   recordings: [{ id: "recording", state: "available", url: "/api/voice/recordings/recording", expiresAt: "2026-10-17T12:00:00Z" }],
 });
 describe("owner call review", () => {
@@ -16,7 +16,7 @@ describe("owner call review", () => {
     expect(html).toContain("Call name"); expect(html).toContain("Stored name");
     expect(html).toContain("Stored contact differs"); expect(html).toContain("call@example.test");
     expect(html).toContain("Existing contact details were kept.");
-    expect(html).toContain("Signup text delivered"); expect(html).toContain("does not confirm a completed signup");
+    expect(html).toContain("Website link text delivered"); expect(html).toContain("does not confirm a completed signup");
     expect(html).toContain('href="/contacts?contact=contact"');
     expect(html).toContain('href="/conversations?conversation=sms"');
     expect(html).toContain('href="/leads?lead=lead#lead-lead"');

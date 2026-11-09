@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
           spokenSignupFallback:
             c.session.business_id === "ea848911-ef72-44a6-8cf3-c47b3959be26" &&
             c.business.goal_url === "https://simplassist.com/signup"
-              ? "Only if the caller declines texting or SMS is unavailable: visit simplassist.com and choose Get Started. Otherwise offer to text the signup link."
+              ? "Only if the caller declines texting or SMS is unavailable: visit simplassist.com and choose Get Started. Otherwise offer to text the website link."
               : null,
           actions: c.actions,
         },

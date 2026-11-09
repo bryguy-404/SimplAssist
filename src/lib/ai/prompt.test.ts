@@ -350,13 +350,13 @@ const SIGNUP_GOLDEN_SCENARIOS = [
   {
     label: "sms_signup",
     expected:
-      "47eaaa7b1035adf052f5eabd1a5b3a9955fc93d4c642d5aa3b8a899d790addc9",
+      "850d2453ccaf5223bb50227143cf19315d32f9178ebf00487477671d38d21817",
     channel: "sms",
   },
   {
     label: "web_signup",
     expected:
-      "1e1802782f63d398b4bf3227654dbbafbc2d4ae83b44b42db03cade596ca9676",
+      "e7178ebf5cb66fb19870c68f4f777778cd8f4be721cc90a22e013413e1fb321e",
     channel: "web_chat",
   },
 ] as const;
@@ -547,12 +547,12 @@ describe("buildSystemPrompt signup goal", () => {
         true
       );
 
-      expect(prompt).toContain("SIGNUP GOAL:");
+      expect(prompt).toContain("WEBSITE LINK GOAL:");
       expect(prompt).toContain(
         "using only the supplied business information and successful tool results"
       );
       expect(prompt).toContain(
-        "current inbound message shows interest in signing up, enrolling, getting started, or taking the next step"
+        "current inbound message shows interest in taking the next step on the business's website, such as requesting a quote, requesting a booking, signing up, or enrolling"
       );
       expect(prompt).toContain("call the offer_goal_link tool");
       expect(prompt).toContain(
@@ -562,7 +562,7 @@ describe("buildSystemPrompt signup goal", () => {
         "Do not ask for or require the customer's name or email before offering it."
       );
       expect(prompt).toContain(
-        "Do not offer booking, appointments, calendar availability, callbacks, email follow-up, staff escalation"
+        "Do not offer to book appointments yourself, check calendar availability, arrange callbacks, send email follow-up, escalate to staff"
       );
       expect(prompt).not.toContain(goalUrl);
       expect(prompt).not.toContain("BOOKING:");
@@ -589,7 +589,7 @@ describe("buildSystemPrompt signup goal", () => {
       false
     );
 
-    expect(prompt).toContain("SIGNUP GOAL:");
+    expect(prompt).toContain("WEBSITE LINK GOAL:");
     expect(prompt).not.toContain("BOOKING:");
     expect(prompt).not.toContain("Booking is currently unavailable");
     expect(prompt).not.toContain("Booking confirmation:");

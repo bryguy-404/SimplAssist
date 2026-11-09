@@ -207,7 +207,7 @@ async function completedActionAnswer(
     )
       throw new Error("voice_signup_continuation_failed");
     return {
-      text: `${summary} If the caller has declined signup or is finished, acknowledge that and do not repeat the offer. Otherwise continue now with this prepared permission question, preserving every detail: ${next.readback} Wait for a fresh clear reply. Nothing has been sent yet; permission to save details does not authorize a text.`,
+      text: `${summary} If the caller has declined the website link or is finished, acknowledge that and do not repeat the offer. Otherwise continue now with this prepared permission question, preserving every detail: ${next.readback} Wait for a fresh clear reply. Nothing has been sent yet; permission to save details does not authorize a text.`,
       confirmationActionId: next.id,
     };
   } catch {
@@ -658,7 +658,7 @@ async function executeVoiceAction(
         if (optout.to === ctx.session.caller_phone)
           throw new Error("voice_sms_opted_out");
       }
-      const sms = `${fresh.business.name}: Here's the signup link you requested on our call: ${url}\nReply STOP to opt out.`;
+      const sms = `${fresh.business.name}: Here's the website link you requested on our call: ${url}\nReply STOP to opt out.`;
       const preflight = await preflightOutboundSms({
         businessId: a.business_id,
         text: sms,
@@ -684,7 +684,7 @@ async function executeVoiceAction(
       if (!response.data?.id) throw new Error("voice_sms_result_uncertain");
       result = {
         summary:
-          "The signup text was accepted for sending to the number calling in. Delivery is not yet confirmed, and signup has not been completed.",
+          "The website link text was accepted for sending to the number calling in. Delivery is not yet confirmed. Sending a link does not complete a signup, submit a request, or confirm a booking.",
         providerMessageId: response.data.id,
         deliveryStatus: "accepted",
         smsBody: sms,

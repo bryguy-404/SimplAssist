@@ -67,7 +67,7 @@ describe("customer voice read model", () => {
     rows.messages = [{ id: "action", conversation_id: "sms" }];
     rows.sms_conversations = [{ id: "sms" }];
     rows.goal_events = [{ id: "lead", voice_action_id: "action", conversation_id: "sms", contact_id: "contact" }];
-    expect((await loadVoiceCallReview("business", "voice"))?.actions[0]).toMatchObject({ label: "Signup text delivered", smsConversationId: "sms", leadId: "lead" });
+    expect((await loadVoiceCallReview("business", "voice"))?.actions[0]).toMatchObject({ label: "Website link text delivered", smsConversationId: "sms", leadId: "lead" });
     expect(calls.find((query) => query.table === "conversations" && query.filters.some(([field, value]) => field === "channel" && value === "sms"))?.filters).toContainEqual(["contact_id", "contact"]);
   });
   it("withholds SMS and lead links when the related conversation is inaccessible", async () => {

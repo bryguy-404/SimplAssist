@@ -180,7 +180,7 @@ function buildGoalAwareCampaignFiling(input: {
     throw campaignRecoveryError(
       "campaign_signup_goal_url_invalid",
       "permanent",
-      "Add a valid HTTPS signup link for your primary goal before retrying SMS registration."
+      "Add a valid HTTPS website link for your primary goal before retrying SMS registration."
     );
   }
 
@@ -196,12 +196,12 @@ function buildGoalAwareCampaignFiling(input: {
     };
   }
 
-  const signupSample = `Thanks for contacting ${cleanBusinessName(input.businessName)}. To sign up, visit ${normalizedGoalUrl}. Reply STOP to opt out.`;
+  const signupSample = `Thanks for contacting ${cleanBusinessName(input.businessName)}. Here's the website link you requested: ${normalizedGoalUrl}. Reply STOP to opt out.`;
   if (signupSample.length > TELNYX_CAMPAIGN_SAMPLE_MAX_CHARACTERS) {
     throw campaignRecoveryError(
       "campaign_signup_sample_too_long",
       "permanent",
-      "The signup link is too long for a carrier campaign sample. Add a shorter direct HTTPS signup link before retrying SMS registration."
+      "The website link is too long for a carrier campaign sample. Add a shorter direct HTTPS website link before retrying SMS registration."
     );
   }
 
@@ -1168,7 +1168,7 @@ export async function registerCampaign(businessId: string): Promise<void> {
         throw campaignRecoveryError(
           "campaign_signup_sample_persist_failed",
           "transient",
-          "We couldn't save the required signup-link campaign sample. No campaign was submitted; please try again."
+          "We couldn't save the required website-link campaign sample. No campaign was submitted; please try again."
         );
       }
     }

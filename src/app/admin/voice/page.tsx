@@ -160,7 +160,7 @@ export default async function VoicePilotPage({
       </section>
       <p className="text-sm text-stone-500">
         Pilot access is an internal exception for this account. Confirmed
-        contact capture and signup texts can be enabled above. Booking and
+        contact capture and website link texts can be enabled above. Booking and
         top-tier customer availability remain separate release steps.
       </p>
     </main>

@@ -23,7 +23,7 @@ describe('owner booking alert enrollment and privacy contract', () => {
   });
   it('describes a sign-up link sent to a caller without claiming registration or exposing caller details', () => {
     const dashboardUrl = `https://simplassist.com/booking-alerts/open/${'a'.repeat(43)}`;
-    expect(signupLinkAlertMessage({ businessName: 'Solar\nWorks\u202e', dashboardUrl })).toBe(`SimplAssist: Solar Works sent a sign-up link to a caller. View details: ${dashboardUrl} Reply STOP to opt out; HELP for help.`);
+    expect(signupLinkAlertMessage({ businessName: 'Solar\nWorks\u202e', dashboardUrl })).toBe(`SimplAssist: Solar Works sent a website link to a caller. View details: ${dashboardUrl} Reply STOP to opt out; HELP for help.`);
     expect(() => signupLinkAlertMessage({ businessName: 'Solar Works', dashboardUrl: 'https://attacker.example/dashboard' })).toThrow();
     expect(() => signupLinkAlertMessage({ businessName: 'Solar Works', dashboardUrl: `${dashboardUrl}?next=https://attacker.example` })).toThrow();
   });

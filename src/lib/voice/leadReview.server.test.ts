@@ -24,7 +24,7 @@ describe("voice-origin lead projection", () => {
   it("combines only scoped prior confirmed identity with actual signup delivery", async () => {
     const db = client([{ data: [signup] }, { data: [session] }, { data: [contact, { ...contact, revision: 4, payload: { name: "Later", phone: session.caller_phone } }] }]);
     const reviews = await loadVoiceLeadReviews(db, "business", [event]);
-    expect(reviews.get("lead")).toMatchObject({ confirmedContact: { name: "Confirmed", conflicts: ["name", "email"] }, status: { label: "Signup text delivered" }, sourceConversationId: "voice" });
+    expect(reviews.get("lead")).toMatchObject({ confirmedContact: { name: "Confirmed", conflicts: ["name", "email"] }, status: { label: "Website link text delivered" }, sourceConversationId: "voice" });
     expect(filters.filter(([field, value]) => field === "business_id" && value === "business")).toHaveLength(3);
   });
   it.each([{ business_id: "foreign" }, { conversation_id: "other-call" }])("rejects mismatched call linkage %j", async (change) => {

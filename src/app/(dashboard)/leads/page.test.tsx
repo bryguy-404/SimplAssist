@@ -249,12 +249,12 @@ describe("LeadsPage", () => {
     mocks.loadVoiceLeadReviews.mockResolvedValue(new Map([[row.id, {
       confirmedContact: { name: "Confirmed identity", email: "confirmed@example.test", phone: "+15555550101", conflicts: ["name", "email"] },
       sourceConversationId: "voice-conversation",
-      status: { label: "Signup text delivered", detail: "This does not confirm a completed signup.", tone: "success" },
+      status: { label: "Website link text delivered", detail: "This does not confirm a completed signup, submitted request, or booking.", tone: "success" },
     }]]));
     const html = renderToStaticMarkup(await LeadsPage({}));
     expect(html).toContain("Voice call → SMS");
     expect(html).toContain("Confirmed identity"); expect(html).toContain("Stored identity");
-    expect(html).toContain("Signup text delivered"); expect(html).toContain("does not confirm a completed signup");
+    expect(html).toContain("Website link text delivered"); expect(html).toContain("does not confirm a completed signup");
     expect(html).toContain('href="/conversations?conversation=voice-conversation"');
     expect(html).toContain('href="/conversations?conversation=text-conversation"');
     expect(html).toContain('href="/contacts?contact=contact-id"');
@@ -267,8 +267,8 @@ describe("LeadsPage", () => {
     mocks.loadVoiceLeadReviews.mockRejectedValue(new Error("lookup unavailable"));
     const html = renderToStaticMarkup(await LeadsPage({}));
     expect(html).toContain("Call details temporarily unavailable");
-    expect(html).toContain("Signup link sent");
-    expect(html).not.toContain("Signup text delivered");
+    expect(html).toContain("Website link sent");
+    expect(html).not.toContain("Website link text delivered");
   });
 
   it("renders the contact fallbacks, local date/time, event copy, and conversation linkage", async () => {
@@ -306,7 +306,7 @@ describe("LeadsPage", () => {
     const markup = renderToStaticMarkup(await LeadsPage({}));
 
     expect(markup).toContain("Leads");
-    expect(markup).toContain("Signup links sent");
+    expect(markup).toContain("Website links sent");
     expect(markup).toContain(">4</p>");
     expect(markup).toContain("This month");
     expect(markup).toContain("Aug 10, 2026");
@@ -315,7 +315,7 @@ describe("LeadsPage", () => {
     expect(markup).toContain("(317) 555-0102");
     expect(markup).toContain("email@example.test");
     expect(markup).toContain("Contact unavailable");
-    expect(markup.match(/Signup link sent/g)).toHaveLength(4);
+    expect(markup.match(/Website link sent/g)).toHaveLength(4);
     expect(markup).toContain(
       'href="/conversations?conversation=conversation-name"'
     );
@@ -329,7 +329,7 @@ describe("LeadsPage", () => {
     const markup = renderToStaticMarkup(await LeadsPage({}));
 
     expect(markup).toContain(">0</p>");
-    expect(markup).toContain("No signup links sent yet.");
+    expect(markup).toContain("No website links sent yet.");
     expect(markup).not.toContain("<table");
     expect(markup).not.toContain("Leads could not be loaded.");
   });
@@ -370,7 +370,7 @@ describe("LeadsPage", () => {
     const markup = renderToStaticMarkup(await LeadsPage({}));
 
     expect(markup).toContain("Leads could not be loaded.");
-    expect(markup).not.toContain("No signup links sent yet.");
+    expect(markup).not.toContain("No website links sent yet.");
     expect(markup).toContain(">—</p>");
     expect(markup).not.toContain(">0</p>");
     expect(mocks.consoleError).toHaveBeenCalledWith(

@@ -507,7 +507,7 @@ const comparisonGroups: ReadonlyArray<{
         },
       },
       {
-        feature: "Voice contact capture and signup texts",
+        feature: "Voice contact capture and website link texts",
         values: {
           chat_only: false,
           sms_only: false,

@@ -165,7 +165,7 @@ import { attemptPaidLaunch } from "./launch";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000091";
 const SIGNUP_GOAL_URL_INVALID_MESSAGE =
-  "Add a valid HTTPS signup link for your primary goal before retrying SMS registration.";
+  "Add a valid HTTPS website link for your primary goal before retrying SMS registration.";
 const ACTIVE_NUMBER = {
   id: "number-row-1",
   phone_number: "+15745550191",

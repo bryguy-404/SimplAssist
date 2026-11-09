@@ -10,7 +10,7 @@ export const FULL_SUITE_HIGHLIGHTS = [
   "Everything in SMS + Web Chat, plus",
   "AI voice answering in English",
   `${plan.includedVoiceMinutes} voice minutes/billing month`,
-  "Contact capture, signup texts + calendar booking",
+  "Contact capture, website link texts + calendar booking",
   `${smsParts} included SMS parts/month`,
 ];
 

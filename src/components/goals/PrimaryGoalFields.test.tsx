@@ -49,7 +49,7 @@ describe("PrimaryGoalFields", () => {
     expect(copy).toEqual([
       renderedCopy("When a new customer reaches out, what's the win for you?"),
       renderedCopy("I run on a schedule — jobs, visits, or appointments"),
-      renderedCopy("I need them on a list — a camp, class, program, or event"),
+      renderedCopy("Direct customers to a website"),
       renderedCopy(
         "Pick the main one. Your AI still handles everything else customers ask — this just sets what it steers toward. You can change it anytime in Settings."
       ),
@@ -89,7 +89,7 @@ describe("PrimaryGoalFields", () => {
     expect(markup).toContain('type="url"');
     expect(markup).toContain('id="goal_url"');
     expect(markup).toContain('name="goal_url"');
-    expect(markup).toContain('aria-label="goal_url"');
+    expect(markup).toContain('aria-label="Website link"');
     expect(markup).toContain('placeholder="https://"');
     expect(markup).toContain('minLength="9"');
     expect(markup).toContain('maxLength="2048"');

@@ -8,7 +8,7 @@ export const signupGoalTools: Anthropic.Tool[] = [
   {
     name: "offer_goal_link",
     description:
-      "Offer the business's signup link when the customer's current inbound message shows interest in signing up or taking the next step. Use this only for the direct reply to that inbound message. The tool returns the exact URL to include in that reply.",
+      "Offer the business's website link when the customer's current inbound message shows interest in taking the next step on its website, such as requesting a quote, requesting a booking, or signing up. Use this only for the direct reply to that inbound message. The tool returns the exact URL to include in that reply.",
     input_schema: {
       type: "object" as const,
       properties: {},

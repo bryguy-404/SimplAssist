@@ -281,7 +281,7 @@ describe("canonical homepage static HTML", () => {
       "Custom AI rules and guardrails",
       "AI voice answering in English",
       "Included voice minutes/billing month",
-      "Voice contact capture and signup texts",
+      "Voice contact capture and website link texts",
       "Voice calendar booking",
       "Voice transcripts and recordings",
     ];

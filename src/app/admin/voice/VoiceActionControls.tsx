@@ -53,7 +53,7 @@ export function VoiceActionControls({
         {(
           [
             ["contacts", "Save confirmed contact details"],
-            ["signup", "Offer and send the approved signup link"],
+            ["signup", "Offer and send the approved website link"],
             ["preparation", "Prepare the voice connection during ringing"],
           ] as const
         ).map(([key, label]) => (

@@ -23,8 +23,8 @@ export const BOOKING_ALERT_STATUS_COPY: Record<OwnerBookingAlertSettings['status
   unavailable: 'Business texts are not available yet. You can review the enrollment details below; alerts will remain off until setup is ready.',
   not_enabled: 'Business texts are off. Add your mobile number and complete verification to turn them on.',
   pending_verification: 'One more step: send the verification text from your mobile to confirm this number.',
-  active: 'Business texts are on for confirmed bookings and sign-up links sent to callers.',
-  paused: 'Business texts are paused. Check your plan and your booking or sign-up setup to resume alerts.',
+  active: 'Business texts are on for confirmed bookings and website links sent to callers.',
+  paused: 'Business texts are paused. Check your plan and your booking or website-link setup to resume alerts.',
   stopped: 'You opted out by text. Send START to the SimplAssist number below, then verify your number again to enable alerts for this business.',
 };
 
@@ -52,7 +52,7 @@ export function OwnerBookingAlertsContent({
       <div>
         <h2 id={`${formId}-heading`} className={`text-lg font-semibold ${ink}`}>Business alerts</h2>
         <p className={`mt-1 max-w-2xl text-sm ${bodyFaint}`}>
-          Get a text when SimplAssist confirms an appointment or sends a sign-up link to a caller.
+          Get a text when SimplAssist confirms an appointment or sends a website link to a caller.
           Booking alerts are available with eligible Chat Only accounts too.
         </p>
       </div>
@@ -67,7 +67,7 @@ export function OwnerBookingAlertsContent({
         : 'Business alert settings could not be loaded. Refresh to try again.')}
     </p>
     {settings?.available && !settings.eligible ? <p className={`mt-3 text-sm ${bodyFaint}`}>
-      An active plan is needed. For sign-up alerts, use Full Suite with the sign-up goal and a sign-up link.
+      An active plan is needed. For website-link alerts, use Full Suite with the website-link goal and a website link.
       For booking alerts, choose the booking goal and enable direct booking with a connected calendar.
     </p> : null}
     {settings?.recipient ? <p className={`mt-4 text-sm ${ink}`}>
@@ -140,7 +140,7 @@ export function OwnerBookingAlertsContent({
     {feedback && !loadError ? <p role={feedback.kind === 'error' ? 'alert' : 'status'} className={`mt-4 rounded-xl p-3 text-sm ${feedback.kind === 'error' ? statusDanger : statusSuccess}`}>{feedback.text}</p> : null}
     <p className={`mt-5 text-sm ${bodyFaint}`}>
       Reply STOP to pause all SimplAssist business texts to this mobile. Turning off alerts here affects this business only.
-      A sign-up-link alert means a text was sent to a caller; it does not confirm delivery or registration.
+      A website-link alert means a text was sent to a caller; it does not confirm delivery or registration.
       Unconfirmed booking requests and appointments made outside SimplAssist do not trigger alerts.
     </p>
   </section>;

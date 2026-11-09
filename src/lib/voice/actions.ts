@@ -59,7 +59,7 @@ export function actionFingerprint(payload: VoiceActionPayload, signupUrl?: strin
   return createHash("sha256").update(JSON.stringify({ ...normalized, ...(signupUrl ? { signupUrl } : {}), ...(confirmedContext ? { confirmedContext } : {}) })).digest("hex");
 }
 export function buildActionReadback(payload: VoiceActionPayload, callerPhone: string, timezone: string): string {
-  if (payload.kind === "signup") return `May I text the signup link to the number you're calling from, ending in ${callerPhone.slice(-4)}?`;
+  if (payload.kind === "signup") return `May I text the website link to the number you're calling from, ending in ${callerPhone.slice(-4)}?`;
   if (payload.kind === 'booking_review_text' || payload.kind === 'booking_confirmation_text') return `May I text ${payload.kind === 'booking_review_text' ? 'these details for you to review while we talk' : 'the confirmed appointment or request details'} to the number you are calling from, ending in ${callerPhone.slice(-4)}?`;
   const details = `${payload.name || "name not provided"}, phone ${payload.phone}${payload.email ? `, email ${payload.email}` : ", without an email invitation"}`;
   if (payload.kind === "contact") return `May I save these contact details: ${details}?`;

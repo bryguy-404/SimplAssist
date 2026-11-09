@@ -120,15 +120,15 @@ export default async function LeadsPage({ searchParams }: { searchParams?: { lea
       <header>
         <h1 className={`text-2xl font-bold ${ink}`}>Leads</h1>
         <p className={`mt-1 text-sm ${body}`}>
-          See each signup link your assistant sent. A sent or delivered link does not confirm a completed signup.
+          See each website link your assistant sent. A sent or delivered link does not confirm a completed signup, submitted request, or booking.
         </p>
       </header>
 
       <section
         className={`${card} w-full p-5 sm:max-w-xs`}
-        aria-label="Monthly signup link activity"
+        aria-label="Monthly website link activity"
       >
-        <p className={`text-sm font-medium ${body}`}>Signup links sent</p>
+        <p className={`text-sm font-medium ${body}`}>Website links sent</p>
         <p className={`mt-2 text-3xl font-bold ${ink}`}>
           {monthlyCount ?? "\u2014"}
         </p>
@@ -137,7 +137,7 @@ export default async function LeadsPage({ searchParams }: { searchParams?: { lea
 
       <section aria-labelledby="lead-events-heading">
         <h2 id="lead-events-heading" className="sr-only">
-          Signup link history
+          Website link history
         </h2>
         <div className={`overflow-hidden ${card}`}>
           {listError ? (
@@ -146,7 +146,7 @@ export default async function LeadsPage({ searchParams }: { searchParams?: { lea
             </div>
           ) : events.length === 0 ? (
             <div className={`px-6 py-12 text-center text-sm ${body}`}>
-              No signup links sent yet.
+              No website links sent yet.
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -192,8 +192,8 @@ export default async function LeadsPage({ searchParams }: { searchParams?: { lea
                           {event.contact_id ? <Link href={`/contacts?contact=${encodeURIComponent(event.contact_id)}`} className="mt-2 inline-flex text-xs font-medium text-[var(--brand-accent)] underline dark:text-[var(--brand-accent-dark)]">View contact</Link> : null}
                         </td>
                         <td className={`px-6 py-4 text-sm ${body}`}>
-                          <p>{voiceReview?.status.label || "Signup link sent"}</p>
-                          {event.origin_kind === "voice_action" ? <p className={`mt-1 max-w-xs text-xs ${body}`}>{voiceReview?.status.detail || "Delivery not confirmed here. Signup is not confirmed."}</p> : null}
+                          <p>{voiceReview?.status.label || "Website link sent"}</p>
+                          {event.origin_kind === "voice_action" ? <p className={`mt-1 max-w-xs text-xs ${body}`}>{voiceReview?.status.detail || "Delivery not confirmed here. A signup, request, or booking is not confirmed."}</p> : null}
                         </td>
                         <td className="px-6 py-4 text-sm">
                           <p className={`mb-2 text-xs ${body}`}>{event.origin_kind === "voice_action" ? "Voice call → SMS" : "Conversation"}</p>

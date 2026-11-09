@@ -23,7 +23,7 @@ describe('public owner booking SMS program evidence', () => {
     expect(html).toContain('Message and data rates may apply');
     expect(html).toContain('about confirmed bookings and sign-up links sent to callers');
     expect(html).toContain('does not confirm that the caller received the text, opened the link, or completed registration');
-    expect(html).toContain('Full Suite accounts with the sign-up goal');
+    expect(html).toContain('Full Suite accounts with the website-link goal');
     expect(html).toContain('do not need a connected calendar');
   });
 

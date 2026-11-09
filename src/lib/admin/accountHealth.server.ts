@@ -140,6 +140,7 @@ const onboardingStepSchema = z.enum([
   "business_info",
   "business_hours",
   "services_faqs",
+  "plan_selection",
   "ai_settings",
   "legal_verification",
   "sms_use_case",

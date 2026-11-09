@@ -144,6 +144,30 @@ describe("loadAdminAccountHealthList", () => {
     });
   });
 
+  it("loads the account list when a new signup is choosing a plan", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: [
+        rpcRow({
+          onboarding_completed_at: null,
+          onboarding_step: "plan_selection",
+          subscription_plan: null,
+          subscription_status: null,
+          subscription_cancel_at_period_end: null,
+          effective_plan: null,
+        }),
+        rpcRow({ business_id: "10000000-0000-4000-a045-000000000002" }),
+      ],
+      error: null,
+    });
+
+    const records = await loadAdminAccountHealthList();
+
+    expect(records).toHaveLength(2);
+    expect(records[0].subscription).toBeUndefined();
+    expect(records[0].health?.lifecycle.state).toBe("onboarding");
+    expect(records[1].health?.lifecycle.state).toBe("live");
+  });
+
   it("derives effective operation state while preserving independent pause timestamps", async () => {
     mocks.rpc.mockResolvedValue({
       data: [

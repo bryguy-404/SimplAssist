@@ -44,12 +44,32 @@ the webhook claim for retry. There is no new SMS sender or booking behavior.
 - Read-only production baseline confirmed healthy app and worker, compatible
   voice protocols and zero active voice calls before release.
 
-## Release and caller acceptance
+## Production release
 
-Deploy only the web app from a clean committed-source archive. The voice worker,
-environment variables, service settings and database remain unchanged. Verify
-the new deployment, public app health, unsigned-webhook rejection, protected
-settings endpoints, and unchanged worker readiness after release.
+Deployed the web app on November 10, 2026 from a clean committed-source archive,
+without a public repository push:
+
+- Source: `4265b37b80043a50a8fa610b4314a68ecbff6ac5`.
+- Archive SHA-256: `f6947df3349f3a17379c819eccd576f1df2ad957a23fb7461d11f18daa5287ec`.
+- Railway web deployment: `b43fa4d9-2afd-4725-8ecd-816b96b0c510`, `SUCCESS`.
+- Unchanged voice deployment: `95f2d013-404b-47ab-8daa-5d1143b6114f`, `SUCCESS`.
+
+Post-deployment verification confirmed:
+
+- Both public domains returned healthy app responses; signup returned HTTP 200.
+- Protected voice and call-forwarding settings rejected unauthenticated requests.
+- The voice webhook returned its expected HTTP 403 `Forbidden` response to an
+  unsigned empty request, without initiating a call or text.
+- The voice worker reported ready, with unchanged action, booking, commercial
+  and natural-opening protocols, and zero active calls at verification.
+- Environment fingerprints and service settings matched the pre-release
+  baseline. No voice-worker release or database migration was performed.
+
+The initial public checks using Python's default user agent received HTTP 403.
+Repeating them with an identified browser-style verification user agent passed
+all expected app responses; no application or edge settings were changed.
+
+## Caller acceptance
 
 Actual handset timing remains unverified. Once the test account's number is
 active, use a customer Full Suite account with AI voice enabled and outgoing

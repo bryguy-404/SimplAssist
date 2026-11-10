@@ -27,7 +27,7 @@ import { hasCustomerVoiceRoutingConfiguration, isCustomerVoiceRolloutEnabledForB
 // We act on a small subset to drive forwarding and the missed-call voicemail flow:
 //
 //   call.initiated      -> answer (or reject if number isn't configured)
-//   call.answered       -> forward if enabled, otherwise play voicemail ringback
+//   call.answered       -> ring owner if enabled, otherwise start eligible AI or voicemail ringback
 //   call.playback.ended -> speak greeting after voicemail ringback
 //   call.bridged        -> mark a forwarding attempt connected
 //   call.speak.ended    -> start recording
@@ -352,6 +352,21 @@ async function handleCallAnswered(payload: Record<string, unknown>) {
     return;
   }
 
+  // Carrier-forwarded calls have already rung the owner's phone. An account
+  // using AI directly also has no owner leg to wait for. Start its saved voice
+  // route now; the voice worker keeps connecting audio only until speech is
+  // ready. Preserve the existing ringback for text-only and invalid-forwarding
+  // paths, without relying on optional carrier diversion headers.
+  if (!state.callForwardingEnabled) {
+    if (await selectCommercialUnansweredRoute(state)) return;
+    if (state.voicePilotSessionId) {
+      // A denied voice admission has already frozen the fallback preference.
+      // Use that greeting immediately instead of introducing another wait.
+      await speakVoicemailGreeting(state);
+      return;
+    }
+  }
+
   await startVoicemailRingback(state);
 }
 
@@ -571,7 +586,7 @@ async function speakVoicemailGreeting(state: VoiceState) {
   }
 }
 
-/** A server-frozen voice decision is made only once the owner's call is missed. */
+/** Freeze the voice decision when there is no owner leg left to ring. */
 async function selectCommercialUnansweredRoute(state: VoiceState): Promise<boolean> {
   if (state.voicePilotSessionId || !state.callSessionId || !state.smsPhoneNumber)
     return false;

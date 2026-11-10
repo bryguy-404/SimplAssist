@@ -237,26 +237,102 @@ function forwardTargetState(overrides: Record<string, unknown> = {}) {
   });
 }
 
-describe("closed commercial unanswered-call integration", () => {
-  it("waits until existing ringback completes before admitting customer voice", async () => {
+describe("commercial unanswered-call integration", () => {
+  it("starts configured AI answering without waiting for the legacy ringing clip", async () => {
     mocks.commercialConfiguration.mockResolvedValue(true);
     mocks.commercialRollout.mockResolvedValue(true);
     mocks.admitCommercial.mockResolvedValue({ id: "customer-call", response_mode: "voice", text_fallback_enabled: true });
     const state = voicemailState({ callSessionId: "original-call" });
     mocks.unwrap.mockResolvedValue(voiceEvent("call.answered", { call_control_id: "cc_voicemail", client_state: state }));
     expect((await voiceWebhook(request())).status).toBe(200);
-    expect(mocks.admitCommercial).not.toHaveBeenCalled();
-    expect(mocks.startPlayback).toHaveBeenCalledOnce();
-    const ringState = mocks.startPlayback.mock.calls[0][1].client_state;
-    mocks.unwrap.mockResolvedValue(voiceEvent("call.playback.ended", { call_control_id: "cc_voicemail", status: "completed", client_state: ringState }));
-    expect((await voiceWebhook(request())).status).toBe(200);
     expect(mocks.admitCommercial).toHaveBeenCalledWith(expect.anything(), {
       businessId: ATTEMPT.business_id, caller: ATTEMPT.caller_phone,
       called: "+15745550300", callControlId: "cc_voicemail", callSessionId: "original-call",
     }, true);
     expect(mocks.startCommercial).toHaveBeenCalledOnce();
+    expect(mocks.startPlayback).not.toHaveBeenCalled();
+    expect(mocks.dial).not.toHaveBeenCalled();
     expect(mocks.speak).not.toHaveBeenCalled();
     expect(mocks.sendMissedCallSMS).not.toHaveBeenCalled();
+  });
+  it("retains the ringing and voicemail flow for accounts using text follow-up", async () => {
+    const state = voicemailState({ callSessionId: "text-call" });
+    mocks.unwrap.mockResolvedValue(voiceEvent("call.answered", { client_state: state }));
+    expect((await voiceWebhook(request())).status).toBe(200);
+    expect(mocks.commercialConfiguration).toHaveBeenCalledWith(ATTEMPT.business_id);
+    expect(mocks.admitCommercial).not.toHaveBeenCalled();
+    expect(mocks.startPlayback).toHaveBeenCalledOnce();
+    expect(mocks.speak).not.toHaveBeenCalled();
+    const ringState = mocks.startPlayback.mock.calls[0][1].client_state;
+    mocks.unwrap.mockResolvedValue(voiceEvent("call.playback.ended", {
+      status: "completed", client_state: ringState,
+    }));
+    expect((await voiceWebhook(request())).status).toBe(200);
+    expect(mocks.speak).toHaveBeenCalledOnce();
+    expect(mocks.startCommercial).not.toHaveBeenCalled();
+    expect(mocks.sendMissedCallSMS).not.toHaveBeenCalled();
+  });
+  it.each([true, false])("uses the frozen fallback=%s immediately when AI admission is denied", async (textFallbackEnabled) => {
+    mocks.commercialConfiguration.mockResolvedValue(true);
+    mocks.commercialRollout.mockResolvedValue(false);
+    mocks.admitCommercial.mockResolvedValue({
+      id: "denied-call", response_mode: "text", text_fallback_enabled: textFallbackEnabled,
+    });
+    mocks.unwrap.mockResolvedValue(voiceEvent("call.answered", {
+      client_state: voicemailState({ callSessionId: "denied-call" }),
+    }));
+    expect((await voiceWebhook(request())).status).toBe(200);
+    expect(mocks.admitCommercial).toHaveBeenCalledExactlyOnceWith(expect.anything(), expect.anything(), false);
+    expect(mocks.startPlayback).not.toHaveBeenCalled();
+    expect(mocks.startCommercial).not.toHaveBeenCalled();
+    expect(mocks.speak).toHaveBeenCalledOnce();
+    const greeting = mocks.speak.mock.calls[0][1];
+    expect(JSON.parse(Buffer.from(greeting.client_state, "base64").toString())).toMatchObject({
+      voicePilotSessionId: "denied-call", voiceTextFallbackEnabled: textFallbackEnabled,
+      voicePhase: "voicemail_greeting",
+    });
+    if (!textFallbackEnabled) expect(greeting.payload).not.toMatch(/text|SMS/i);
+    expect(mocks.sendMissedCallSMS).not.toHaveBeenCalled();
+  });
+  it("keeps legacy ringing when the account is not admitted to a customer voice route", async () => {
+    mocks.commercialConfiguration.mockResolvedValue(true);
+    mocks.commercialRollout.mockResolvedValue(true);
+    mocks.admitCommercial.mockResolvedValue(null);
+    mocks.unwrap.mockResolvedValue(voiceEvent("call.answered", {
+      client_state: voicemailState({ callSessionId: "unadmitted-call" }),
+    }));
+    expect((await voiceWebhook(request())).status).toBe(200);
+    expect(mocks.startPlayback).toHaveBeenCalledOnce();
+    expect(mocks.startCommercial).not.toHaveBeenCalled();
+    expect(mocks.speak).not.toHaveBeenCalled();
+  });
+  it("leaves stored pilot and active AI calls with their existing lifecycle handler", async () => {
+    mocks.handleStoredVoiceEvent.mockResolvedValue(true);
+    mocks.commercialConfiguration.mockResolvedValue(true);
+    mocks.unwrap.mockResolvedValue(voiceEvent("call.answered", {
+      client_state: voicemailState({ callSessionId: "pilot-call", voicePilotSessionId: "pilot-session" }),
+    }));
+    expect((await voiceWebhook(request())).status).toBe(200);
+    expect(mocks.commercialConfiguration).not.toHaveBeenCalled();
+    expect(mocks.startCommercial).not.toHaveBeenCalled();
+    expect(mocks.startPlayback).not.toHaveBeenCalled();
+    expect(mocks.sendMissedCallSMS).not.toHaveBeenCalled();
+  });
+  it("releases the webhook claim for retry if the immediate AI decision fails", async () => {
+    mocks.commercialConfiguration.mockResolvedValue(true);
+    mocks.commercialRollout.mockResolvedValue(true);
+    mocks.admitCommercial.mockRejectedValue(new Error("admission unavailable"));
+    mocks.unwrap.mockResolvedValue(voiceEvent("call.answered", {
+      client_state: voicemailState({ callSessionId: "retry-call" }),
+    }, "evt_ai_start_retry"));
+    expect((await voiceWebhook(request())).status).toBe(500);
+    expect(mocks.releaseProcessedEvent).toHaveBeenCalledExactlyOnceWith("evt_ai_start_retry");
+    expect(mocks.startPlayback).not.toHaveBeenCalled();
+    expect(mocks.speak).not.toHaveBeenCalled();
+    expect(mocks.sendMissedCallSMS).not.toHaveBeenCalled();
+    mocks.admitCommercial.mockResolvedValue({ id: "retry-session", response_mode: "voice" });
+    expect((await voiceWebhook(request())).status).toBe(200);
+    expect(mocks.startCommercial).toHaveBeenCalledOnce();
   });
   it("keeps the caller connected when customer voice wins after the owner does not answer", async () => {
     mocks.commercialConfiguration.mockResolvedValue(true);
@@ -2062,6 +2138,7 @@ describe("POST /api/messaging/voice", () => {
   });
 
   it("uses forwarding-enabled configuration captured at initiation to create, dial, and bridge an attempt", async () => {
+    mocks.commercialConfiguration.mockResolvedValue(true);
     mocks.unwrap.mockResolvedValueOnce(
       voiceEvent(
         "call.initiated",
@@ -2191,6 +2268,8 @@ describe("POST /api/messaging/voice", () => {
     );
     expect(mocks.speak).not.toHaveBeenCalled();
     expect(mocks.startPlayback).not.toHaveBeenCalled();
+    expect(mocks.admitCommercial).not.toHaveBeenCalled();
+    expect(mocks.startCommercial).not.toHaveBeenCalled();
     expect(mocks.from.mock.calls.map(([table]) => table)).toEqual([
       "phone_numbers",
       "businesses",

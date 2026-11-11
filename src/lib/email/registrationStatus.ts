@@ -103,8 +103,8 @@ export async function sendBrandApprovedEmail(
       paragraphs: [
         "Hi,",
         `Good news — business verification for ${input.businessName} is complete.`,
-        "SMS campaign review and phone number setup are the next steps. Registration will continue automatically. Texting becomes available after those steps finish; business verification alone does not activate it.",
-        "No action needed from you. If you have questions, reply to this email.",
+        "SMS campaign review and phone number setup are the next steps. Texting becomes available after those steps finish; business verification alone does not activate it.",
+        "You can check progress and any next steps in your account. If you have questions, reply to this email.",
         `— The ${brand.name} Team`,
       ],
     }),

@@ -239,8 +239,7 @@ delta re-verify.
 
 ## 5. Parked backlog
 
-Customer onboarding follow-ups recorded 2026-11-11 (implemented and locally
-verified; production release verification follows):
+Customer onboarding follow-ups completed 2026-11-11 (deployed and verified):
 
 Implementation plan: reuse the existing voice settings revision to distinguish
 default text mode from an explicit owner choice; add a dashboard setup prompt
@@ -296,6 +295,27 @@ preview was removed before packaging. Pending approval, missed/early webhooks,
 interrupted continuation, competing claims, real rejection, existing launch
 gates, voice preferences and customer dashboard paths are covered. No migration,
 manual customer setting change, carrier submission or test message was performed.
+
+Production release: private committed-source archive
+`03289cdfe070e28227ec9c60228bdb7887225201`, SHA-256
+`1430d2e3eab0b4b069b8d0d6333c12c48c8f15d140be9ba03e3f242dc0a211d1`.
+App deployment `79a6a078-777b-49d3-8677-8032f8a24230` and voice-worker deployment
+`a970c4f1-2594-4fb0-bf3b-8a6786195b02` both SUCCESS. The final email wording also
+passed its 14-test focused suite. No public Git push; unrelated worktree files
+were excluded, and worker archives excluded app/other-worker Railway config.
+Environment fingerprints and saved service settings matched the baseline.
+
+Post-release verification: apex/www health and signup returned 200; owner voice
+and forwarding endpoints rejected anonymous requests (401); unsigned voice
+webhook returned the application's 403; the new internal reconciliation route
+returned 404 without authentication and 200 with it (zero pending candidates,
+zero failures). Railway HTTP logs independently showed the worker's automatic
+Node request returning 200 at 15:11:26 UTC. Voice readiness remained true with
+unchanged protocols and zero active calls. Read-only account comparison found
+unchanged registration resource IDs and voice preferences, approved business
+verification, pending campaign review, and no registration error. Real carrier
+approval and customer phone testing remain external acceptance steps. This release
+guides owners to enable voice; their existing preferences remain in place.
 
 Deletion-pipeline PII crumbs (verified real, pre-existing, out of scope of PR #7):
 

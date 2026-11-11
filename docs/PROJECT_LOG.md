@@ -239,6 +239,64 @@ delta re-verify.
 
 ## 5. Parked backlog
 
+Customer onboarding follow-ups recorded 2026-11-11 (implemented and locally
+verified; production release verification follows):
+
+Implementation plan: reuse the existing voice settings revision to distinguish
+default text mode from an explicit owner choice; add a dashboard setup prompt
+and a settings anchor. Represent a submitted brand awaiting campaign filing
+using the existing submitted state and saved resource IDs, with a guarded claim
+for continuation. Recognize the specific pending-brand provider response, resume
+on approval webhooks, and reconcile missing/early webhooks through an independent
+background heartbeat in the existing worker. Keep that heartbeat independent of
+voice call maintenance/readiness. Preserve paid-launch authorization, resource
+recovery, rejection guards and provider create-intent fences. Replace ordinary
+customer provider jargon while keeping legal disclosures, staff details and
+exact carrier rejection reasons. No new database columns or paid service are
+planned. Verify continuation races and failures, dashboard choices, existing
+launch paths, production build and browser rendering before release.
+
+- **Make Full Suite voice activation explicit.** Full Suite includes voice
+  access, but new commercial accounts currently default to `Text follow-up`.
+  Prefer a dashboard setup banner/card over an interrupting popup: "AI voice
+  answering is included in your plan but is not turned on." Link to Settings
+  > Call answering > AI voice answering, with a clear save step. Show accurate
+  waiting guidance while carrier/number readiness prevents dashboard access;
+  do not imply the assistant is already answering. Respect an intentional
+  text-only choice and clear the setup prompt when voice is enabled. Explain
+  carrier forward-when-unanswered separately from SimplAssist-to-owner
+  forwarding. This is a general onboarding improvement, not an account override.
+- **Treat pending business verification as waiting, not failed registration.**
+  A read-only production audit found campaign preflight returning provider code
+  527, "Brand registration status pending", before a later attempt succeeded.
+  `attemptPaidLaunch` proceeds from `registerBrand` to `registerCampaign`;
+  campaign preflight can run while brand verification remains pending. Its
+  generic error path marks registration failed, producing "Registration needs
+  another try" for a normal prerequisite wait. Add a distinct pending outcome
+  and reliable continuation after verified brand approval (webhook/worker with
+  reconciliation), preserving existing provider resources, create-intent
+  fencing, billing authority and rejection handling. Do not merely change copy
+  to promise automatic continuation without implementing that continuation.
+  Verify pending-to-approved progress, duplicate events/retries, delayed or
+  missing webhooks, true rejection, and genuine technical failures before ship.
+
+Customer-facing provider terminology was also reviewed: Telnyx is named in
+`CarrierReviewStatus.tsx` (approved campaign awaiting number assignment), the
+dashboard A2P status card, compliance settings and the public privacy policy.
+These establish that the provider is disclosed; they do not establish which
+source a particular customer read. The subsequently authorized third fix replaces
+ordinary customer-facing provider jargon with carrier/business-number wording;
+legal disclosures, staff tools and exact rejection reasons remain intact. The
+business-approval email now distinguishes verification from SMS activation.
+
+Local verification: 112 relevant test files / 2,060 tests passed, production app
+build (including lint/type checks) passed, worker TypeScript check passed, and
+the real UI components rendered correctly in a temporary local preview. The
+preview was removed before packaging. Pending approval, missed/early webhooks,
+interrupted continuation, competing claims, real rejection, existing launch
+gates, voice preferences and customer dashboard paths are covered. No migration,
+manual customer setting change, carrier submission or test message was performed.
+
 Deletion-pipeline PII crumbs (verified real, pre-existing, out of scope of PR #7):
 
 - `call_forwarding_attempts.caller_phone` / `forward_to_number` never scrubbed

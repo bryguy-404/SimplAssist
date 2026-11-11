@@ -4,6 +4,7 @@ import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  continuePendingBrandRegistration: vi.fn(),
   unwrap: vi.fn(),
   markProcessedOnce: vi.fn(),
   releaseProcessedEvent: vi.fn(),
@@ -59,6 +60,10 @@ vi.mock("@/lib/email/registrationStatus", () => ({
   sendBrandRejectedEmail: mocks.sendBrandRejectedEmail,
   sendCampaignApprovedEmail: mocks.sendCampaignApprovedEmail,
   sendCampaignRejectedEmail: mocks.sendCampaignRejectedEmail,
+}));
+
+vi.mock("@/lib/onboarding/continueRegistration.server", () => ({
+  continuePendingBrandRegistration: mocks.continuePendingBrandRegistration,
 }));
 
 import { POST as statusWebhook } from "./route";
@@ -195,6 +200,7 @@ beforeEach(() => {
     repairedRejectedOnboarding: true,
   });
   mocks.ensureCampaignAssignmentForBusiness.mockResolvedValue(undefined);
+  mocks.continuePendingBrandRegistration.mockResolvedValue(undefined);
   mocks.mapCampaignStatus.mockReturnValue({
     dbStatus: "approved",
     isTerminal: true,
@@ -206,6 +212,21 @@ beforeEach(() => {
 });
 
 describe("POST /api/messaging/registration/status", () => {
+  it.each([[], [{ id: BUSINESS.id }]])("continues brand approval even when the status was already written", async (transitionRows) => {
+    mocks.unwrap.mockResolvedValue(campaignEvent("evt_brand", { eventType: "10dlc.brand.identityStatus", payload: { brandId: BRAND_ID, identityStatus: "VERIFIED" } }));
+    mocks.mapBrandStatus.mockReturnValue({ dbStatus: "approved", isTerminal: true });
+    queueResults({ data: BUSINESS, error: null }, { data: transitionRows, error: null });
+    expect((await statusWebhook(request())).status).toBe(200);
+    expect(mocks.continuePendingBrandRegistration).toHaveBeenCalledWith(BUSINESS.id);
+  });
+  it("releases an approval event for redelivery if continuation fails", async () => {
+    mocks.unwrap.mockResolvedValue(campaignEvent("evt_brand_failure", { payload: { brandId: BRAND_ID, identityStatus: "VERIFIED" } }));
+    mocks.mapBrandStatus.mockReturnValue({ dbStatus: "approved", isTerminal: true });
+    mocks.continuePendingBrandRegistration.mockRejectedValueOnce(new Error("database temporarily unavailable"));
+    queueResults({ data: BUSINESS, error: null }, { data: [], error: null });
+    expect((await statusWebhook(request())).status).toBe(500);
+    expect(mocks.releaseProcessedEvent).toHaveBeenCalledWith("evt_brand_failure");
+  });
   it("forwards a full snapshot and provider ordering time, then awaits exactly one assignment for an applied VERIFIED approval", async () => {
     const event = campaignEvent();
     mocks.unwrap.mockResolvedValue(event);

@@ -130,7 +130,7 @@ export const chatOnlyPlan = {
     "AI answer, tone, FAQ, and service customization",
     "Google Calendar connection",
     "AI appointment scheduling",
-    "No phone number, SMS, MMS, or Telnyx activation",
+    "No phone number or texting activation required",
     "No setup or SMS activation fee",
     ...customerFeatures("chat_only"),
   ],

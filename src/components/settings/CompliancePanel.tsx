@@ -254,7 +254,7 @@ export default function CompliancePanel({
           checked={mode === 'hosted'}
           onChange={() => setMode('hosted')}
           title="SimplAssist-hosted (default)"
-          description="We generate and host your privacy policy and terms at SimplAssist URLs. Zero effort — and Telnyx automatically receives the right URLs."
+          description="We generate and host your privacy policy and terms at SimplAssist URLs and automatically include these links in your carrier registration."
         >
           {mode === 'hosted' && (
             <div className="mt-3 grid gap-2 text-sm">

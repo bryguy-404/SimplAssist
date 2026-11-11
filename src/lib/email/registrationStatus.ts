@@ -99,11 +99,11 @@ export async function sendBrandApprovedEmail(
     to: input.recipients,
     context: "brand_approved",
     content: (brand) => ({
-      subject: `Your ${brand.name} business is approved to send SMS`,
+      subject: `Your ${brand.name} business verification is approved`,
       paragraphs: [
         "Hi,",
-        `Good news — the carrier review for ${input.businessName} is complete. Your business brand has been approved by The Campaign Registry.`,
-        "Your campaign is the next step in the review process. We'll email you again as soon as the carriers approve it (usually 1–3 business days). Once your campaign is approved, your AI assistant will start replying to text messages automatically.",
+        `Good news — business verification for ${input.businessName} is complete.`,
+        "SMS campaign review and phone number setup are the next steps. Registration will continue automatically. Texting becomes available after those steps finish; business verification alone does not activate it.",
         "No action needed from you. If you have questions, reply to this email.",
         `— The ${brand.name} Team`,
       ],

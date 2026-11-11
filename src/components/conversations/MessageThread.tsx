@@ -53,7 +53,7 @@ function formatTimestamp(dateStr: string): string {
 function smsPausedCopy(reason: SmsBlockReason | null): string {
   switch (reason) {
     case "assignment_pending":
-      return "Your campaign is approved, and Telnyx is linking your phone number to it. You can reply once assignment finishes.";
+      return "Your campaign is approved, and your business number is being linked to it. You can reply once setup finishes.";
     case "assignment_failed":
       return "Your campaign is approved, but phone number assignment needs attention before replies can send.";
     case "missing_phone_number":

@@ -192,6 +192,14 @@ afterEach(() => {
 });
 
 describe("POST /api/onboarding/refresh-status", () => {
+  it("returns a normal waiting response for a submitted brand without a campaign", async () => {
+    setBusinessRead({ data: { ...SNAPSHOT, brand_status: "pending", telnyx_campaign_id: null }, error: null });
+    mocks.getCampaignAssignmentSafetyBlock.mockReturnValue("brand_not_approved");
+    const { response, body } = await invoke();
+    expect(response.status).toBe(200);
+    expect(body.message).toContain("continue automatically");
+    expect(mocks.retrieveCampaign).not.toHaveBeenCalled();
+  });
   it("returns workspace lookup failures before auth or Telnyx reconciliation", async () => {
     mocks.requireWorkspaceRouteAccess.mockResolvedValue({
       ok: false,
@@ -444,7 +452,7 @@ describe("POST /api/onboarding/refresh-status", () => {
       expect(body).toEqual({
         code: "carrier_identity_mismatch",
         error:
-          "Telnyx returned a campaign that does not match this registration. No changes were made.",
+          "We could not verify the campaign for this registration. No changes were made.",
       });
       expect(mocks.appendRegistrationEvent).toHaveBeenCalledWith({
         businessId: BUSINESS_ID,
@@ -484,7 +492,7 @@ describe("POST /api/onboarding/refresh-status", () => {
     expect(body).toEqual({
       reconciled: false,
       providerStatus: "MNO_PENDING",
-      message: "Telnyx has not reported a terminal campaign decision yet.",
+      message: "Your SMS campaign is still under carrier review.",
     });
     expect(mocks.mapCampaignStatus).toHaveBeenCalledWith({
       campaignStatus: "MNO_PENDING",
@@ -519,7 +527,7 @@ describe("POST /api/onboarding/refresh-status", () => {
     expect(body).toEqual({
       reconciled: false,
       providerStatus: "MNO_PENDING",
-      message: "Telnyx has not reported a terminal campaign decision yet.",
+      message: "Your SMS campaign is still under carrier review.",
     });
     expect(JSON.stringify(body)).not.toContain("audit dependency secret");
     expectNoReconciliation();
@@ -552,7 +560,7 @@ describe("POST /api/onboarding/refresh-status", () => {
       reconciled: true,
       repaired: false,
       providerStatus: "MNO_PROVISIONED",
-      message: "Carrier status updated from Telnyx.",
+      message: "Carrier status updated.",
     });
     expect(mocks.applyObservedCampaignStatus).toHaveBeenCalledTimes(1);
     expect(mocks.applyObservedCampaignStatus).toHaveBeenCalledWith({
@@ -669,7 +677,7 @@ describe("POST /api/onboarding/refresh-status", () => {
     expect(response.status).toBe(502);
     expect(body).toEqual({
       code: "carrier_status_unavailable",
-      error: "Telnyx status could not be loaded. Please try again.",
+      error: "Carrier status could not be loaded. Please try again.",
     });
     const serializedBody = JSON.stringify(body);
     expect(serializedBody).not.toContain("secret Telnyx");
@@ -728,7 +736,7 @@ describe("POST /api/onboarding/refresh-status", () => {
       reconciled: true,
       repaired: false,
       providerStatus: "MNO_REJECTED",
-      message: "Carrier status updated from Telnyx.",
+      message: "Carrier status updated.",
     });
     expect(mocks.applyObservedCampaignStatus).toHaveBeenCalledWith({
       snapshot: SNAPSHOT,

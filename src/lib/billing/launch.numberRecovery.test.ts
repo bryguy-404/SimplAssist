@@ -117,6 +117,7 @@ vi.mock("@/lib/onboarding/contentQuality.server", () => ({
 }));
 
 import { attemptPaidLaunch } from "./launch";
+import { BrandVerificationPendingError } from "@/lib/messaging/registration/pendingBrand";
 import { TextingUpgradeProvisioningStoppedError } from "./textingUpgradeActivation.server";
 import {
   CarrierRejectionSupportRequiredError,
@@ -268,6 +269,15 @@ beforeEach(() => {
 });
 
 describe("attemptPaidLaunch carrier rejection guard", () => {
+  it("records a normal brand wait as submitted, preserving the claim and resources for continuation", async () => {
+    queueHappyPathThrough({ data: null, error: null }, { error: null }, { error: null });
+    mocks.registerCampaign.mockRejectedValue(new BrandVerificationPendingError());
+    expect(await attemptPaidLaunch(BUSINESS_ID, "stripe_finalize")).toEqual({ status: "submitted" });
+    expect(mocks.markRegistrationFailed).not.toHaveBeenCalled();
+    expect(mocks.markRegistrationSubmitted).toHaveBeenCalledWith(BUSINESS_ID, "2026-07-15T00:00:00.000Z");
+    expect(mocks.ensureCampaignAssignmentForBusiness).not.toHaveBeenCalled();
+    expect(mocks.archiveAndClearRejectedBrand).not.toHaveBeenCalled();
+  });
   it.each([
     ["brand-only", { brand_status: "rejected", campaign_status: null }],
     ["campaign-only", { brand_status: "approved", campaign_status: "rejected" }],

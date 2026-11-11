@@ -111,6 +111,13 @@ export async function POST() {
   }
 
   const safetyBlock = getCampaignAssignmentSafetyBlock(snapshot);
+  if ((safetyBlock === "brand_not_approved" || safetyBlock === "missing_campaign_id") &&
+    snapshot.telnyx_brand_id && !snapshot.telnyx_campaign_id &&
+    snapshot.onboarding_registration_status === "submitted" && !snapshot.onboarding_registration_error) {
+    const state = await loadReadOnlyState(user.id, snapshot.id);
+    return NextResponse.json({ state, reconciled: false,
+      message: "Business verification and SMS setup will continue automatically. You do not need to resubmit." });
+  }
   if (safetyBlock) {
     await auditRefresh(snapshot, {
       outcome: "blocked",
@@ -149,7 +156,7 @@ export async function POST() {
     return NextResponse.json(
       {
         code: "carrier_status_unavailable",
-        error: "Telnyx status could not be loaded. Please try again.",
+        error: "Carrier status could not be loaded. Please try again.",
       },
       { status: 502 }
     );
@@ -172,7 +179,7 @@ export async function POST() {
       {
         code: "carrier_identity_mismatch",
         error:
-          "Telnyx returned a campaign that does not match this registration. No changes were made.",
+          "We could not verify the campaign for this registration. No changes were made.",
       },
       { status: 409 }
     );
@@ -200,7 +207,7 @@ export async function POST() {
       reconciled: false,
       providerStatus:
         providerCampaignStatus ?? providerSubmissionStatus ?? providerStatus,
-      message: "Telnyx has not reported a terminal campaign decision yet.",
+      message: "Your SMS campaign is still under carrier review.",
     });
   }
 
@@ -374,7 +381,7 @@ export async function POST() {
     providerStatus:
       providerCampaignStatus ?? providerSubmissionStatus ?? providerStatus,
     message: transition.statusChanged
-      ? "Carrier status updated from Telnyx."
+      ? "Carrier status updated."
       : "Carrier status is already up to date.",
   });
 }

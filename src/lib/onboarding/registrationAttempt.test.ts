@@ -9,7 +9,7 @@ vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { from: mocks.from },
 }));
 
-import { markRegistrationSubmitted } from "./registrationAttempt";
+import { claimRegistrationAttempt, markRegistrationSubmitted } from "./registrationAttempt";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000123";
 const STARTED_AT = "2026-08-28T12:00:00.000Z";
@@ -44,6 +44,32 @@ function queueResults(...results: unknown[]) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+describe("claim pending brand continuation", () => {
+  const pending = { id: BUSINESS_ID, onboarding_registration_status: "submitted",
+    onboarding_registration_started_at: STARTED_AT, onboarding_registration_submitted_at: STARTED_AT,
+    onboarding_registration_error: null, telnyx_brand_id: "brand", telnyx_campaign_id: null, brand_status: "approved" };
+  it("claims an approved unfinished campaign with resource and approval guards", async () => {
+    queueResults({ data: pending, error: null }, { data: [{ ...pending, onboarding_registration_status: "submitting" }], error: null });
+    expect(await claimRegistrationAttempt(BUSINESS_ID)).toMatchObject({ claimed: true, claimedFrom: "pending_brand" });
+    expect(chains[1].eq).toHaveBeenCalledWith("onboarding_registration_status", "submitted");
+    expect(chains[1].eq).toHaveBeenCalledWith("telnyx_brand_id", "brand");
+    expect(chains[1].eq).toHaveBeenCalledWith("brand_status", "approved");
+    expect(chains[1].is).toHaveBeenCalledWith("telnyx_campaign_id", null);
+  });
+  it.each([{ brand_status: "pending" }, { brand_status: "rejected" }, { telnyx_campaign_id: "campaign" },
+    { onboarding_registration_error: "A real failure" }, { telnyx_brand_id: null }])(
+    "does not claim an ineligible or completed submitted row: %j", async (change) => {
+      queueResults({ data: { ...pending, ...change }, error: null });
+      expect(await claimRegistrationAttempt(BUSINESS_ID)).toMatchObject({ claimed: false });
+      expect(chains).toHaveLength(1);
+    });
+  it("does not acquire a second claim when another continuation wins", async () => {
+    const submitting = { ...pending, onboarding_registration_status: "submitting" };
+    queueResults({ data: pending, error: null }, { data: [], error: null }, { data: submitting, error: null });
+    expect(await claimRegistrationAttempt(BUSINESS_ID)).toMatchObject({ claimed: false, reason: "already_submitting" });
+  });
 });
 
 describe("markRegistrationSubmitted", () => {

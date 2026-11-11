@@ -266,7 +266,7 @@ export function OwnerVoiceSettingsContent({
     draft.textFallbackEnabled !== settings.preferences.textFallbackEnabled;
   const blockedVoiceChoice = draft.mode === "voice" && settings.preferences.mode !== "voice" && !settings.canEnableVoice;
   return (
-    <section aria-labelledby={headingId} aria-busy={Boolean(busy)} className={clsx("p-6", card)}>
+    <section id={variant === "settings" ? "call-answering" : undefined} aria-labelledby={headingId} aria-busy={Boolean(busy)} className={clsx("scroll-mt-6 p-6", card)}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 id={headingId} className={clsx("text-lg font-semibold", ink)}>

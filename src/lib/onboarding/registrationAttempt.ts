@@ -11,11 +11,15 @@ export interface AttemptRow {
   onboarding_registration_started_at: string | null;
   onboarding_registration_submitted_at: string | null;
   onboarding_registration_error: string | null;
+  telnyx_brand_id?: string | null;
+  telnyx_campaign_id?: string | null;
+  brand_status?: string | null;
 }
 
 export type RegistrationClaimOrigin =
   | "not_started"
   | "failed"
+  | "pending_brand"
   | "stale_submitting";
 
 export type RegistrationAttemptClaim =
@@ -59,6 +63,10 @@ export async function claimRegistrationAttempt(
     origin = "not_started";
   } else if (observedStatus === "failed") {
     origin = "failed";
+  } else if (observedStatus === "submitted" && observed?.telnyx_brand_id &&
+    !observed.telnyx_campaign_id && observed.brand_status === "approved" &&
+    !observed.onboarding_registration_error) {
+    origin = "pending_brand";
   } else if (
     observedStatus === "submitting" &&
     (observedStartedAt === null || observedStartedAt < staleBefore)
@@ -91,6 +99,12 @@ export async function claimRegistrationAttempt(
       observedStartedAt === null
         ? query.is("onboarding_registration_started_at", null)
         : query.eq("onboarding_registration_started_at", observedStartedAt);
+  }
+
+  if (origin === "pending_brand") {
+    query = query.eq("telnyx_brand_id", observed!.telnyx_brand_id!)
+      .is("telnyx_campaign_id", null).eq("brand_status", "approved")
+      .is("onboarding_registration_error", null);
   }
 
   const { data, error } = await query
@@ -191,7 +205,7 @@ async function readRegistrationAttempt(
   const { data, error } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id, onboarding_registration_status, onboarding_registration_started_at, onboarding_registration_submitted_at, onboarding_registration_error"
+      "id, onboarding_registration_status, onboarding_registration_started_at, onboarding_registration_submitted_at, onboarding_registration_error, telnyx_brand_id, telnyx_campaign_id, brand_status"
     )
     .eq("id", businessId)
     .maybeSingle<AttemptRow>();

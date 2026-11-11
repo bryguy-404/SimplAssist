@@ -95,7 +95,7 @@ const baseBusiness = {
     | "callback"
     | null,
   goal_url: null as string | null,
-  brand_status: null as string | null,
+  brand_status: "approved" as string | null,
   campaign_status: null as string | null,
   brand_rejection_reason: null as string | null,
   campaign_rejection_reason: null as string | null,
@@ -332,6 +332,20 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
+});
+
+describe("campaign business verification prerequisite", () => {
+  it.each(["pending", null])("waits for a %s brand before preflight or campaign fees", async (status) => {
+    business.brand_status = status;
+    await expect(registerCampaign(BUSINESS_ID)).rejects.toMatchObject({ name: "BrandVerificationPendingError" });
+    expect(mocks.qualify).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+  it("handles provider propagation lag as waiting even after the local approval arrives", async () => {
+    mocks.qualify.mockRejectedValueOnce({ status: 400, error: [{ code: 527, description: "Brand registration status pending" }] });
+    await expect(registerCampaign(BUSINESS_ID)).rejects.toMatchObject({ name: "BrandVerificationPendingError" });
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
 });
 
 describe("goal-aware signup campaign filing", () => {

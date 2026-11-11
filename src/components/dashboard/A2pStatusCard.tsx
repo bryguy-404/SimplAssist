@@ -124,7 +124,7 @@ function AssignmentRow({
         <div className="flex-1 min-w-0">
           <p className={`text-sm font-medium ${ink}`}>Phone number assignment</p>
           <p className={`text-xs ${body}`}>
-            Your Telnyx number must be linked to the approved SMS campaign.
+            Your business number must be linked to the approved SMS campaign.
           </p>
         </div>
         <AssignmentBadge status={status} />
@@ -141,7 +141,7 @@ function smsReadyCopy(reason: SmsBlockReason | null): string {
     case 'campaign_not_approved':
       return 'Available once your campaign is approved.';
     case 'assignment_pending':
-      return 'Campaign approved. Waiting for Telnyx to finish phone number assignment.';
+      return 'Campaign approved. We are finishing your business number setup.';
     case 'assignment_failed':
       return 'Campaign approved, but phone number assignment needs attention.';
     case 'missing_phone_number':

@@ -1,4 +1,5 @@
 import "server-only";
+import { BrandVerificationPendingError } from "@/lib/messaging/registration/pendingBrand";
 
 import {
   resolveBusinessOperationalControls,
@@ -101,7 +102,7 @@ const EXISTING_BRAND_RETRY_MESSAGE =
 export const SERVICES_FAQS_REQUIRED_MESSAGE =
   "Add at least 3 distinct services and 3 answered FAQs so your AI has enough accurate information to help customers.";
 
-type LaunchSource = "stripe_finalize" | "stripe_webhook" | "onboarding_retry" | "texting_upgrade";
+type LaunchSource = "stripe_finalize" | "stripe_webhook" | "onboarding_retry" | "texting_upgrade" | "registration_continuation";
 
 export type LaunchResult =
   | { status: "submitted" | "in_progress" | "already_submitted"; message?: string }
@@ -288,7 +289,7 @@ export async function attemptPaidLaunch(
     // The retry-only risk gate lives INSIDE the try so a transient failure
     // here funnels into the catch's markRegistrationFailed (immediately
     // retryable) instead of stranding the claimed row in 'submitting'.
-    if (claim.claimedFrom === "failed" || claim.claimedFrom === "stale_submitting") {
+    if (claim.claimedFrom !== "not_started") {
       // Run AFTER the claim so it keys on the atomic claim origin rather
       // than a pre-claim snapshot (a rejection webhook landing mid-request
       // cannot slip an unscreened resubmission through). Origin
@@ -448,6 +449,18 @@ export async function attemptPaidLaunch(
     await reconcileTextingUpgradeActivationForBusiness(businessId);
     return { status: "submitted" };
   } catch (err) {
+    if (err instanceof BrandVerificationPendingError) {
+      // The brand was submitted successfully. Preserve its saved resources and
+      // release only this claim into a durable waiting state. Approval webhooks
+      // and background reconciliation resume the unfinished campaign filing.
+      await assertNoCarrierRejectionForBusiness(businessId);
+      const waiting = await markRegistrationSubmitted(businessId, claim.startedAt);
+      if (!waiting.completed) {
+        await assertNoCarrierRejectionForBusiness(businessId);
+        return { status: "in_progress" };
+      }
+      return { status: "submitted" };
+    }
     if (err instanceof TextingUpgradeProvisioningStoppedError) {
       return { status: "billing_required", message: err.message };
     }

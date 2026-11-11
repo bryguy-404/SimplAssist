@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrimaryGoal } from "@/types/database";
 
 const mocks = vi.hoisted(() => ({
+  getOwnerVoiceSettings: vi.fn(),
   redirect: vi.fn(),
   getDashboardUpgradePrompt: vi.fn(async () => null),
   getDashboardReviewSetup: vi.fn<() => Promise<"add_link" | "finish_setup" | null>>(async () => null),
@@ -28,7 +29,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/dashboard/upgradePrompt.server", () => ({ getDashboardUpgradePrompt: mocks.getDashboardUpgradePrompt }));
 vi.mock("@/lib/dashboard/reviewSetup.server", () => ({ getDashboardReviewSetup: mocks.getDashboardReviewSetup }));
-vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
+vi.mock("next/navigation", () => ({ redirect: mocks.redirect, useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock("@/lib/voice/access.server", () => ({ getOwnerVoiceSettings: mocks.getOwnerVoiceSettings }));
 vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
   requireWorkspacePageAccess: mocks.requireWorkspacePageAccess,
 }));
@@ -103,6 +105,7 @@ interface DashboardOverviewProps {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.getOwnerVoiceSettings.mockResolvedValue(null);
   mocks.getDashboardReviewSetup.mockResolvedValue(null);
   mocks.redirect.mockImplementation((path: string) => {
     throw new Error(`redirect:${path}`);
@@ -332,6 +335,20 @@ async function renderedDashboardOverviewProps() {
 }
 
 describe("DashboardPage query scheduling", () => {
+  it("loads voice setup only for active Full Suite and renders the activation prompt", async () => {
+    configureResolvedDashboardWithSavedGuardrails();
+    mocks.getDashboardPageEntitlements.mockResolvedValue({ status: "resolved", entitlements: { ...ENTITLEMENTS, plan: "full" } });
+    mocks.getOwnerVoiceSettings.mockResolvedValue({ visible: true, accessSource: "commercial", canEnableVoice: true,
+      preferences: { mode: "text", textFallbackEnabled: true, revision: 1 } });
+    const html = renderToStaticMarkup(await DashboardPage());
+    expect(mocks.getOwnerVoiceSettings).toHaveBeenCalledWith(BUSINESS_ID);
+    expect(html).toContain("Set up voice answering");
+  });
+  it("does not fetch voice setup for a plan without voice", async () => {
+    configureResolvedDashboardWithSavedGuardrails();
+    await DashboardPage();
+    expect(mocks.getOwnerVoiceSettings).not.toHaveBeenCalled();
+  });
   it("links incomplete review setup to Settings and removes the invitation when ready", async () => {
     configureResolvedDashboardWithSavedGuardrails();
     mocks.getDashboardReviewSetup.mockResolvedValue("add_link");

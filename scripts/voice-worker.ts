@@ -1,4 +1,5 @@
 import { createDisclosureReplyClassifier } from "../src/lib/voice/disclosure";
+import { createRegistrationHeartbeat } from "./registration-heartbeat";
 import { VoicePreparations } from "../src/lib/voice/preparation";
 import { createVoiceActionClient } from "../src/lib/voice/actionClient";
 import { createServer } from "node:http";
@@ -313,6 +314,9 @@ server.on("upgrade", (req, socket, head) => {
 
 const probeTimer = setInterval(() => void probe(), 15000);
 const maintenanceTimer = setInterval(() => void maintenance(), 15000);
+const registrationHeartbeat = createRegistrationHeartbeat(appUrl, internalToken);
+const registrationTimer = setInterval(() => void registrationHeartbeat.run(), 60_000);
+void registrationHeartbeat.run();
 void maintenance();
 void probe();
 server.listen(Number(process.env.PORT || 3002), "0.0.0.0", () =>
@@ -324,6 +328,8 @@ async function shutdown() {
   draining = true;
   clearInterval(probeTimer);
   clearInterval(maintenanceTimer);
+  clearInterval(registrationTimer);
+  registrationHeartbeat.stop();
   server.close();
   preparations.closeAll();
   const deadline = setTimeout(() => process.exit(1), 25000);

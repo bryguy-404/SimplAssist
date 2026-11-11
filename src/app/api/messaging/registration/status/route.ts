@@ -31,6 +31,7 @@ import {
 import { REJECTION_SUPPORT_MESSAGE } from "@/lib/onboarding/rejectionGuidance";
 import type { RegistrationStatus } from "@/types/database";
 import { handleSharedBrandEvent } from "@/lib/messaging/sharedBrandEvents.server";
+import { continuePendingBrandRegistration } from "@/lib/onboarding/continueRegistration.server";
 
 // Telnyx 10DLC brand/campaign status webhook receiver. Phase 3 wires this URL
 // into every brand and campaign it creates; Phase 4 (this file) updates the
@@ -333,6 +334,12 @@ async function processClaimedEvent(
         );
         throw err;
       }
+    }
+
+    if (kind === "brand" && mapped.dbStatus === "approved") {
+      // Repeat on a redelivery even if the status write already succeeded.
+      // An early webhook during the original launch is recovered by the sweep.
+      await continuePendingBrandRegistration(business.id);
     }
 
     if (mapped.isTerminal && statusChanged) {

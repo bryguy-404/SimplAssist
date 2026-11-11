@@ -23,6 +23,7 @@ function stateWithRejection(args: {
 }): OnboardingState {
   return {
     businessId: "business-1",
+    billing: { plan: "full" },
     registration: {
       status: args.status ?? "failed",
       holdReason: args.holdReason ?? null,
@@ -58,6 +59,16 @@ function render(state: OnboardingState): string {
 }
 
 describe("CarrierReviewStatus rejection actions", () => {
+  it("explains the business verification wait without a retry or failure alert", () => {
+    const state = stateWithRejection({ brandStatus: "pending", campaignStatus: null, status: "submitted" });
+    state.registration.awaitingCampaignSubmission = true;
+    const html = render(state);
+    expect(html).toContain("Business verification is in progress");
+    expect(html).toContain("continue SMS registration automatically");
+    expect(html).toContain("Voice answering stays off until you enable it");
+    expect(html).not.toContain("Registration needs another try");
+    expect(html).not.toContain("Retry registration");
+  });
   it.each([
     [
       "brand-only",

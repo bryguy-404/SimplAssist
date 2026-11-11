@@ -142,6 +142,7 @@ export interface OnboardingBrandVerification {
 }
 
 export interface OnboardingRegistrationSnapshot {
+  awaitingCampaignSubmission?: boolean;
   status: OnboardingRegistrationStatus;
   holdReason: RegistrationHoldReason | null;
   startedAt: string | null;

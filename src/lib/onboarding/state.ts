@@ -804,6 +804,8 @@ async function getOnboardingContextForBusiness(
       chatOnlyCheckoutPaused,
     },
     registration: {
+      awaitingCampaignSubmission: Boolean(business.telnyx_brand_id && !business.telnyx_campaign_id &&
+        business.onboarding_registration_status === "submitted" && !business.onboarding_registration_error),
       status: normalizeRegistrationStatus(business),
       holdReason: business.has_ein === true ? null : "held_no_ein",
       startedAt: business.onboarding_registration_started_at,

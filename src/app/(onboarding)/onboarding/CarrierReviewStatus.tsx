@@ -119,6 +119,8 @@ export function CarrierReviewStatus({
         ? 'Add your EIN to continue'
         : registration.status === 'failed'
           ? 'Registration needs another try'
+          : registration.awaitingCampaignSubmission
+            ? registration.brandStatus === 'approved' ? 'Preparing your SMS registration' : 'Business verification is in progress'
           : 'Carrier review is underway';
 
   const copy = statusCopy(state);
@@ -224,9 +226,16 @@ export function CarrierReviewStatus({
           )}
       </div>
 
+      {state.billing.plan === 'full' && !carrierRejected && registration.status !== 'failed' && (
+        <p className="text-sm text-stone-600 dark:text-[#bdbdbf]">
+          Full Suite includes AI voice answering. Once setup is complete, go to Settings → Call answering,
+          choose AI voice answering, and save. Voice answering stays off until you enable it.
+        </p>
+      )}
+
       <div className={`space-y-3 p-4 ${tile}`}>
         <StatusLine label="Business verification" value={registration.brandStatus ?? 'not submitted'} />
-        <StatusLine label="SMS campaign" value={registration.campaignStatus ?? 'not submitted'} />
+        <StatusLine label="SMS campaign" value={registration.awaitingCampaignSubmission ? registration.brandStatus === 'approved' ? 'preparing submission' : 'waiting for business verification' : registration.campaignStatus ?? 'not submitted'} />
         <StatusLine label="Phone number link" value={registration.assignmentStatus ?? 'not assigned'} />
         <StatusLine label="SMS sending" value={registration.smsReady ? 'active' : 'paused'} />
       </div>
@@ -376,8 +385,14 @@ function statusCopy(state: OnboardingState): string {
     return 'Something interrupted the registration submit. Any saved carrier IDs will be reused when you retry.';
   }
 
+  if (registration.awaitingCampaignSubmission) {
+    return registration.brandStatus === 'approved'
+      ? 'Business verification is approved. We are preparing the next step automatically. You do not need to resubmit.'
+      : 'Your business details were submitted successfully. We will continue SMS registration automatically after verification. You do not need to retry.';
+  }
+
   if (registration.campaignStatus === 'approved' && registration.assignmentStatus !== 'assigned') {
-    return 'Your campaign is approved. Telnyx is linking your phone number before SMS can go live.';
+    return 'Your campaign is approved. We are linking your business number before texting can go live.';
   }
 
   if (registration.brandStatus === 'approved') {

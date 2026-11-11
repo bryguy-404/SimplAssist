@@ -99,10 +99,11 @@ describe("registration-status business branding", () => {
       context: "registrationStatus:brand_approved",
       message: {
         to: ["owner@example.com"],
-        subject: "Your Alpha Dog Agency business is approved to send SMS",
+        subject: "Your Alpha Dog Agency business verification is approved",
       },
     });
     expect(sentMessage().message.text).toContain("— The Alpha Dog Agency Team");
+    expect(sentMessage().message.text).toContain("business verification alone does not activate it");
     expect(sentMessage().message.html).toContain("Bryan&#39;s Plumbing");
   });
 

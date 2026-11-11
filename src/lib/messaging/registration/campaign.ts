@@ -4,6 +4,7 @@ import { ensureSignupReviewSmsKeywords } from "@/lib/reviews/signupKeywords.serv
 import { reviewSignupDescription, reviewSignupSamples } from "./reviewSignup";
 import { normalizeHttpsGoalUrl } from "@/lib/goals/primaryGoal";
 import { telnyx } from "@/lib/messaging/client";
+import { BrandVerificationPendingError, isBrandVerificationPendingResponse } from "./pendingBrand";
 import {
   deactivateTelnyxCampaign,
   TelnyxRemoteMutationAuthorizationError,
@@ -1037,6 +1038,12 @@ export async function registerCampaign(businessId: string): Promise<void> {
     );
   }
 
+  // Creating a brand does not mean asynchronous identity verification finished.
+  // Keep this before campaign preflight or any charged campaign creation.
+  if (business.brand_status !== "approved") {
+    throw new BrandVerificationPendingError();
+  }
+
   if (!business.use_case_description) {
     throw new Error(
       `[registration:campaign] Business ${businessId} is missing use_case_description`
@@ -1336,6 +1343,9 @@ export async function registerCampaign(businessId: string): Promise<void> {
     });
   } catch (err) {
     if (!campaignPreflightChecked) {
+      if (isBrandVerificationPendingResponse(err)) {
+        throw new BrandVerificationPendingError();
+      }
       await appendRegistrationEvent({
         businessId,
         eventType: "campaign_preflight_checked",

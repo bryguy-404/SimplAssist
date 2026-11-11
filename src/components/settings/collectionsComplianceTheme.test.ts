@@ -48,7 +48,7 @@ describe("Phase 2 Diff 8 settings collections and compliance theme", () => {
 
     expect(complianceSource).toContain('title="SimplAssist-hosted (default)"');
     expect(complianceSource).toContain(
-      'description="We generate and host your privacy policy and terms at SimplAssist URLs. Zero effort — and Telnyx automatically receives the right URLs."',
+      'description="We generate and host your privacy policy and terms at SimplAssist URLs and automatically include these links in your carrier registration."',
     );
     expect(complianceSource.match(/SimplAssist/g)).toHaveLength(2);
   });

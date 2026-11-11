@@ -2,6 +2,8 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import UpgradePrompt from '@/components/dashboard/UpgradePrompt';
 import ReviewSetupPrompt from '@/components/dashboard/ReviewSetupPrompt';
+import VoiceSetupPrompt from '@/components/dashboard/VoiceSetupPrompt';
+import { getOwnerVoiceSettings } from '@/lib/voice/access.server';
 import { getDashboardUpgradePrompt } from '@/lib/dashboard/upgradePrompt.server';
 import { getDashboardReviewSetup } from '@/lib/dashboard/reviewSetup.server';
 import DashboardOverview from '@/components/dashboard/DashboardOverview';
@@ -40,7 +42,7 @@ export default async function DashboardPage() {
   if (entitlementResult.status === 'subscription_missing') redirect('/onboarding');
   const { entitlements } = entitlementResult;
   const smsEnabled = planRequiresSmsProvisioning(entitlements.plan);
-  const [dashboardData, smsReadiness, upgradePrompt, reviewSetup] = await Promise.all([
+  const [dashboardData, smsReadiness, upgradePrompt, reviewSetup, voiceSettings] = await Promise.all([
     Promise.all([
       supabase.from('conversations').select('*', { count: 'exact', head: true }).eq('business_id', business.id),
       supabase.from('conversations').select('*', { count: 'exact', head: true }).eq('business_id', business.id).eq('status', 'active'),
@@ -90,6 +92,9 @@ export default async function DashboardPage() {
         }),
     getDashboardUpgradePrompt(business.id, user.id),
     getDashboardReviewSetup(context, entitlements),
+    entitlements.active && entitlements.plan === 'full'
+      ? getOwnerVoiceSettings(business.id).catch(() => null)
+      : Promise.resolve(null),
   ]);
 
   const [
@@ -169,6 +174,8 @@ export default async function DashboardPage() {
         status={entitlements.status}
         pausedFeatures={pausedFeatures}
       />
+
+      <VoiceSetupPrompt settings={voiceSettings} />
 
       {/* Calendar connection warning */}
       {!signupMode && canUseCalendar && !calendarToken && (

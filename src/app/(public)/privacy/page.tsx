@@ -11,11 +11,11 @@ export default function PrivacyPage() {
   return (
     <LegalDocLayout
       title="Privacy Policy"
-      lastUpdated="November 8, 2026"
+      lastUpdated="November 12, 2026"
       siblingHref="/terms"
       siblingLabel="Terms of Service"
     >
-      <p className={`-mt-8 text-sm ${body}`}>Effective date: November 8, 2026</p>
+      <p className={`-mt-8 text-sm ${body}`}>Effective date: November 12, 2026</p>
 
       <LegalSection title="1. Introduction">
         <p>
@@ -86,30 +86,38 @@ export default function PrivacyPage() {
         </p>
 
         <p className="mb-4 font-semibold">
-          Consent to Receive Text Messages
+          How Text Messages Are Sent
         </p>
         <p className="mb-4">
-          By calling, texting, or chatting with a business powered by SimplAssist, you (the
-          end user/customer) consent to receive automated text messages at the phone number you
-          provided. These messages may include responses to your inquiry, appointment confirmations,
-          follow-up communications, and other messages related to the business you contacted.
-          Consent is not a condition of purchase.
+          When you text a business, SimplAssist may send automated replies relevant to your inquiry.
+          During an AI voice call, the assistant asks permission before sending a requested website
+          link or booking text and waits for a separate confirmation.
         </p>
         <p className="mb-4">
-          By providing your phone number to a business using SimplAssist, you give express written
-          consent to receive automated SMS messages from that business and SimplAssist as described
-          above. You may receive roughly 1 to 10 messages per inquiry depending on your
-          conversation; overall message frequency varies.
+          Depending on the features enabled, SimplAssist may also send automatic missed-call or
+          technical-failure follow-up texts. The standard voicemail greeting explains that leaving
+          a message will result in a text. These automatic messages are not always preceded by a
+          separate permission check.
+        </p>
+        <p className="mb-4">
+          Ordinary webchat links are displayed in the chat. Using webchat, placing a call, providing
+          a phone number, or agreeing to save contact details does not by itself give permission
+          for SMS.
+        </p>
+        <p className="mb-4">
+          Businesses are responsible for obtaining and keeping evidence of any permission required
+          for their messages. This policy and a business owner&apos;s acceptance of it do not create
+          permission from individual recipients. Consent is not a condition of purchase.
         </p>
 
         <p className="mb-4 font-semibold">
           Opting Out
         </p>
         <p className="mb-4">
-          You can opt out of receiving text messages at any time by replying <strong>STOP</strong> to
-          any message. After opting out, you will receive one final confirmation message and no
-          further texts will be sent. To resume messages, text <strong>START</strong> to the same
-          number.
+          Reply <strong>STOP</strong> to a text from the business to opt out. Once processed, this
+          blocks further texts from that business; an opt-out confirmation may still be sent.
+          To resume messages, text <strong>START</strong> to the same number. This does not
+          automatically enroll you in separate messaging programs.
         </p>
 
         <p className="mb-4 font-semibold">
@@ -157,7 +165,8 @@ export default function PrivacyPage() {
           When the announcement is enabled, recording and transcript storage begin after it plays.
           The system may briefly process an interruption to handle an objection or repeat the
           announcement; that opening input is not saved in the call transcript. An approved
-          private tester may have acknowledged recording in advance.
+          private tester may have acknowledged recording in advance. This website disclosure does
+          not replace any notice or permission required during the actual call.
         </p>
         <p>
           Call audio recordings are retained for 30 days and then deleted through our automated

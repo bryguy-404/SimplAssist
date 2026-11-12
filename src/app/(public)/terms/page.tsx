@@ -11,7 +11,7 @@ export default function TermsPage() {
   return (
     <LegalDocLayout
       title="Terms of Service"
-      lastUpdated="September 24, 2026"
+      lastUpdated="November 12, 2026"
       siblingHref="/privacy"
       siblingLabel="Privacy Policy"
     >
@@ -67,10 +67,9 @@ export default function TermsPage() {
             and all other applicable federal and state regulations regarding text messaging.
           </li>
           <li>
-            You acknowledge that SimplAssist automatically handles opt-out requests. When an
-            end user replies <strong>STOP</strong>, they will be immediately unsubscribed from
-            future messages. You must not attempt to contact opted-out users through other means
-            via the platform.
+            SimplAssist processes recognized opt-out keywords such as <strong>STOP</strong> to
+            block further messages. You must honor opt-out requests and must not attempt to
+            contact opted-out users through other means via the platform.
           </li>
         </ul>
 
@@ -78,10 +77,19 @@ export default function TermsPage() {
           End User Consent Disclosure
         </p>
         <p className="mb-4">
-          By calling, texting, or chatting with a business powered by SimplAssist, end users
-          consent to receive automated text messages at the phone number provided. Message
-          frequency varies. Message and data rates may apply. Reply <strong>STOP</strong> to
-          opt out at any time. Reply <strong>HELP</strong> for assistance.
+          Customers may receive relevant replies to texts they initiate, separately confirmed link
+          or booking texts requested during AI calls, or automatic missed-call or technical-failure
+          follow-ups when those features are enabled. Not every automatic follow-up includes a
+          separate permission check. Calling, using webchat, providing a phone number, or agreeing
+          to save contact details does not by itself grant SMS permission. Ordinary webchat links
+          stay in the chat. Businesses must obtain and keep evidence of any required recipient
+          permission; accepting these terms does not supply that permission.
+        </p>
+        <p className="mb-4">
+          Message frequency varies. Message and data rates may apply. Reply <strong>STOP</strong>
+          {" "}to opt out at any time. To resume messages, text <strong>START</strong> to the same
+          number; this does not automatically enroll you in separate messaging programs.
+          Reply <strong>HELP</strong> for assistance.
         </p>
         <p>
           For more information, see our{" "}

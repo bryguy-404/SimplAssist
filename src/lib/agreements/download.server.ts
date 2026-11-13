@@ -28,7 +28,8 @@ export async function serviceAgreementDownload(businessId: string, agreementId: 
     return new NextResponse(html, { headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Content-Disposition": `${attachment ? "attachment" : "inline"}; filename="simplassist-agreement-${a.id}.html"`,
-      "Cache-Control": "private, no-store", "Vary": "Cookie",
+      // Preserve the archived text through CDN email obfuscation and other HTML transforms.
+      "Cache-Control": "private, no-store, no-transform", "Vary": "Cookie",
       "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
       "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; sandbox",
     } });

@@ -28,6 +28,7 @@ describe("historical agreement downloads", () => {
     expect(mocks.read).toHaveBeenCalledWith("owned-business", recordId);
     expect(response.headers.get("Content-Disposition")).toContain("attachment");
     expect(response.headers.get("Cache-Control")).toContain("no-store");
+    expect(response.headers.get("Cache-Control")).toContain("no-transform");
     const body = await response.text();
     expect(body).toContain(html); expect(body).toContain("historical-v1");
     expect(body).toContain("2026-11-12T12:34:56.000Z"); expect(body).toContain("cs_test_saved");
@@ -50,6 +51,7 @@ describe("historical agreement downloads", () => {
   it("serves the same saved record to the authorized admin", async () => {
     const response = await adminDownload(request(), { params: { businessId: "owned-business", agreementId: recordId } });
     expect(response.status).toBe(200); expect(await response.text()).toContain(html);
+    expect(response.headers.get("Cache-Control")).toContain("no-transform");
     expect(mocks.read).toHaveBeenCalledWith("owned-business", recordId);
   });
   it("refuses a corrupted archived document", async () => {

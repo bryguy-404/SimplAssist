@@ -1,4 +1,5 @@
 import "server-only";
+import { requireServiceAgreement, linkServiceAgreementReference } from "@/lib/agreements/service.server";
 import { reviewShared } from "@/lib/billing/sharedRegistrationErrors.server";
 import { createHash } from "node:crypto";
 import type Stripe from "stripe";
@@ -387,6 +388,7 @@ export async function createReviewSmsActivationCheckout(
   businessId: string,
   ownerId: string,
   origin: string,
+  serviceAgreement?: unknown,
 ) {
   requireRollout(businessId);
   const { business, account: a } = await ownerAccount(businessId, ownerId);
@@ -397,12 +399,14 @@ export async function createReviewSmsActivationCheckout(
   )
     throw new ReviewSmsError("review_sms_partner_grant_required");
   if (a.activation_paid_at) return { paid: true };
+  const agreementId = await requireServiceAgreement(businessId, ownerId, serviceAgreement, "review_texting");
   let op = await pendingOperation(a, "activation");
   // Once Checkout was authorized, recover its frozen receipt even when new
   // shared-brand admissions are disabled. Never reopen a revoked unpaid link.
   if (op && op.state !== "prepared" && op.payload.sharedRegistration) {
     const session = await activationSession(op);
     assertActivationSession(session, op, a);
+    await linkServiceAgreementReference(agreementId, "stripe_checkout", session.id);
     if (session.status === "complete") {
       await synchronizeReviewSmsCheckout(session);
       return { paid: session.payment_status === "paid" };
@@ -454,6 +458,7 @@ export async function createReviewSmsActivationCheckout(
     if (op) {
       let session = await activationSession(op);
       assertActivationSession(session, op, a);
+      await linkServiceAgreementReference(agreementId, "stripe_checkout", session.id);
       if (session.status === "complete") {
         await synchronizeReviewSmsCheckout(session);
         return { paid: session.payment_status === "paid" };
@@ -464,6 +469,7 @@ export async function createReviewSmsActivationCheckout(
         try { await stripe.checkout.sessions.expire(session.id); } catch { /* retrieve below */ }
         session = await stripe.checkout.sessions.retrieve(session.id);
         assertActivationSession(session, op, a);
+        await linkServiceAgreementReference(agreementId, "stripe_checkout", session.id);
       }
       if (session.status === "complete") {
         await synchronizeReviewSmsCheckout(session);
@@ -478,6 +484,7 @@ export async function createReviewSmsActivationCheckout(
   op ??= await acquire(a, "activation", payload);
   const session = await activationSession(op);
   assertActivationSession(session, op, a);
+  await linkServiceAgreementReference(agreementId, "stripe_checkout", session.id);
   if (session.status === "complete") {
     await synchronizeReviewSmsCheckout(session);
     return { paid: session.payment_status === "paid" };
@@ -697,6 +704,7 @@ export async function confirmReviewSmsRecurring(
   ownerId: string,
   operationId: string,
   quoteFingerprint: string,
+  serviceAgreement?: unknown,
 ) {
   requireRollout(businessId);
   const { account: a } = await ownerAccount(businessId, ownerId);
@@ -719,6 +727,9 @@ export async function confirmReviewSmsRecurring(
   }
   assertReplay(op);
   if (op.state === "prepared") {
+    const agreementId = await requireServiceAgreement(businessId, ownerId, serviceAgreement, "review_texting");
+    await linkServiceAgreementReference(agreementId, "review_sms_operation", op.id);
+    await linkServiceAgreementReference(agreementId, "stripe_subscription", a.source_subscription_id);
     if (
       a.state !== "ready_unpaid" ||
       !a.ready_expires_at ||

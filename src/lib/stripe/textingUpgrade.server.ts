@@ -1,4 +1,6 @@
 import "server-only";
+import { requireServiceAgreement, linkServiceAgreementReference } from "@/lib/agreements/service.server";
+
 import { normalizeStripeSubscriptionStatus } from "./subscriptionStatus";
 import type Stripe from "stripe";
 import { stripe } from "./client";
@@ -84,11 +86,11 @@ function updateParameters(op: SmsBillingOperation, upgradeId: string): Stripe.Su
     add_invoice_items: [{ price: op.setup_fee_price_id!, quantity: 1, metadata: { chat_texting_upgrade_id: upgradeId, sms_billing_operation_id: op.id } }],
   };
 }
-export async function confirmTextingUpgrade(businessId: string, ownerId: string, operationId: string, quoteFingerprint: string, starterAcknowledged: boolean) {
+export async function confirmTextingUpgrade(businessId: string, ownerId: string, operationId: string, quoteFingerprint: string, starterAcknowledged: boolean, serviceAgreement?: unknown) {
   const { loadTextingUpgradeContext } = await import("@/lib/billing/textingUpgrade.server");
   const c = await loadTextingUpgradeContext(businessId, ownerId);
   const u = c.upgrade;
-  if (u?.source_mode === "review_sms") return confirmReviewTextingConversion(businessId, ownerId, operationId, quoteFingerprint);
+  if (u?.source_mode === "review_sms") return confirmReviewTextingConversion(businessId, ownerId, operationId, quoteFingerprint, serviceAgreement);
   if (!u || u.billing_operation_id !== operationId || !c.operation || c.operation.owner_id !== ownerId) throw new TextingUpgradeError("texting_upgrade_operation_not_found", 404);
   let op = c.operation;
   if (op.source_fingerprint !== quoteFingerprint) throw new TextingUpgradeError("texting_upgrade_quote_changed");
@@ -106,6 +108,9 @@ export async function confirmTextingUpgrade(businessId: string, ownerId: string,
     await assertPrices(op);
     const refreshed = await preview(sub, op.target_price_id, op.setup_fee_price_id!, seconds(op.proration_at!));
     if (refreshed.amount_due !== op.quote.amountDueCents || refreshed.currency !== op.quote.currency) throw new TextingUpgradeError("texting_upgrade_quote_changed");
+    const agreementId = await requireServiceAgreement(businessId, ownerId, serviceAgreement, "texting_upgrade");
+    await linkServiceAgreementReference(agreementId, "billing_operation", op.id);
+    await linkServiceAgreementReference(agreementId, "stripe_subscription", u.source_subscription_id);
     op = operationSchema.parse(await textingUpgradeRpc("confirm_chat_texting_upgrade", { p_upgrade_id: u.id, p_owner_id: ownerId, p_operation_id: op.id, p_source_fingerprint: quoteFingerprint }));
   }
   if (op.state === "confirming" && !op.invoice_id) {

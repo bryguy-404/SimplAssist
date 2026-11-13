@@ -1,4 +1,6 @@
 import "server-only";
+import { requireServiceAgreement, linkServiceAgreementReference } from "@/lib/agreements/service.server";
+
 import { createHash } from "node:crypto";
 import type Stripe from "stripe";
 import { z } from "zod";
@@ -109,7 +111,7 @@ function assertRetryWindow(op: SmsBillingOperation) {
   if (Date.now() - Date.parse(op.created_at) >= 23 * 3600_000) throw new SmsBillingError("sms_billing_recovery_required");
 }
 
-export async function createSmsCheckout(args: { businessId: string; plan: SmsPlan; priceId: string; setupFeePriceId: string | null; successUrl: string; cancelUrl: string; mode: string }): Promise<string> {
+export async function createSmsCheckout(args: { agreementId?: string; businessId: string; plan: SmsPlan; priceId: string; setupFeePriceId: string | null; successUrl: string; cancelUrl: string; mode: string }): Promise<string> {
   const ownerId = await owner(args.businessId);
   const current = await localSubscription(args.businessId);
   let previousTerminalProof: Record<string, string> = {};
@@ -137,7 +139,11 @@ export async function createSmsCheckout(args: { businessId: string; plan: SmsPla
     if (op.setup_fee_price_id && op.setup_fee_price_id !== args.setupFeePriceId)
       throw new SmsBillingError("sms_billing_recovery_required");
   }
-  if (op.checkout_session_id) return recoverCheckout(op);
+  if (op.checkout_session_id) {
+    const url = await recoverCheckout(op);
+    await linkServiceAgreementReference(args.agreementId, "stripe_checkout", op.checkout_session_id);
+    return url;
+  }
   assertRetryWindow(op);
   if (op.state === "prepared") {
     if (!isPlanAvailable(op.target_plan)) throw new SmsBillingError("sms_billing_plan_unavailable");
@@ -147,7 +153,10 @@ export async function createSmsCheckout(args: { businessId: string; plan: SmsPla
       if (!fee.active || fee.currency !== "usd" || fee.unit_amount !== SETUP_FEE_CENTS || fee.type !== "one_time") throw new SmsBillingError("sms_billing_price_unavailable", 503);
     }
   }
-  return checkoutUrl(await materializeSmsCheckout(op), op);
+  const session = await materializeSmsCheckout(op);
+  const url = checkoutUrl(session, op);
+  await linkServiceAgreementReference(args.agreementId, "stripe_checkout", session.id);
+  return url;
 }
 /** Replays only the exact originally confirmed Checkout parameters. */
 async function materializeSmsCheckout(original: SmsBillingOperation): Promise<Stripe.Checkout.Session> {
@@ -247,15 +256,21 @@ export async function previewSmsPlanChange(businessId: string, ownerId: string, 
   return view(op);
 }
 
-export async function confirmSmsPlanChange(businessId: string, ownerId: string, operationId: string): Promise<BillingChangeView> {
+export async function confirmSmsPlanChange(businessId: string, ownerId: string, operationId: string, serviceAgreement?: unknown): Promise<BillingChangeView> {
   await owner(businessId, ownerId);
   let op = await operation(operationId, businessId);
   if (op.owner_id !== ownerId) throw new SmsBillingError("sms_billing_forbidden", 403);
   if (op.source_plan === "chat_only") throw new SmsBillingError("texting_upgrade_required");
+  let agreementId: string | undefined;
+  if (op.state === "prepared" && op.kind !== "downgrade") {
+    agreementId = await requireServiceAgreement(businessId, ownerId, serviceAgreement, "plan_change");
+    await linkServiceAgreementReference(agreementId, "billing_operation", op.id);
+    await linkServiceAgreementReference(agreementId, "stripe_subscription", op.expected_subscription_id);
+  }
   if (op.kind === "checkout") {
     if (op.state === "applied" || op.state === "expired") return view(op);
     const url = await createSmsCheckout({ businessId, plan: op.target_plan, priceId: op.target_price_id,
-      setupFeePriceId: op.setup_fee_price_id, successUrl: String(op.quote.successUrl), cancelUrl: String(op.quote.cancelUrl), mode: String(op.quote.mode) });
+      setupFeePriceId: op.setup_fee_price_id, successUrl: String(op.quote.successUrl), cancelUrl: String(op.quote.cancelUrl), mode: String(op.quote.mode), agreementId });
     const result = (await readSmsBillingChange(businessId, ownerId, op.id))!;
     return { ...result, ...(result.state !== "applied" && url.startsWith("https://checkout.stripe.com/") ? { paymentUrl: url } : {}) };
   }

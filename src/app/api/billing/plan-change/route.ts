@@ -1,11 +1,15 @@
+import { ServiceAgreementError } from "@/lib/agreements/errors";
+import { serviceAgreementFailure } from "@/lib/agreements/response";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 import { cancelSmsBillingOperation, confirmSmsPlanChange, previewSmsPlanChange, readSmsBillingChange, SmsBillingError } from "@/lib/stripe/smsBilling.server";
 
 const previewSchema = z.object({ plan: z.enum(["sms_only", "sms_and_chat", "full"]) }).strict();
+const confirmationSchema = z.object({ operationId: z.string().uuid(), serviceAgreement: z.unknown().optional() }).strict();
 const operationSchema = z.object({ operationId: z.string().uuid() }).strict();
 function failure(error: unknown) {
+  if (error instanceof ServiceAgreementError) return serviceAgreementFailure(error);
   if (error instanceof SmsBillingError) return NextResponse.json({ error: error.code }, { status: error.httpStatus });
   return NextResponse.json({ error: "sms_billing_unavailable" }, { status: 503 });
 }
@@ -31,9 +35,9 @@ export async function POST(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   const workspace = await context();
   if (!workspace.ok) return workspace.response;
-  const parsed = operationSchema.safeParse(await request.json().catch(() => null));
+  const parsed = confirmationSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
-  try { return NextResponse.json({ change: await confirmSmsPlanChange(workspace.access.business.id, workspace.access.user.id, parsed.data.operationId) }); }
+  try { return NextResponse.json({ change: await confirmSmsPlanChange(workspace.access.business.id, workspace.access.user.id, parsed.data.operationId, parsed.data.serviceAgreement) }); }
   catch (error) { return failure(error); }
 }
 export async function DELETE(request: NextRequest) {

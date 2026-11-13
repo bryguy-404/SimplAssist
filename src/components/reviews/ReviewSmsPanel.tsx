@@ -1,4 +1,5 @@
 "use client";
+import { ServiceAgreementField, useServiceAgreement } from "@/components/agreements/ServiceAgreementField";
 
 import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
 import { CheckCircle2, MessageSquare, RefreshCw } from "lucide-react";
@@ -207,6 +208,7 @@ export default function ReviewSmsPanel({
   const [quote, setQuote] = useState<ReviewSmsQuote | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [feeAgreed, setFeeAgreed] = useState(false);
+  const agreement = useServiceAgreement(active);
   const load = useCallback(async () => {
     const value = await reviewRequest<ReviewSmsOverview>(ENDPOINT);
     setOverview(value);
@@ -229,7 +231,7 @@ export default function ReviewSmsPanel({
     };
   }, [onStatusChanged]);
   async function perform(action: string) {
-    if (busy) return;
+    if (busy || ((action === "checkout" || action === "activate") && !agreement.ready)) return;
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -253,6 +255,7 @@ export default function ReviewSmsPanel({
         method: "POST",
         body: JSON.stringify({
           action,
+          ...((action === "checkout" || action === "activate") ? { serviceAgreement: agreement.confirmation } : {}),
           ...(action === "activate" && quote
             ? { operationId: quote.operationId, fingerprint: quote.fingerprint }
             : {}),
@@ -489,9 +492,9 @@ export default function ReviewSmsPanel({
                   account.activation_paid_at ? (
                     <p className={`text-sm ${body}`}>Your activation payment was received. Check status to follow the approval process.</p>
                   ) : activationRecovery ? (
-                    <button type="button" disabled={busy} onClick={() => perform("checkout")} className={`${btnPrimaryInline} disabled:opacity-50`}>
+                    <><ServiceAgreementField agreement={agreement} disabled={busy} /><button type="button" disabled={busy || !agreement.ready} onClick={() => perform("checkout")} className={`${btnPrimaryInline} disabled:opacity-50`}>
                       Continue activation
-                    </button>
+                    </button></>
                   ) : newActivationAllowed ? <>
                     <label className={`flex items-start gap-3 text-sm ${body}`}>
                       <input
@@ -504,9 +507,10 @@ export default function ReviewSmsPanel({
                       application and approval is required before review texts
                       can be sent.
                     </label>
+                    <ServiceAgreementField agreement={agreement} disabled={busy} />
                     <button
                       type="button"
-                      disabled={busy || !feeAgreed}
+                      disabled={busy || !feeAgreed || !agreement.ready}
                       onClick={() => perform("checkout")}
                       className={`${btnPrimaryInline} disabled:opacity-50`}
                     >
@@ -649,9 +653,10 @@ export default function ReviewSmsPanel({
                 {error}
               </p>
             ) : null}
+            <ServiceAgreementField agreement={agreement} disabled={busy} />
             <button
               type="button"
-              disabled={busy}
+              disabled={busy || !agreement.ready}
               onClick={() => perform("activate")}
               className={`${btnPrimaryInline} disabled:opacity-50`}
             >

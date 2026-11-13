@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { ServiceAgreementField, useServiceAgreement } from "@/components/agreements/ServiceAgreementField";
+
 import type { SubscriptionPlan } from "@/types/database";
 import { PulsingDot } from "@/components/ui/pulsing-dot";
 import { primaryCtaInlineClass } from "@/lib/glass";
@@ -14,17 +16,19 @@ export function BillingActions({
   mode: "checkout" | "portal";
   plan?: SubscriptionPlan;
 }) {
+  const agreement = useServiceAgreement(mode === "checkout");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleCheckout() {
+    if (!agreement.ready) return;
     setLoading(true);
     setError(null);
     try {
       const res = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan }),
+        body: JSON.stringify({ plan, serviceAgreement: agreement.confirmation }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -52,9 +56,9 @@ export function BillingActions({
   }
 
   return (
-    <div><button
+    <div><ServiceAgreementField agreement={agreement} disabled={loading} /><button
       onClick={handleCheckout}
-      disabled={loading}
+      disabled={loading || !agreement.ready}
       className={`${primaryCtaInlineClass} w-full py-2.5 text-sm`}
     >
       {loading ? (

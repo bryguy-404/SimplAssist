@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { ServiceAgreementLink } from '@/components/agreements/ServiceAgreementLink';
 import OwnerVoiceSettings from '@/components/settings/OwnerVoiceSettings';
 import OwnerBookingAlerts from '@/components/owner-booking-alerts/OwnerBookingAlerts';
 import { getOwnerVoiceSettings } from '@/lib/voice/access.server';
@@ -106,6 +107,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
         <ChevronRight className="h-5 w-5 shrink-0 text-stone-400 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
       </Link>}
 
+      <ServiceAgreementLink />
       {/* Phone Number */}
       {smsEnabled && <div className={`p-6 ${card}`}>
         <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Phone Number</h2>

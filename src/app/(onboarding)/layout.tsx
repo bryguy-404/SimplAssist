@@ -1,4 +1,6 @@
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
+import { SERVICE_AGREEMENTS_PATH } from '@/lib/agreements/shared';
 import { createClient } from '@/lib/supabase/server';
 import { getOnboardingStateForOwner } from '@/lib/onboarding/state';
 import { card, pageShell, fontStack, lightAmbient, darkAmbient } from '@/lib/theme-v2/theme';
@@ -100,6 +102,7 @@ export default async function OnboardingLayout({
 
       <div className="relative z-[1] w-full max-w-[720px]">
         <div className="mb-4 flex items-center justify-end gap-2">
+          <Link href={SERVICE_AGREEMENTS_PATH} className="mr-auto text-xs underline">Service agreement</Link>
           <OnboardingDeleteAccount />
           <OnboardingSignOut />
           <ThemeToggleV2 />

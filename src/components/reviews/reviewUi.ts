@@ -1,3 +1,4 @@
+import { SERVICE_AGREEMENT_ERRORS } from "@/lib/agreements/shared";
 export const REVIEW_TIMEZONES = [
   ["America/New_York", "Eastern"],
   ["America/Detroit", "Eastern — Detroit"],
@@ -12,6 +13,7 @@ export const REVIEW_TIMEZONES = [
 ] as const;
 
 const REASONS: Record<string, string> = {
+  ...SERVICE_AGREEMENT_ERRORS,
   email_missing: "No valid email address",
   phone_missing: "No valid phone number",
   customer_unavailable: "Customer is no longer available",

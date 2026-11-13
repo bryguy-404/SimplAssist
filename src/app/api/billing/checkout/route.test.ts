@@ -135,6 +135,7 @@ vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
 }));
 
 import { POST } from "./route";
+import { ServiceAgreementError } from "@/lib/agreements/service.server";
 import { REJECTION_SUPPORT_MESSAGE } from "@/lib/onboarding/rejectionGuidance";
 
 const BUSINESS = {
@@ -284,6 +285,16 @@ describe("first checkout requires completed onboarding", () => {
     return state;
   }
 
+  it.each(["chat_only", "sms_only", "sms_and_chat", "full"] as const)("blocks %s payment when agreement is missing or cannot be saved", async (plan) => {
+    for (const [code, status] of [["service_agreement_required", 400], ["service_agreement_unavailable", 503]] as const) {
+      configureFresh(plan);
+      agreementChecks.require.mockRejectedValueOnce(new ServiceAgreementError(code, status));
+      const response = await POST(request("onboarding", plan));
+      expect(response.status).toBe(status);
+      expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
+    }
+  });
+
   it.each([
     "plan_selection", "business_info", "business_hours", "services_faqs",
     "ai_settings", "legal_verification", "sms_use_case", "phone_number",
@@ -309,6 +320,7 @@ describe("first checkout requires completed onboarding", () => {
         BUSINESS.id, plan, expect.any(String), plan === "chat_only" ? null : "price_setup",
         expect.stringContaining("/onboarding?checkout=success"),
         expect.stringContaining("/onboarding?checkout=canceled"), "onboarding", true,
+        "12100000-0000-4000-8000-000000000001",
       );
     },
   );
@@ -364,6 +376,7 @@ describe("first checkout requires completed onboarding", () => {
       BUSINESS.id, "sms_and_chat", "price_growth", "price_setup",
       expect.stringContaining("/billing?success=true"),
       expect.stringContaining("/billing?canceled=true"), "billing", false,
+      "12100000-0000-4000-8000-000000000001",
     );
   });
 
@@ -540,6 +553,7 @@ describe("POST /api/billing/checkout onboarding precedence", () => {
       "https://simplassist.com/onboarding?checkout=canceled",
       "onboarding",
       true,
+      "12100000-0000-4000-8000-000000000001",
     );
   });
 
@@ -644,6 +658,7 @@ describe("POST /api/billing/checkout onboarding precedence", () => {
         expect.any(String),
         "onboarding",
         false,
+        "12100000-0000-4000-8000-000000000001",
       );
     },
   );
@@ -1393,6 +1408,7 @@ describe("POST /api/billing/checkout onboarding precedence", () => {
         "https://simplassist.com/onboarding?checkout=canceled",
         "onboarding",
         false,
+        "12100000-0000-4000-8000-000000000001",
       );
       expect(await response.json()).toEqual({
         url: "https://checkout.test/session",
@@ -1517,6 +1533,7 @@ describe("POST /api/billing/checkout redirect URLs", () => {
       "https://simplassist.com/onboarding?checkout=canceled",
       "onboarding",
       false,
+      "12100000-0000-4000-8000-000000000001",
     );
   });
 
@@ -1541,6 +1558,7 @@ describe("POST /api/billing/checkout redirect URLs", () => {
       "https://simplassist.com/billing?canceled=true",
       "billing",
       false,
+      "12100000-0000-4000-8000-000000000001",
     );
     expect(mocks.getBusinessContentQuality).not.toHaveBeenCalled();
   });
@@ -1556,3 +1574,15 @@ describe("POST /api/billing/checkout redirect URLs", () => {
     expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
   });
 });
+
+
+// Existing billing cases represent subscribers with a saved current agreement.
+// The agreement module and rejected-payment boundaries have dedicated tests.
+const agreementChecks = vi.hoisted(() => ({ require: vi.fn(), link: vi.fn() }));
+vi.mock("@/lib/agreements/service.server", () => ({
+  requireServiceAgreement: async (...args: unknown[]) => (await agreementChecks.require(...args)) ?? "12100000-0000-4000-8000-000000000001",
+  linkServiceAgreementReference: async (...args: unknown[]) => agreementChecks.link(...args),
+  ServiceAgreementError: class extends Error {
+    constructor(readonly code: string, readonly status = 503) { super(code); }
+  },
+}));

@@ -1,3 +1,4 @@
+import { ServiceAgreementLink } from "@/components/agreements/ServiceAgreementLink";
 import TextingUpgradeEntry from "@/components/billing/TextingUpgradeEntry";
 import OwnerVoiceSettings from '@/components/settings/OwnerVoiceSettings';
 import BillingPlanChange from '@/components/billing/BillingPlanChange';
@@ -92,6 +93,7 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
           Billing
         </h1>
         {suspensionBillingNotice}
+        <ServiceAgreementLink />
         <div className={`mt-8 p-6 ${card}`}>
           <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5]">
             Partner-managed billing
@@ -160,6 +162,7 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
           : "Choose a plan to get started"}
       </p>
       {suspensionBillingNotice}
+      <ServiceAgreementLink />
 
       {hasActiveSubscription ? (
         <div className={`mt-8 p-6 ${card}`}>

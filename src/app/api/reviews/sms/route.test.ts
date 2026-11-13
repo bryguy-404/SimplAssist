@@ -212,6 +212,7 @@ describe("POST /api/reviews/sms actions", () => {
       expect(response.status).toBe(200);
       expect(response.headers.get("Cache-Control")).toBe("no-store");
       await expect(response.json()).resolves.toEqual({ accepted: true });
+      if (action === "checkout" || action === "activate") expectedArguments.push(undefined);
       expect(mocks[service]).toHaveBeenCalledExactlyOnceWith(
         ...expectedArguments,
       );

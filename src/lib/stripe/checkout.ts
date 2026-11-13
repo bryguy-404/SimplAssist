@@ -1,4 +1,5 @@
 import "server-only";
+import { linkServiceAgreementReference } from "@/lib/agreements/service.server";
 
 import { createHash, randomUUID } from "node:crypto";
 import type Stripe from "stripe";
@@ -79,6 +80,7 @@ export async function createCheckoutSession(
   cancelUrl: string,
   mode: "onboarding" | "billing" = "billing",
   requireOnboardingIntent = false,
+  agreementId?: string,
 ): Promise<string | null> {
   if (plan === "chat_only") {
     if (setupFeePriceId !== null) {
@@ -98,15 +100,17 @@ export async function createCheckoutSession(
       successUrl,
       cancelUrl,
       mode,
+      agreementId,
     });
   }
 
   // Keep onboarding/family authorization; payable SMS work uses durable identity.
   await claimCheckoutPlanFamily(businessId, plan, requireOnboardingIntent);
-  return createSmsCheckout({ businessId, plan, priceId: planPriceId, setupFeePriceId, successUrl, cancelUrl, mode });
+  return createSmsCheckout({ businessId, plan, priceId: planPriceId, setupFeePriceId, successUrl, cancelUrl, mode, agreementId });
 }
 
 async function createSingleFlightChatOnlyCheckout(args: {
+  agreementId?: string;
   businessId: string;
   planPriceId: string;
   successUrl: string;
@@ -139,6 +143,7 @@ async function createSingleFlightChatOnlyCheckout(args: {
       expectedCustomerId: decision.customerId,
       sessionExpiresAt: decision.sessionExpiresAt,
     });
+    await linkServiceAgreementReference(args.agreementId, "stripe_checkout", session.id);
     return resolveKnownChatOnlySession(session, {
       businessId: args.businessId,
       attemptId: decision.attemptId,
@@ -200,6 +205,7 @@ async function createSingleFlightChatOnlyCheckout(args: {
   });
 
   if (session.status !== "open") {
+    await linkServiceAgreementReference(args.agreementId, "stripe_checkout", session.id);
     return resolveKnownChatOnlySession(session, {
       businessId: args.businessId,
       attemptId: decision.attemptId,
@@ -220,6 +226,7 @@ async function createSingleFlightChatOnlyCheckout(args: {
     sessionExpiresAt: decision.sessionExpiresAt,
   });
 
+  await linkServiceAgreementReference(args.agreementId, "stripe_checkout", session.id);
   return session.url;
 }
 

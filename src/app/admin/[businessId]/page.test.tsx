@@ -878,3 +878,5 @@ describe("AdminBusinessPage account lifecycle rendering", () => {
     expect(mocks.getPreview).not.toHaveBeenCalled();
   });
 });
+
+vi.mock("@/components/agreements/AdminServiceAgreementCard", () => ({ AdminServiceAgreementCard: () => <section>Service agreement</section> }));

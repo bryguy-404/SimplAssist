@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ServiceAgreementField, useServiceAgreement } from "@/components/agreements/ServiceAgreementField";
+import { SERVICE_AGREEMENT_ERRORS, type ServiceAgreementConfirmation } from "@/lib/agreements/shared";
+
 import { useBrand } from "@/components/branding/BrandProvider";
 import { PlanSelectionOption } from "@/components/onboarding/PlanSelectionOption";
 import { getUsStateName } from '@/lib/usStates';
@@ -34,6 +37,7 @@ const SETUP_FEE = SETUP_FEE_CENTS / 100;
 export function buildOnboardingLaunchRequest(args: {
   billingMode: OnboardingState["billing"]["mode"];
   plan: SubscriptionPlan;
+  serviceAgreement?: ServiceAgreementConfirmation;
 }): { url: string; init: RequestInit } {
   if (args.plan === "chat_only" && args.billingMode !== "stripe") {
     throw new Error("partner_chat_only_requires_no_sms_launch");
@@ -51,7 +55,7 @@ export function buildOnboardingLaunchRequest(args: {
     init: {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ plan: args.plan, mode: "onboarding" }),
+      body: JSON.stringify({ plan: args.plan, mode: "onboarding", ...(args.serviceAgreement ? { serviceAgreement: args.serviceAgreement } : {}) }),
     },
   };
 }
@@ -214,6 +218,7 @@ export default function ReviewAndLaunch({
   );
   const isPartnerManaged = billing.mode !== "stripe";
   const isPaidSubscription = Boolean(paidPlanKey);
+  const agreement = useServiceAgreement(!isPartnerManaged && !isPaidSubscription);
   const isChatOnly =
     chatOnly || selectedEffectivePlan === "chat_only" || paidPlanKey === "chat_only";
   const isPartnerChatOnly = isPartnerManaged && isChatOnly;
@@ -271,12 +276,14 @@ export default function ReviewAndLaunch({
       return;
     }
 
+    if (!agreement.ready) { setError(SERVICE_AGREEMENT_ERRORS.service_agreement_required); return; }
     setLaunching(true);
 
     try {
       const res = await requestOnboardingLaunch({
         billingMode: billing.mode,
         plan: paidPlanKey ?? selectedPlan,
+        serviceAgreement: agreement.confirmation,
       });
       const requestFailureMessage = isPartnerManaged
         ? "Could not submit your SMS registration right now."
@@ -672,6 +679,7 @@ export default function ReviewAndLaunch({
         </div>
       )}
 
+      {showPrimaryButton && <ServiceAgreementField agreement={agreement} disabled={launching} />}
       <div className="flex justify-between pt-4">
         <button
           type="button"
@@ -689,7 +697,7 @@ export default function ReviewAndLaunch({
                   ? () => onEditStep(5)
                 : handleLaunch
             }
-            disabled={launching && launchHold?.action !== 'choose_number' && launchHold?.action !== 'add_ein'}
+            disabled={(launching || !agreement.ready) && launchHold?.action !== 'choose_number' && launchHold?.action !== 'add_ein'}
             className={`${primaryCtaInlineClass} py-3 px-8 text-lg font-semibold`}
           >
             {primaryButtonLabel}

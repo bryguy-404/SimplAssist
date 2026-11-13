@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { notFound } from "next/navigation";
+import { AdminServiceAgreementCard } from "@/components/agreements/AdminServiceAgreementCard";
 import { requireAdminUser } from "@/lib/admin/auth";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
@@ -394,6 +395,7 @@ export default async function AdminBusinessPage({
           />
         </Card>
 
+        <AdminServiceAgreementCard businessId={business.id} />
         <Card title="Billing Flags">
           {/* A router refresh preserves client component state. Remount when
               any server value changes so stale legacy flags cannot cross a
@@ -560,6 +562,7 @@ function TerminalBusiness({
       <BusinessHeading business={business} lifecycle="terminal" />
       <section className={`${card} p-5`}>
         <h2 className="text-lg font-semibold">Terminally cleaned account</h2>
+        <AdminServiceAgreementCard businessId={business.id} />
         <p className="mt-2 text-sm text-stone-600 dark:text-[#bdbdbf]">
           This retained tombstone is read-only. Customer identity, partner
           assignment, configuration, credentials, and account-linked

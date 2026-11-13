@@ -1,3 +1,5 @@
+import { ServiceAgreementError } from "@/lib/agreements/errors";
+import { serviceAgreementFailure } from "@/lib/agreements/response";
 import { NextResponse } from "next/server";
 import { requireFreshWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 import { ReviewSmsError } from "@/lib/billing/reviewSms";
@@ -34,6 +36,7 @@ async function route(
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
+    if (error instanceof ServiceAgreementError) return serviceAgreementFailure(error);
     return NextResponse.json(
       {
         error:
@@ -84,6 +87,7 @@ export const POST = (request: Request) =>
           businessId,
           ownerId,
           reviewOrigin(),
+          body.serviceAgreement,
         );
       case "quote":
         return quoteReviewSmsRecurring(businessId, ownerId);
@@ -93,6 +97,7 @@ export const POST = (request: Request) =>
           ownerId,
           String(body.operationId ?? ""),
           String(body.fingerprint ?? ""),
+          body.serviceAgreement,
         );
       case "cancel":
         return cancelReviewSmsAtPeriodEnd(businessId, ownerId);

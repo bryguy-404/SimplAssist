@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ServiceAgreementField, useServiceAgreement } from "@/components/agreements/ServiceAgreementField";
+import { SERVICE_AGREEMENT_ERRORS, type ServiceAgreementConfirmation } from "@/lib/agreements/shared";
+
 import { useRouter } from "next/navigation";
 import type { BillingChangeView, SmsPlan } from "@/lib/stripe/smsBilling";
 import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
@@ -9,6 +12,7 @@ import { card, statusWarning } from "@/lib/theme-v2/theme";
 import { primaryCtaInlineClass, secondaryCtaClass } from "@/lib/glass";
 
 const errors: Record<string, string> = {
+  ...SERVICE_AGREEMENT_ERRORS,
   sms_billing_quote_expired: "This quote expired. Review the updated amount before confirming.",
   sms_billing_source_changed: "Your subscription changed. Refresh your billing details before continuing.",
   sms_billing_operation_in_progress: "Another billing change is in progress. Refresh its status below.",
@@ -20,8 +24,8 @@ const errors: Record<string, string> = {
 export function billingChangeError(code: unknown): string {
   return typeof code === "string" && errors[code] ? errors[code] : "Billing is temporarily unavailable. Your existing plan remains in place until a paid change is confirmed.";
 }
-export async function requestBillingChange(method: "POST" | "PATCH" | "DELETE", input: { plan: SmsPlan } | { operationId: string }): Promise<BillingChangeView | null> {
-  const body = "plan" in input ? { plan: input.plan } : { operationId: input.operationId };
+export async function requestBillingChange(method: "POST" | "PATCH" | "DELETE", input: { plan: SmsPlan } | { operationId: string; serviceAgreement?: ServiceAgreementConfirmation }): Promise<BillingChangeView | null> {
+  const body = "plan" in input ? { plan: input.plan } : { operationId: input.operationId, ...(input.serviceAgreement ? { serviceAgreement: input.serviceAgreement } : {}) };
   const response = await fetch("/api/billing/plan-change", { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const result = await response.json();
   if (!response.ok) throw new Error(billingChangeError(result.error));
@@ -43,6 +47,7 @@ export default function BillingPlanChange({ currentPlan, active, initialTargetPl
     }).catch(() => {}).finally(() => { if (!canceled) setLoaded(true); });
     return () => { canceled = true; };
   }, []);
+  const agreement = useServiceAgreement(Boolean(change && change.state === "prepared" && change.kind !== "downgrade"));
   const pending = change && ["prepared", "confirming", "pending", "scheduled"].includes(change.state);
   const options = active && currentPlan && currentPlan !== "chat_only"
     ? (["sms_only", "sms_and_chat", "full"] as const).filter((plan) => plan !== currentPlan && isPlanAvailable(plan)) : [];
@@ -78,8 +83,9 @@ export default function BillingPlanChange({ currentPlan, active, initialTargetPl
             {change.targetPlan === "full" && <p>Approximately {Math.floor(change.voiceSeconds / 60)} voice minutes for the remaining month, then 100 each billing month. No voice overage charges.</p>}
           </>}
         </> : <p>Payment or subscription confirmation is still pending. Refresh the status after completing payment.</p>}
+      <ServiceAgreementField agreement={agreement} disabled={busy} />
       <div className="flex flex-wrap gap-3">
-        {change.state === "prepared" && <button className={primaryCtaInlineClass} disabled={busy} onClick={() => perform(() => requestBillingChange("PATCH", { operationId: change.operationId }))}>
+        {change.state === "prepared" && <button className={primaryCtaInlineClass} disabled={busy || !agreement.ready} onClick={() => perform(() => requestBillingChange("PATCH", { operationId: change.operationId, serviceAgreement: agreement.confirmation }))}>
           {busy ? "Processing…" : change.kind === "checkout" ? "Continue to Checkout" : change.kind === "upgrade" ? `Confirm and pay ${money(change.amountDueCents)}` : "Confirm change at renewal"}
         </button>}
         {change.state === "confirming" && <button className={primaryCtaInlineClass} disabled={busy}

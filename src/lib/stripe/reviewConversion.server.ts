@@ -1,4 +1,6 @@
 import "server-only";
+import { requireServiceAgreement, linkServiceAgreementReference } from "@/lib/agreements/service.server";
+
 import type Stripe from "stripe";
 import { stripe } from "./client";
 import { classifySubscriptionItems } from "./subscriptionItems";
@@ -143,7 +145,7 @@ export function reviewConversionUpdateParameters(op: SmsBillingOperation, u: Tex
   };
 }
 
-export async function confirmReviewTextingConversion(businessId: string, ownerId: string, operationId: string, quoteFingerprint: string) {
+export async function confirmReviewTextingConversion(businessId: string, ownerId: string, operationId: string, quoteFingerprint: string, serviceAgreement?: unknown) {
   const { loadTextingUpgradeContext, requireTextingUpgradeReady } = await import("@/lib/billing/textingUpgrade.server");
   const c = await loadTextingUpgradeContext(businessId, ownerId), u = c.upgrade;
   if (!u || u.source_mode !== "review_sms" || u.billing_operation_id !== operationId || !c.operation || c.operation.owner_id !== ownerId)
@@ -161,6 +163,9 @@ export async function confirmReviewTextingConversion(businessId: string, ownerId
     await requirePaidSource(sub, u); await assertTarget(op.target_price_id);
     const refreshed = await preview(sub, u, op.target_price_id, seconds(op.proration_at!));
     if (refreshed.amount_due !== op.quote.amountDueCents || refreshed.currency !== op.quote.currency) throw new TextingUpgradeError("texting_upgrade_quote_changed");
+    const agreementId = await requireServiceAgreement(businessId, ownerId, serviceAgreement, "texting_upgrade");
+    await linkServiceAgreementReference(agreementId, "billing_operation", op.id);
+    await linkServiceAgreementReference(agreementId, "stripe_subscription", u.source_subscription_id);
     op = operationSchema.parse(await textingUpgradeRpc("confirm_chat_texting_upgrade", {
       p_upgrade_id: u.id, p_owner_id: ownerId, p_operation_id: op.id, p_source_fingerprint: quoteFingerprint,
     }));

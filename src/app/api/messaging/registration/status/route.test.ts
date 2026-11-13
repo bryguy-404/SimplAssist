@@ -212,7 +212,7 @@ beforeEach(() => {
 });
 
 describe("POST /api/messaging/registration/status", () => {
-  it.each([[], [{ id: BUSINESS.id }]])("continues brand approval even when the status was already written", async (transitionRows) => {
+  it.each([{ transitionRows: [] }, { transitionRows: [{ id: BUSINESS.id }] }])("continues brand approval even when the status was already written", async ({ transitionRows }) => {
     mocks.unwrap.mockResolvedValue(campaignEvent("evt_brand", { eventType: "10dlc.brand.identityStatus", payload: { brandId: BRAND_ID, identityStatus: "VERIFIED" } }));
     mocks.mapBrandStatus.mockReturnValue({ dbStatus: "approved", isTerminal: true });
     queueResults({ data: BUSINESS, error: null }, { data: transitionRows, error: null });

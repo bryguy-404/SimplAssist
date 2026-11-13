@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { ServiceAgreementField, useServiceAgreement } from "@/components/agreements/ServiceAgreementField";
+import { SERVICE_AGREEMENT_ERRORS } from "@/lib/agreements/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TextingUpgradeState } from "@/lib/billing/textingUpgrade";
 import { primaryCtaInlineClass, secondaryCtaClass } from "@/lib/glass";
@@ -29,13 +31,14 @@ async function read(path = "", body?: unknown) {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error("We couldn’t complete this step. Your saved progress is retained. Refresh the status before trying again, or contact support.");
+  if (!response.ok) throw new Error(SERVICE_AGREEMENT_ERRORS[data.code ?? data.error] ?? "We couldn’t complete this step. Your saved progress is retained. Refresh the status before trying again, or contact support.");
   return data;
 }
 
 export default function ReviewTextingUpgradeWizard({ state, onState, initialProvider }: {
   state: TextingUpgradeState; onState: (state: TextingUpgradeState) => void; initialProvider?: ReviewUpgradeProviderState;
 }) {
+  const agreement = useServiceAgreement(Boolean(state.actions.canConfirm));
   const [provider, setProvider] = useState<ReviewUpgradeProviderState | null>(initialProvider ?? null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -119,7 +122,7 @@ export default function ReviewTextingUpgradeWizard({ state, onState, initialProv
               <p>Your review texting is available again on the new approved application. Your $35 package continues until the Growth payment succeeds. You can also keep your current package.</p>
               {quote && quote.state !== "expired" ? <div className="space-y-2 rounded-xl border p-4"><p className="font-semibold">{money(quote.amountDueCents)} due now</p><p>The prorated subscription change has no activation fee. {money(quote.monthlyPriceCents)}/month at renewal{quote.renewalAt ? ` on ${new Date(quote.renewalAt).toLocaleDateString()}` : ""}.</p><p className="text-sm">Quote expires {new Date(quote.expiresAt).toLocaleString()}.</p></div> : <p>Review a fresh payment quote before accepting the upgrade.</p>}
               {state.actions.canQuote && <button className={secondaryCtaClass} disabled={busy} onClick={() => act("/quote", {})}>{quote ? "Refresh price" : "Review exact price"}</button>}
-              {quote && state.actions.canConfirm && <button className={primaryCtaInlineClass} disabled={busy || Date.parse(quote.expiresAt) <= Date.now()} onClick={() => act("/confirm", { operationId: quote.operationId, quoteFingerprint: quote.quoteFingerprint, starterAcknowledged: false })}>Confirm upgrade and pay {money(quote.amountDueCents)}</button>}
+              {quote && state.actions.canConfirm && <><ServiceAgreementField agreement={agreement} disabled={busy} /><button className={primaryCtaInlineClass} disabled={busy || !agreement.ready || Date.parse(quote.expiresAt) <= Date.now()} onClick={() => act("/confirm", { operationId: quote.operationId, quoteFingerprint: quote.quoteFingerprint, starterAcknowledged: false, serviceAgreement: agreement.confirmation })}>Confirm upgrade and pay {money(quote.amountDueCents)}</button></>}
             </>}
             {provider.stage === "support_required" && <p>Your saved resources and payment history are retained. Contact support to inspect the carrier result before another attempt.</p>}
           </>}

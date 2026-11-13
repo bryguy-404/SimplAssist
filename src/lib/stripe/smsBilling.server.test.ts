@@ -227,3 +227,23 @@ describe("SMS Checkout authority", () => {
     expect(mocks.createCheckout).not.toHaveBeenCalled();
   });
 });
+
+
+// Existing billing cases represent subscribers with a saved current agreement.
+// The agreement module and rejected-payment boundaries have dedicated tests.
+const agreementChecks = vi.hoisted(() => ({ require: vi.fn(), link: vi.fn() }));
+vi.mock("@/lib/agreements/service.server", () => ({
+  requireServiceAgreement: async (...args: unknown[]) => (await agreementChecks.require(...args)) ?? "12100000-0000-4000-8000-000000000001",
+  linkServiceAgreementReference: async (...args: unknown[]) => agreementChecks.link(...args),
+  ServiceAgreementError: class extends Error {
+    constructor(readonly code: string, readonly status = 503) { super(code); }
+  },
+}));
+
+it("does not initiate a paid plan change if agreement saving fails", async () => {
+  op = fixtureOperation();
+  agreementChecks.require.mockRejectedValueOnce(new Error("agreement_save_failed"));
+  await expect(confirmSmsPlanChange(business, ownerId, operationId)).rejects.toThrow("agreement_save_failed");
+  expect(mocks.update).not.toHaveBeenCalled();
+  expect(mocks.rpc.mock.calls.some(([name]) => name === "confirm_sms_billing_operation")).toBe(false);
+});

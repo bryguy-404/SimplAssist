@@ -1,3 +1,4 @@
+import { requireServiceAgreement, ServiceAgreementError } from "@/lib/agreements/service.server";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -84,7 +85,7 @@ export async function POST(request: NextRequest) {
   if (!workspace.ok) return workspace.response;
 
   try {
-    const { plan, mode: requestedMode } = await request.json();
+    const { plan, mode: requestedMode, serviceAgreement } = await request.json();
 
     const parsedPlan = subscriptionPlanSchema.safeParse(plan);
     if (!parsedPlan.success) {
@@ -501,6 +502,7 @@ export async function POST(request: NextRequest) {
         ? "/onboarding?checkout=canceled"
         : "/billing?canceled=true";
 
+    const agreementId = await requireServiceAgreement(business.id, workspace.access.user.id, serviceAgreement, mode === "onboarding" ? "onboarding" : "billing_checkout");
     const checkoutUrl = await createCheckoutSession(
       business.id,
       selectedPlan,
@@ -510,10 +512,12 @@ export async function POST(request: NextRequest) {
       `${origin}${cancelPath}`,
       mode,
       !subscription && mode === "onboarding" && directSelectionFlowEnabled,
+      agreementId,
     );
 
     return NextResponse.json({ url: checkoutUrl });
   } catch (error) {
+    if (error instanceof ServiceAgreementError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
     if (error instanceof ChatOnlyCheckoutRecoveredCompletionError) {
       try {
         const launch = await finalizePaidCheckout(

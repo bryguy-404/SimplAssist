@@ -1,6 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { ServiceAgreementField, useServiceAgreement } from "@/components/agreements/ServiceAgreementField";
+import { SERVICE_AGREEMENT_ERRORS } from "@/lib/agreements/shared";
+
 import ReviewTextingUpgradeWizard from "./ReviewTextingUpgradeWizard";
 import { useCallback, useEffect, useRef, useState } from "react";
 import BusinessInfoForm from "@/components/onboarding/BusinessInfoForm";
@@ -18,6 +21,7 @@ import { supportHref } from "@/lib/support/constants";
 const ENDPOINT = "/api/billing/texting-upgrade";
 const labels: Record<TextingUpgradeStep, string> = { plan: "Choose plan", business: "Business details", verification: "Business verification", use_case: "Texting details", phone: "Phone number", review: "Review and pay", status: "Texting status" };
 const errorMessages: Record<string, string> = {
+  ...SERVICE_AGREEMENT_ERRORS,
   ein_already_connected: "This EIN is already connected to an account. Contact support for help.",
   registration_locked: "Your carrier registration has started. Contact support to change these details.",
   rejection_support_required: "Your carrier registration needs support. Contact support for help with registration.",
@@ -60,6 +64,7 @@ export default function TextingUpgradeWizard({ initialState }: { initialState?: 
   const [error, setError] = useState<string | null>(null);
   const [replacingPhone, setReplacingPhone] = useState(false);
   const inFlight = useRef(false);
+  const agreement = useServiceAgreement(step === "review" && state?.sourceMode !== "review_sms");
 
   const acceptState = useCallback((next: TextingUpgradeState, resume = true) => {
     setState(next);
@@ -162,7 +167,7 @@ export default function TextingUpgradeWizard({ initialState }: { initialState?: 
           <div className="flex flex-wrap gap-3">
             <button className={secondaryCtaClass} disabled={busy} onClick={() => navigate("phone")}>Back</button>
             {state.actions.canQuote && <button className={state.quote ? secondaryCtaClass : primaryCtaInlineClass} disabled={busy} onClick={() => perform(() => requestState("/quote", {}), false)}>{state.quote ? "Refresh price" : "Review exact price"}</button>}
-            {state.quote && state.actions.canConfirm && <button className={primaryCtaInlineClass} disabled={busy || Date.parse(state.quote.expiresAt) <= Date.now() || (state.selectedPlan === "sms_only" && !starterAcknowledged)} onClick={() => perform(() => requestState("/confirm", { operationId: state.quote!.operationId, quoteFingerprint: state.quote!.quoteFingerprint, starterAcknowledged }))}>Confirm upgrade and pay {money(state.quote.amountDueCents, state.quote.currency)}</button>}
+            {state.quote && state.actions.canConfirm && <><ServiceAgreementField agreement={agreement} disabled={busy} /><button className={primaryCtaInlineClass} disabled={busy || !agreement.ready || Date.parse(state.quote.expiresAt) <= Date.now() || (state.selectedPlan === "sms_only" && !starterAcknowledged)} onClick={() => perform(() => requestState("/confirm", { operationId: state.quote!.operationId, quoteFingerprint: state.quote!.quoteFingerprint, starterAcknowledged, serviceAgreement: agreement.confirmation }))}>Confirm upgrade and pay {money(state.quote.amountDueCents, state.quote.currency)}</button></>}
           </div>
         </div>}
         {step === "status" && <div className="space-y-4">

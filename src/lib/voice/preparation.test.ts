@@ -116,6 +116,7 @@ describe("provider preparation", () => {
     expect(socket.sent.filter((e) => e.type === "session.start")).toHaveLength(
       1,
     );
+    expect(socket.sent.find(e => e.type === "session.start")?.session).toMatchObject({ model: "gpt-live-1.1" });
     const instructions = (socket.sent.find((e) => e.type === "session.start")?.session as { instructions: string }).instructions;
     expect(instructions).toContain("I’m Test’s AI assistant. How can I help you today?");
     expect(instructions).toContain("Small phrasing variations are welcome");
@@ -137,8 +138,8 @@ describe("provider preparation", () => {
     event(socket, { type: "session.closed", usage: { seconds: 25.5 } });
     await vi.advanceTimersByTimeAsync(1);
     expect(mocks.rpc).toHaveBeenCalledWith(
-      "update_voice_usage",
-      expect.objectContaining({ p_seconds: 25.5, p_confirmed: true }),
+      "update_voice_model_usage",
+      expect.objectContaining({ p_model: "gpt-live-1.1", p_seconds: 25.5, p_confirmed: true }),
     );
     expect(p.size).toBe(0);
   });

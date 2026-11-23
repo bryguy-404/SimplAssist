@@ -74,7 +74,8 @@ export class VoicePreparations {
       entry.seconds = Math.max(entry.seconds, seconds);
       io = io
         .then(async () => {
-          const r = await this.db.rpc("update_voice_usage", {
+          const r = await this.db.rpc("update_voice_model_usage", {
+            p_model: VOICE_MODEL,
             p_session_id: sessionId,
             p_seconds: entry.seconds,
             p_confirmed: confirmed,

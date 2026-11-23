@@ -60,7 +60,7 @@ describe("commercial voice persistence", () => {
     expect(f.rpc.mock.calls).toEqual([
       ["record_voice_customer_start", { p_session_id: "call", p_event_id: "start-mark", p_started_at: "2026-09-17T12:00:00Z" }],
       ["acknowledge_voice_customer_start", { p_session_id: "call", p_event_id: "start-mark" }],
-      ["update_voice_usage", { p_session_id: "call", p_seconds: 15, p_confirmed: true }],
+      ["update_voice_model_usage", { p_session_id: "call", p_model: "gpt-live-1.1", p_seconds: 15, p_confirmed: true }],
     ]);
     await f.store.finish("technical_failure", "audio_failed", true);
     expect(f.rpc).toHaveBeenLastCalledWith("finalize_voice_session", expect.objectContaining({ p_fallback: false }));

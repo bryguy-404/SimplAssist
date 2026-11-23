@@ -859,7 +859,7 @@ describe("continuous phone bridge", () => {
       expect(h.live.sent[0]).toMatchObject({
         type: "session.start",
         session: {
-          model: "gpt-live-1",
+          model: "gpt-live-1.1",
           audio: {
             format: AUDIO_PROFILES[profile].format,
             output: { voice: "marin" },

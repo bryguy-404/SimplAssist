@@ -117,9 +117,19 @@ function fixture(status: VoiceSession["status"] = "ringing") {
 }
 
 describe("existing-number voice routing", () => {
+  it.each([["gpt-live-1.1", true], ["gpt-live-1", true], ["unknown", false]] as const)(
+    "checks worker model %s during a rolling release", async (model, allowed) => {
+      const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({
+        ready: true, model, profile: "pcm16", commercialProtocol: 2, actionProtocol: 1, naturalOpeningProtocol: 1,
+      }));
+      try {
+        expect(await checkVoiceWorkerReady("https://voice.example", "x".repeat(32), true, true)).toBe(allowed);
+      } finally { fetch.mockRestore(); }
+    },
+  );
   it.each([undefined, 0, 1])("requires natural-opening capability only for stored v2 calls (capability %s)", async (capability) => {
     const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({
-      ready: true, model: "gpt-live-1", profile: "pcm16", commercialProtocol: 2, actionProtocol: 1,
+      ready: true, model: "gpt-live-1.1", profile: "pcm16", commercialProtocol: 2, actionProtocol: 1,
       naturalOpeningProtocol: capability,
     })));
     try {

@@ -4,6 +4,7 @@
 import { createClient } from '@supabase/supabase-js';
 import Telnyx from 'telnyx';
 
+const voiceModel = 'gpt-live-1.1';
 const businessId = 'ea848911-ef72-44a6-8cf3-c47b3959be26';
 const phone = '+15742638634';
 const schemaOnly = process.argv.includes('--schema-only');
@@ -50,7 +51,7 @@ for (const [table, fields] of Object.entries(tables)) await check(`Schema: ${tab
 await check('Required voice RPCs are deployed', async () => {
   const response = await request(new URL('/rest/v1/', url), { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, Accept: 'application/openapi+json' });
   const api = await response.json();
-  for (const name of ['admit_voice_pilot','prepare_preinformed_voice_session','consume_voice_stream','record_voice_fragment','update_voice_usage','activate_voice_session','finalize_voice_session','configure_voice_pilot','stop_voice_pilot','reconcile_voice_usage','claim_voice_recording_cleanup','finish_voice_recording_cleanup','reconcile_unstarted_voice_sessions','estimate_voice_telnyx_usage']) {
+  for (const name of ['admit_voice_pilot','prepare_preinformed_voice_session','consume_voice_stream','record_voice_fragment','update_voice_usage','update_voice_model_usage','activate_voice_session','finalize_voice_session','configure_voice_pilot','stop_voice_pilot','reconcile_voice_usage','claim_voice_recording_cleanup','finish_voice_recording_cleanup','reconcile_unstarted_voice_sessions','estimate_voice_telnyx_usage']) {
     requireValue(api.paths?.[`/rpc/${name}`], `Missing RPC: ${name}`);
   }
 });
@@ -72,7 +73,7 @@ await check('Pilot is initialized with bounded limits', async () => {
 });
 if (!schemaOnly) {
   await check('OpenAI GPT-Live model access', async () => {
-    await request('https://api.openai.com/v1/models/gpt-live-1', { Authorization: `Bearer ${need('OPENAI_API_KEY')}` });
+    await request(`https://api.openai.com/v1/models/${voiceModel}`, { Authorization: `Bearer ${need('OPENAI_API_KEY')}` });
   });
   await check('Claude answering model access', async () => {
     await request('https://api.anthropic.com/v1/models/claude-haiku-4-5-20251001', { 'x-api-key': need('ANTHROPIC_API_KEY'), 'anthropic-version': '2023-06-01' });
@@ -91,7 +92,7 @@ if (!schemaOnly) {
     requireValue(token.length >= 32 && need('VOICE_STREAM_SECRET').length >= 32, 'Voice credentials need at least 32 characters');
     const response = await request(endpoint, { Authorization: `Bearer ${token}` });
     const body = await response.json();
-    requireValue(body.ready === true && body.model === 'gpt-live-1' && body.profile === (process.env.VOICE_AUDIO_PROFILE || 'pcm16'), 'Worker model, audio profile or maintenance readiness mismatch');
+    requireValue(body.ready === true && body.model === voiceModel && body.profile === (process.env.VOICE_AUDIO_PROFILE || 'pcm16'), 'Worker model, audio profile or maintenance readiness mismatch');
   });
   await check('Approved tester numbers are configured', async () => {
     const { count, error } = await db.from('voice_pilot_testers').select('phone_number', { count: 'exact', head: true }).eq('business_id', businessId);

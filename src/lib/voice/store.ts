@@ -1,7 +1,7 @@
 import { createHash, createHmac } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { VoiceInboxReply } from "./inboxReply";
-import type { TranscriptFragment, VoiceSession } from "./types";
+import { VOICE_MODEL, type TranscriptFragment, type VoiceSession } from "./types";
 
 export const hashStreamToken = (token: string) =>
   createHash("sha256").update(token).digest("hex");
@@ -121,7 +121,8 @@ export function createVoiceStore(
       });
     },
     async usage(seconds, confirmed) {
-      await rpc("update_voice_usage", {
+      await rpc("update_voice_model_usage", {
+        p_model: VOICE_MODEL,
         p_seconds: seconds,
         p_confirmed: confirmed,
       });

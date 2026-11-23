@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type Telnyx from "telnyx";
 import {
+  VOICE_MODEL,
   PILOT_BUSINESS_ID,
   PILOT_PHONE,
   RECORDING_NOTICE,
@@ -52,7 +53,8 @@ export async function checkVoiceWorkerReady(
       (!naturalOpening || body.naturalOpeningProtocol === 1) &&
       (process.env.VOICE_ACTIONS_ROLLOUT !== "true" ||
         body.actionProtocol === 1) &&
-      body.model === "gpt-live-1" &&
+      // A rolling cutover or rollback can briefly route to the previous worker.
+      (body.model === VOICE_MODEL || body.model === "gpt-live-1") &&
       body.profile === (process.env.VOICE_AUDIO_PROFILE || "pcm16")
     );
   } catch {

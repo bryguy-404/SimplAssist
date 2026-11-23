@@ -25,5 +25,5 @@ export async function DELETE(request: NextRequest) {
   } catch {
     return NextResponse.json({ error: "Invalid deletion request." }, { status: 400 });
   }
-  return deleteConversations(body?.ids);
+  return deleteConversations(body?.ids, body?.folder);
 }

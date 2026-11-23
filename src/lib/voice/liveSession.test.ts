@@ -83,6 +83,7 @@ function harness(
     customerPlaybackAcknowledged: vi.fn().mockResolvedValue(undefined),
     customerTermination: vi.fn().mockResolvedValue(undefined),
     finish: vi.fn().mockResolvedValue(undefined),
+    inboxReply: vi.fn().mockResolvedValue(undefined),
   } satisfies VoiceStore;
   const answer = vi
     .fn()
@@ -184,6 +185,42 @@ describe("continuous phone bridge", () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
+  it("releases the call while the inbox write is pending", async () => {
+    const onClosed = vi.fn();
+    const h = harness("pcmu8", false, { onClosed });
+    let finishWrite!: () => void;
+    h.store.inboxReply.mockImplementation(() => new Promise<void>(resolve => { finishWrite = resolve; }));
+    await h.start();
+    await h.finish();
+    expect(h.store.inboxReply).toHaveBeenCalledOnce();
+    expect(onClosed).toHaveBeenCalledOnce();
+    finishWrite();
+  });
+  it.each([["silent","silent"],["caller","responded"],["dropped","unknown"]] as const)(
+    "stores the inbox result for %s input on the actual phone bridge", async (input, expected) => {
+      const h = harness("pcmu8");
+      await h.start();
+      const size = new AudioQueue("pcmu8").frameBytes;
+      h.live.event({ type: "session.output_audio.delta", delta: Buffer.alloc(size * 30, 25).toString("base64") });
+      const silence = Buffer.alloc(size, 255).toString("base64");
+      for (let i=1; i<=105; i++) {
+        if (input !== "dropped" || i !== 45) h.phone.event({
+          event: "media", stream_id: "stream", media: { track: "inbound", chunk: String(i), payload: silence },
+        });
+        await vi.advanceTimersByTimeAsync(20);
+        if (i === 26) {
+          const mark = h.phone.sent.find(e => e.event === "mark");
+          expect(mark).toBeDefined();
+          h.phone.event({ event: "mark", stream_id: "stream", mark: mark!.mark });
+        }
+      }
+      if (input === "caller") h.live.event({ type: "session.input_transcript.delta", event_id: "reply",
+        delta: "Hello", start_ms: 900, end_ms: 1100 });
+      await h.finish();
+      expect(h.store.inboxReply).toHaveBeenCalledWith(expected);
+      expect(h.store.finish).toHaveBeenCalledWith("caller_hangup", null, false);
+    },
+  );
   it.each(["pcm16", "pcmu8"] as const)(
     "meters commercial %s from the first audible frame and its own acknowledged mark",
     async (profile) => {

@@ -175,6 +175,17 @@ beforeEach(() => {
 });
 
 describe("sendMissedCallSMS", () => {
+  it("finishes an accepted text even if its call history cannot be saved", async () => {
+    setRows("en");
+    mocks.send.mockResolvedValue({ data: { id: "telnyx_message_1" }, reservationId: "receipt", replayed: false });
+    // The setup only supports reads, so the receipt update throws after the send.
+    await sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID, { inboxOrigin: "voicemail" });
+    expect(mocks.from).toHaveBeenCalledWith("tenant_sms_sends");
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+    expect(mocks.addMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.recordOutboundSmsUsage).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     [
       "en" as const,

@@ -8,7 +8,7 @@ import { statusInfo, statusWarning, statusNeutral } from "@/lib/theme-v2/theme";
 import type { ConversationWithContact } from "@/app/(dashboard)/conversations/page";
 import { getConversationAccessState } from "./accessState";
 import { canDeleteConversation, MAX_CONVERSATION_DELETE_BATCH } from "@/lib/conversations/deletion";
-import type { InboxQuery } from "@/lib/conversations/inbox";
+import { conversationFolder, folderLabels, inboxFolders, inboxReasonLabels, type InboxPage, type InboxQuery } from "@/lib/conversations/inbox";
 import { spamLabel } from "@/lib/call-screening/domain";
 import { phoneMatchesSearch } from "@/lib/phone/display";
 
@@ -24,7 +24,7 @@ interface ConversationListProps {
   query?: InboxQuery;
   onQueryChange?: (query: InboxQuery) => void;
   paging?: {
-    total: number; counts: { inbox: number; spam: number }; page: number;
+    total: number; counts: InboxPage["counts"]; page: number;
     hasNext: boolean; loading: boolean; error: string | null;
     onNext: () => void; onPrevious: () => void; onRefresh: () => void;
   };
@@ -105,7 +105,7 @@ export function ConversationList({
         const res = await fetch("/api/conversations", {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ids: deleteTargetIds }),
+          body: JSON.stringify({ ids: deleteTargetIds, folder }),
         });
         const data = await res.json().catch(() => null);
         if (!res.ok) throw new Error(data?.error || "Unable to delete conversations. Please try again.");
@@ -135,10 +135,10 @@ export function ConversationList({
 
   const filtered = useMemo(() => {
     if (paging) return conversations;
-    let result = conversations.filter(c => folder === "spam" ? c.spam_state && c.spam_state !== "inbox" : !c.spam_state || c.spam_state === "inbox");
+    let result = conversations.filter(c => conversationFolder(c) === folder);
 
     if (filter !== "all") {
-      result = result.filter((c) => c.channel === filter);
+      result = result.filter((c) => c.channel === filter || (filter === "voice" && !!c.missed_calls?.length));
     }
 
     if (search.trim()) {
@@ -152,7 +152,10 @@ export function ConversationList({
 
     return result;
   }, [conversations, filter, search, folder, paging]);
-  const counts = paging?.counts ?? { inbox: conversations.filter(c => !c.spam_state || c.spam_state === "inbox").length, spam: conversations.filter(c => c.spam_state && c.spam_state !== "inbox").length };
+  const counts = paging?.counts ?? conversations.reduce((totals, item) => {
+    totals[conversationFolder(item)]++;
+    return totals;
+  }, { inbox: 0, no_reply: 0, spam: 0 });
 
   const selectable = filtered.filter((conversation) => canDeleteConversation(conversation, { canUseManualSms, canUseWebChat }));
   const selection = selectable.filter((conversation) => selectedIds.has(conversation.id));
@@ -171,9 +174,9 @@ export function ConversationList({
   return (
     <div className="flex h-full flex-col border-r border-[#ece4d8] dark:border-white/[0.10] bg-white dark:bg-transparent">
       {query && onQueryChange && <div className="flex gap-1 border-b border-[#ece4d8] p-3 dark:border-white/10" aria-label="Conversation folders">
-        {(["inbox", "spam"] as const).map(value => <button type="button" key={value} disabled={deleting} aria-pressed={folder === value} onClick={() => onQueryChange({ folder: value, channel: "all", search: "" })}
-          className={cn("flex-1 rounded-lg px-3 py-2 text-sm font-medium", folder === value ? "bg-[var(--brand-accent-soft)] text-[var(--brand-accent)] dark:bg-white/10 dark:text-[var(--brand-accent-dark)]" : "text-stone-500 dark:text-stone-400")}>
-          {value === "inbox" ? "Inbox" : "Spam"} <span className="ml-1 text-xs">{counts[value]}</span>
+        {inboxFolders.map(value => <button type="button" key={value} disabled={deleting} aria-pressed={folder === value} onClick={() => onQueryChange({ folder: value, channel: "all", search: "" })}
+          className={cn("flex-auto whitespace-nowrap rounded-lg px-2 py-2 text-sm font-medium", folder === value ? "bg-[var(--brand-accent-soft)] text-[var(--brand-accent)] dark:bg-white/10 dark:text-[var(--brand-accent-dark)]" : "text-stone-500 dark:text-stone-400")}>
+          {folderLabels[value]} <span className="ml-1 text-xs">{counts[value]}</span>
         </button>)}
       </div>}
       {/* Search */}
@@ -275,7 +278,7 @@ export function ConversationList({
       <div className="flex-1 overflow-y-auto">
         {paging?.loading ? <p role="status" className="p-6 text-center text-sm text-stone-500">Loading conversations…</p> : paging?.error ? <p role="alert" className="p-6 text-sm text-red-600">{paging.error}</p> : filtered.length === 0 ? (
           <div className="p-6 text-center text-sm text-stone-500 dark:text-[#bdbdbf]">
-            {folder === "spam" ? "No spam calls in this view." : conversations.length === 0
+            {search || filter !== "all" ? "No conversations match these filters." : folder === "no_reply" ? "No unanswered conversations." : folder === "spam" ? "No spam calls in this view." : conversations.length === 0
               ? "No conversations yet. Once customers start texting or chatting, they'll appear here."
               : "No conversations match your search."}
           </div>
@@ -297,16 +300,17 @@ export function ConversationList({
               (conv.contact?.phone_number
                 ? formatPhoneNumber(conv.contact.phone_number)
                 : "Unknown");
-            const preview = conv.last_message_preview
+            const reasonLabel = inboxReasonLabels[conv.inbox_reason ?? ""];
+            const preview = reasonLabel ?? (conv.last_message_preview
               ? conv.last_message_preview.length > 50
                 ? conv.last_message_preview.slice(0, 50) + "..."
                 : conv.last_message_preview
-              : "No messages yet";
+              : "No messages yet");
             const canDelete = canDeleteConversation(conv, { canUseManualSms, canUseWebChat });
             const checked = selectedIds.has(conv.id);
             const selectionDisabled = !canDelete || (!checked && selectionLimitReached);
-            const channelLabel = conv.channel === "web_chat" ? "chat" : conv.channel === "voice" ? "voice call" : "SMS";
-            const label = `${contactName}, ${channelLabel}, ${new Date(conv.last_message_at).toLocaleString()}`;
+            const channelLabel = conv.missed_calls?.length ? "call and SMS" : conv.channel === "web_chat" ? "chat" : conv.channel === "voice" ? "voice call" : "SMS";
+            const label = `${contactName}, ${channelLabel}, ${new Date(conv.inbox_sort_time ?? conv.last_message_at).toLocaleString()}`;
 
             return (
               <div
@@ -353,7 +357,7 @@ export function ConversationList({
                       {contactName}
                     </span>
                     <span className="flex-shrink-0 text-xs text-stone-500 dark:text-[#bdbdbf]">
-                      {timeAgo(conv.last_message_at)}
+                      {timeAgo(conv.inbox_sort_time ?? conv.last_message_at)}
                     </span>
                   </div>
                   <p className="mt-0.5 truncate text-sm text-stone-500 dark:text-[#bdbdbf]">
@@ -389,6 +393,9 @@ export function ConversationList({
                     </span>
                     {/* Status badge */}
                     {spamLabel(conv.spam_state) && <span className={cn("rounded-full px-2 py-0.5 text-xs", statusWarning)}>{spamLabel(conv.spam_state)}</span>}
+                    {!!conv.missed_calls?.length && (
+                      <span className={cn("rounded-full px-2 py-0.5 text-xs", statusNeutral)}>Call + SMS</span>
+                    )}
                     {conv.status === "closed" && (
                       <span className={cn("rounded-full px-2 py-0.5 text-xs", statusNeutral)}>
                         Closed
@@ -437,9 +444,9 @@ export function ConversationList({
         title={`Delete ${deleteTargetIds.length === 1 ? "conversation" : `${deleteTargetIds.length} conversations`}?`}
         description="This permanently removes the selected conversations from your inbox and deletes their text and chat messages. Contacts and appointments are kept. This cannot be undone."
       >
-        {includesVoice && (
+        {(includesVoice || conversations.some(c => deleteTargetIds.includes(c.id) && c.missed_calls?.some(call => call.conversation_id))) && (
           <p className="mb-3 text-sm text-stone-600 dark:text-[#bdbdbf]">
-            Selected calls will be removed from your inbox. Call recordings keep their normal expiration schedule, and usage totals stay the same.
+            Selected calls and any calls grouped with a selected text thread will be removed from your inbox. Call recordings keep their normal expiration schedule, and usage totals stay the same.
           </p>
         )}
         {deleteError && <p role="alert" className="mb-3 text-sm text-red-600 dark:text-red-400">{deleteError}</p>}

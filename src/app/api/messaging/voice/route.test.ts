@@ -1111,7 +1111,7 @@ describe("POST /api/messaging/voice", () => {
       ATTEMPT.caller_phone,
       ATTEMPT.business_id,
       "sess_voicemail",
-      expect.objectContaining({ sourceCallControlId: expect.any(String) })
+      expect.objectContaining({ sourceCallControlId: expect.any(String), inboxOrigin: "voicemail" })
     );
   });
 
@@ -3099,7 +3099,7 @@ describe("POST /api/messaging/voice", () => {
       ATTEMPT.caller_phone,
       ATTEMPT.business_id,
       "sess_recording_error",
-      expect.objectContaining({ sourceCallControlId: expect.any(String) })
+      expect.objectContaining({ sourceCallControlId: expect.any(String), inboxOrigin: "unknown" })
     );
     expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
   });

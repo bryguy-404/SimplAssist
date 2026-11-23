@@ -41,7 +41,7 @@ export function pilotRoutingDependencies(): PilotRoutingDependencies {
         session.caller_phone,
         session.business_id,
         session.call_session_id,
-        { claim, sourceCallControlId: session.call_control_id },
+        { claim, sourceCallControlId: session.call_control_id, inboxOrigin: session.outcome === "caller_abandoned" ? "missed" : "unknown" },
       );
     },
   };

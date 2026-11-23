@@ -23,6 +23,7 @@ beforeEach(() => {
 describe("server-paginated inbox page", () => {
   it.each([
     ["spam", "spam"],
+    ["no_reply", "no_reply"],
     ["inbox", "inbox"],
     ["unknown", "inbox"],
     [["spam", "inbox"], "inbox"],

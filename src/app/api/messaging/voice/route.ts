@@ -1126,7 +1126,7 @@ async function handleRecordingSaved(payload: Record<string, unknown>) {
     state.from,
     state.businessId,
     voicemailMetricSourceId(payload, state.callControlId),
-    { sourceCallControlId: state.callControlId, screeningExpected: state.screeningTracked }
+    { sourceCallControlId: state.callControlId, screeningExpected: state.screeningTracked, inboxOrigin: "voicemail" }
   );
 }
 
@@ -1150,7 +1150,7 @@ async function handleRecordingError(payload: Record<string, unknown>) {
     state.from,
     state.businessId,
     voicemailMetricSourceId(payload, state.callControlId),
-    { sourceCallControlId: state.callControlId, screeningExpected: state.screeningTracked }
+    { sourceCallControlId: state.callControlId, screeningExpected: state.screeningTracked, inboxOrigin: "unknown" }
   );
 }
 
@@ -1560,7 +1560,7 @@ async function triggerForwardingFallback(args: {
       attempt.caller_phone,
       attempt.business_id,
       attempt.call_session_id,
-      { sourceCallControlId: attempt.inbound_call_control_id, screeningExpected: args.voiceState?.screeningTracked }
+      { sourceCallControlId: attempt.inbound_call_control_id, screeningExpected: args.voiceState?.screeningTracked, inboxOrigin: "missed" }
     );
   } catch (err) {
     // Record the failure AND re-open the fallback claim: handleCallHangup

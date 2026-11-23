@@ -19,7 +19,7 @@ export default async function ConversationsPage({ searchParams }: {
   const { business, user, entitlements } = context;
   const smsIncluded = planRequiresSmsProvisioning(entitlements.plan);
   const focus = z.string().uuid().safeParse(searchParams?.conversation);
-  const folder = searchParams?.folder === "spam" ? "spam" : "inbox";
+  const folder = searchParams?.folder === "spam" || searchParams?.folder === "no_reply" ? searchParams.folder : "inbox";
   const [smsReadiness, page] = await Promise.all([
     smsIncluded ? getSmsReadinessForBusiness(business.id) : Promise.resolve({ smsReady: false, blockReason: null }),
     readInboxPage(business.id, user.id, { folder, channel: "all", search: "", focus: focus.success ? focus.data : undefined }),

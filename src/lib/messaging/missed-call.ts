@@ -31,7 +31,7 @@ export async function sendMissedCallSMS(
   callerPhone: string,
   businessId: string,
   callSessionOrControlId: string,
-  delivery?: { claim?: () => Promise<boolean>; sourceCallControlId?: string; screeningExpected?: boolean },
+  delivery?: { claim?: () => Promise<boolean>; sourceCallControlId?: string; screeningExpected?: boolean; inboxOrigin?: "missed" | "voicemail" | "unknown" },
 ): Promise<void> {
   // PERMANENT conditions return without throwing — a webhook retry can
   // never fix them, and throwing would 500-loop the caller's event across
@@ -223,6 +223,17 @@ export async function sendMissedCallSMS(
       sourceCallControlId: delivery?.sourceCallControlId ?? callSessionOrControlId,
       screeningExpected: delivery?.screeningExpected,
     });
+    if (delivery?.inboxOrigin && result.reservationId) {
+      // This describes a completed send. Losing an inbox annotation must never retry a text.
+      try {
+        let update = supabaseAdmin.from("tenant_sms_sends").update({ inbox_call_origin: delivery.inboxOrigin })
+          .eq("id", result.reservationId).eq("business_id", businessId).eq("purpose", "missed_call");
+        if (delivery.inboxOrigin === "missed") update = update.or("inbox_call_origin.is.null,inbox_call_origin.eq.unverified");
+        if (delivery.inboxOrigin === "unknown") update = update.or("inbox_call_origin.is.null,inbox_call_origin.neq.voicemail");
+        const { error } = await update;
+        if (error) throw error;
+      } catch { console.warn("[missed-call] Inbox call origin unavailable", { businessId }); }
+    }
     if (result.replayed) return;
 
     const occurredAt = new Date();

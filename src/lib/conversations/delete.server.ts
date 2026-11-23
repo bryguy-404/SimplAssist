@@ -9,17 +9,19 @@ import {
   resolveBusinessEntitlements,
 } from "@/lib/billing/entitlements";
 import { requireFreshWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
+import { inboxFolders } from "./inbox";
 import { MAX_CONVERSATION_DELETE_BATCH } from "./deletion";
 
 const idsSchema = z.array(z.string().uuid()).min(1).max(MAX_CONVERSATION_DELETE_BATCH);
 
 /** Both deletion routes use the same authorization and completed-call checks. */
-export async function deleteConversations(input: unknown) {
+export async function deleteConversations(input: unknown, expectedFolder?: unknown) {
   const workspace = await requireFreshWorkspaceRouteAccess();
   if (!workspace.ok) return workspace.response;
 
   const parsed = idsSchema.safeParse(input);
-  if (!parsed.success) {
+  const folder = z.enum(inboxFolders).optional().safeParse(expectedFolder);
+  if (!parsed.success || !folder.success) {
     return NextResponse.json(
       { error: `Select between 1 and ${MAX_CONVERSATION_DELETE_BATCH} conversations to delete.` },
       { status: 400 },
@@ -99,7 +101,8 @@ export async function deleteConversations(input: unknown) {
   // The service-only RPC rechecks ownership, locks the selected rows, refuses
   // active calls and linked appointments, then deletes the whole batch atomically.
   // Voice content remains read-only; usage and recording retention are unchanged.
-  const { data: deleted, error } = await supabaseAdmin.rpc("delete_inbox_conversations", {
+  const { data: deleted, error } = await supabaseAdmin.rpc(folder.data ? "delete_inbox_folder_items" : "delete_inbox_conversations", {
+    ...(folder.data ? { p_folder: folder.data } : {}),
     p_business_id: business.id,
     p_owner_id: workspace.access.user.id,
     p_ids: ids,

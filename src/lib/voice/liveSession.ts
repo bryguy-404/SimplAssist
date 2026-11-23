@@ -15,6 +15,7 @@ import {
 import { CallTranscript, type VoiceTranscriptSnapshot } from "./transcript";
 import { buildLiveGreeting, buildLiveInstructions, publicDisclosureInstruction, publicDisclosureComplete, PUBLIC_CONVERSATION_ACTIVATION } from "./conversationStyle";
 import { VOICE_MODEL, usesPublicDisclosure, usesNaturalPublicOpening, type VoiceSession } from "./types";
+import { CallerInputObservation } from "./inboxReply";
 import type { VoiceStore } from "./store";
 
 export interface LiveSessionOptions {
@@ -60,6 +61,12 @@ export class LiveCall {
     audibleSent: boolean; inputGeneration: number; inputQuietAt: number;
     classifierBusy: boolean; instructionAccepted: boolean; pendingReply: boolean; handoffAck: string | null; activationPending: boolean; handoffCommitted: boolean;
   } | null = null;
+  private readonly callerInput: CallerInputObservation;
+  private heardGreetingAt: number | null = null;
+  private audiblePlaybackGeneration = -1;
+  private inboxPlaybackMark: string | null = null;
+  private inputEndedAt: number | null = null;
+  private inboxEvidenceFailed = false;
   private inputAudioMs = 0;
   private transcriptCutoffMs = 0;
   private readonly input: AudioQueue;
@@ -124,6 +131,7 @@ export class LiveCall {
   constructor(private readonly options: LiveSessionOptions) {
     // Retain early caller speech during the bounded startup handshake.
     // Flush it in order once the provider accepts audio; normal input is paced.
+    this.callerInput = new CallerInputObservation(options.profile);
     this.publicOpening = usesPublicDisclosure(options.session);
     this.naturalOpening = usesNaturalPublicOpening(options.session);
     if (this.publicOpening) this.disclosure = { phase: "speaking", attempt: 1, spoken: "", reply: "", mark: null,
@@ -165,6 +173,7 @@ export class LiveCall {
   }
   private persist(fn: () => Promise<void>) {
     this.io = this.io.then(fn).catch(() => {
+      this.inboxEvidenceFailed = true;
       void this.close("persistence_failed", true);
     });
   }
@@ -212,6 +221,7 @@ export class LiveCall {
         // Output-energy thresholds do not identify caller speech. Opening
         // interruption uses the live provider's actual input transcript below;
         // steady background noise must not indefinitely pause disclosure.
+        this.callerInput.observe(Number(event.media.chunk), input, this.monotonicNow());
         this.reorder.add(
           Number(event.media.chunk),
           input,
@@ -270,6 +280,9 @@ export class LiveCall {
           name.startsWith(`played-${this.playbackGeneration}-`) &&
           !this.closing
         ) {
+          if (name === this.inboxPlaybackMark && this.streamId === event.stream_id) {
+            this.heardGreetingAt ??= this.monotonicNow();
+          }
           this.persist(() => this.options.store.playbackAcknowledged());
         }
       } else if (event.event === "stop") {
@@ -858,6 +871,11 @@ export class LiveCall {
             event: "media",
             media: { payload: frame.toString("base64") },
           });
+          if (this.heardGreetingAt === null && this.audiblePlaybackGeneration !== this.playbackGeneration &&
+              (!this.disclosure || this.disclosure.phase === "active") && hasAudibleAudio(frame, this.options.profile)) {
+            this.audiblePlaybackGeneration = this.playbackGeneration;
+            this.inboxPlaybackMark = null;
+          }
           if (this.pendingAction && hasAudibleAudio(frame, this.options.profile))
             this.pendingAction.audibleFrameSent = true;
           if (this.disclosure?.phase === "speaking" && hasAudibleAudio(frame, this.options.profile)) this.disclosure.audibleSent = true;
@@ -889,6 +907,9 @@ export class LiveCall {
           this.output.restrictToNormalBuffer();
           if (++this.outputFrames % 25 === 0) {
             const name = `played-${this.playbackGeneration}-${this.outputFrames}`;
+            if (this.heardGreetingAt === null && this.audiblePlaybackGeneration === this.playbackGeneration) {
+              this.inboxPlaybackMark ??= name;
+            }
             this.pendingMarks.add(name);
             if (this.pendingMarks.size > 20)
               throw new Error("playback_stalled");
@@ -1152,6 +1173,7 @@ export class LiveCall {
   async close(reason: string, fallback: boolean): Promise<void> {
     if (this.closing || this.closed) return this.done;
     this.closing = true;
+    this.inputEndedAt = this.monotonicNow();
     this.finishReason = reason;
     this.fallback = fallback;
     this.finishError = fallback ? reason : null;
@@ -1205,12 +1227,20 @@ export class LiveCall {
     } catch {
       // An expired heartbeat remains a durable recovery signal. Do not log
       // provider payloads, stream credentials, audio or transcript content.
+      this.inboxEvidenceFailed = true;
       console.error("[voice] finalization requires recovery", {
         sessionId: this.options.session.id,
       });
     }
     await this.requestPhoneHangup();
+    const cleanEnd = this.finalUsage && !this.finishError && !this.fallback && !this.inboxEvidenceFailed &&
+      ["caller_hangup", "idle_timeout"].includes(this.finishReason);
+    const reply = this.callerInput.result(this.transcript.hasCallerText, cleanEnd, this.heardGreetingAt, this.inputEndedAt);
     this.options.onClosed();
     this.resolveClosed();
+    // Folder evidence is optional. Release phone capacity before writing it.
+    void this.options.store.inboxReply?.(reply).catch(() => {
+      console.warn("[voice] Inbox call result unavailable", { sessionId: this.options.session.id });
+    });
   }
 }

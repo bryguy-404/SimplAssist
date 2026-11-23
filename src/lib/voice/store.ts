@@ -1,5 +1,6 @@
 import { createHash, createHmac } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { VoiceInboxReply } from "./inboxReply";
 import type { TranscriptFragment, VoiceSession } from "./types";
 
 export const hashStreamToken = (token: string) =>
@@ -59,6 +60,7 @@ export interface VoiceStore {
   customerAudioStarted?(eventId: string, startedAt: string): Promise<void>;
   customerPlaybackAcknowledged?(eventId: string): Promise<void>;
   customerTermination?(eventId: string, terminatedAt: string): Promise<void>;
+  inboxReply?(reply: VoiceInboxReply): Promise<void>;
   finish(
     outcome: string,
     error: string | null,
@@ -195,6 +197,13 @@ export function createVoiceStore(
       await rpc("record_voice_customer_termination", {
         p_event_id: eventId, p_terminated_at: terminatedAt,
       });
+    },
+    async inboxReply(reply) {
+      let update = db.from("voice_sessions").update({ inbox_reply_state: reply })
+        .eq("business_id", session.business_id).eq("id", session.id).eq("status", "closed");
+      if (reply !== "responded") update = update.is("inbox_reply_state", null);
+      const { error } = await update;
+      if (error) throw new Error("voice_inbox_reply_unavailable");
     },
     async finish(outcome, error, fallback) {
       await rpc("finalize_voice_session", {

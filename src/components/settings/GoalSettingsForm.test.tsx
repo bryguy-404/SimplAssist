@@ -28,13 +28,15 @@ import GoalSettingsForm, {
 function renderForm(
   initialPrimaryGoal: PrimaryGoal | null,
   initialGoalUrl: string | null = null,
-  registrationLocked = false
+  registrationLocked = false,
+  canUseCalendar = true
 ): string {
   return renderToStaticMarkup(
     <GoalSettingsForm
       initialPrimaryGoal={initialPrimaryGoal}
       initialGoalUrl={initialGoalUrl}
       registrationLocked={registrationLocked}
+      canUseCalendar={canUseCalendar}
     />
   );
 }
@@ -60,6 +62,14 @@ function submitButton(markup: string): string {
 }
 
 describe("GoalSettingsForm", () => {
+  it("only offers a Google Calendar connection when the plan includes it", () => {
+    const eligible = renderForm("book");
+    const smsOnly = renderForm("book", null, false, false);
+    expect(eligible).toContain("You can connect Google Calendar");
+    expect(smsOnly).toContain("require a plan with calendar access");
+    expect(smsOnly).not.toContain("You can connect Google Calendar");
+  });
+
   it("renders the exact shared copy in order with only the v1 options", () => {
     const markup = renderForm(null);
     const copy = [

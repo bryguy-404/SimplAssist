@@ -9,7 +9,9 @@ import { requireWorkspacePageAccess } from "@/lib/customer/workspaceRouteRespons
 import { readInboxPage } from "@/lib/conversations/inbox.server";
 export type { ConversationWithContact } from "@/lib/conversations/inbox";
 
-export default async function ConversationsPage({ searchParams }: { searchParams?: { conversation?: string | string[] } }) {
+export default async function ConversationsPage({ searchParams }: {
+  searchParams?: { conversation?: string | string[]; folder?: string | string[] };
+}) {
   await requireWorkspacePageAccess();
   const context = await getDashboardEntitledContext();
   if (context.status === "unauthenticated") redirect("/login");
@@ -17,13 +19,15 @@ export default async function ConversationsPage({ searchParams }: { searchParams
   const { business, user, entitlements } = context;
   const smsIncluded = planRequiresSmsProvisioning(entitlements.plan);
   const focus = z.string().uuid().safeParse(searchParams?.conversation);
+  const folder = searchParams?.folder === "spam" ? "spam" : "inbox";
   const [smsReadiness, page] = await Promise.all([
     smsIncluded ? getSmsReadinessForBusiness(business.id) : Promise.resolve({ smsReady: false, blockReason: null }),
-    readInboxPage(business.id, user.id, { folder: "inbox", channel: "all", search: "", focus: focus.success ? focus.data : undefined }),
+    readInboxPage(business.id, user.id, { folder, channel: "all", search: "", focus: focus.success ? focus.data : undefined }),
   ]);
   return (
     <div className="h-[calc(100vh-4rem)]">
       <InboxLayout
+        key={`${page.folder}:${page.selected?.id ?? ""}`}
         conversations={page.conversations} initialPage={page}
         businessId={business.id} smsIncluded={smsIncluded}
         smsReady={smsReadiness.smsReady} smsBlockReason={smsReadiness.blockReason}

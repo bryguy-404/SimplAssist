@@ -304,6 +304,15 @@ describe('SettingsPage access and owner reads', () => {
 });
 
 describe('SettingsPage primary-goal presentation', () => {
+  it('uses the calendar entitlement in the goal description for SMS-only accounts', async () => {
+    const context = resolvedContext('book', null);
+    context.entitlements = { ...context.entitlements, plan: 'sms_only' };
+    mocks.getDashboardEntitledContext.mockResolvedValue(context);
+    mocks.canUseFeature.mockImplementation((_entitlements, feature) => feature !== 'calendar');
+    renderToStaticMarkup(await SettingsPage({}));
+    expect(mocks.goalSettingsForm).toHaveBeenCalledWith(expect.objectContaining({ canUseCalendar: false }));
+  });
+
   it('passes false while preserving saved token state for signup mode', async () => {
     mocks.getDashboardEntitledContext.mockResolvedValue(
       resolvedContext('signup', SIGNUP_GOAL_URL)
@@ -315,6 +324,7 @@ describe('SettingsPage primary-goal presentation', () => {
       initialPrimaryGoal: 'signup',
       initialGoalUrl: SIGNUP_GOAL_URL,
       registrationLocked: false,
+      canUseCalendar: true,
     });
     expect(markup.indexOf('Goal settings form')).toBeLessThan(
       markup.indexOf('AI settings form')
@@ -348,6 +358,7 @@ describe('SettingsPage primary-goal presentation', () => {
         initialPrimaryGoal: primaryGoal,
         initialGoalUrl: RETAINED_GOAL_URL,
         registrationLocked: false,
+        canUseCalendar: true,
       });
       expect(mocks.aiSettingsForm).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -421,6 +432,7 @@ describe('SettingsPage registration-sensitive settings', () => {
         initialPrimaryGoal: 'book',
         initialGoalUrl: RETAINED_GOAL_URL,
         registrationLocked: expectedLocked,
+        canUseCalendar: true,
       });
       expect(mocks.businessInfoEditor).toHaveBeenCalledWith({
         initialPhoneNumber: '+13175550123',

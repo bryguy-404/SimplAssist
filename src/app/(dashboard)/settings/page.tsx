@@ -207,6 +207,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
             initialPrimaryGoal={business.primary_goal}
             initialGoalUrl={business.goal_url}
             registrationLocked={registrationLocked}
+            canUseCalendar={canUseCalendar}
           />
         </div>
 

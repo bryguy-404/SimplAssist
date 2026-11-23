@@ -23,6 +23,7 @@ export type GoalSettingsFormProps = {
   initialPrimaryGoal: PrimaryGoal | null;
   initialGoalUrl: string | null;
   registrationLocked: boolean;
+  canUseCalendar: boolean;
 };
 
 type GoalSettingsDraft = {
@@ -41,16 +42,6 @@ type GoalSettingsDraftAction =
 
 const LOCKED_GOAL_HELPER =
   "Pick the main one. Your AI still handles everything else customers ask — this just sets what it steers toward.";
-const GOAL_OPTION_DETAILS = {
-  book: "Your assistant works toward getting customers on your schedule. You get a Calendar page and can connect Google Calendar.",
-  signup:
-    "Your assistant sends customers the link you set below. Everyone it sends the link to shows up on your Leads page.",
-} as const;
-const GOAL_SWITCH_NOTICE = {
-  book: "Switching to scheduling replaces your Leads page with a Calendar page, and your assistant starts working toward booking a time instead of sending your link. Nothing is deleted. Your link is kept in case you switch back.",
-  signup:
-    "Switching to a website link replaces your Calendar page and booking settings with a Leads page, and your assistant sends your link instead of offering appointments. Nothing is deleted. Your calendar comes back if you switch back.",
-} as const;
 const GOAL_SETTINGS_SAVE_FALLBACK =
   "Could not save your AI settings. Please try again.";
 
@@ -146,6 +137,7 @@ export default function GoalSettingsForm({
   initialPrimaryGoal,
   initialGoalUrl,
   registrationLocked,
+  canUseCalendar,
 }: GoalSettingsFormProps) {
   const router = useRouter();
   const [draft, dispatch] = useReducer(
@@ -174,6 +166,12 @@ export default function GoalSettingsForm({
     draft.primaryGoal !== initialPrimaryGoal
       ? draft.primaryGoal
       : null;
+  const schedulingDetail = canUseCalendar
+    ? "Choose this goal to help customers book a time. You can connect Google Calendar in Booking settings."
+    : "Choose this goal for appointment requests. Google Calendar and automatic booking require a plan with calendar access.";
+  const schedulingNotice = registrationLocked
+    ? "Your saved link is kept. After switching to scheduling, contact support to switch back to the website-link goal."
+    : "Your saved link is kept if you switch back.";
   const payload = buildPrimaryGoalUpdate({
     primary_goal: draft.primaryGoal,
     goal_url: draft.goalUrl,
@@ -213,8 +211,7 @@ export default function GoalSettingsForm({
           Main goal
         </h2>
         <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">
-          The one outcome your assistant steers conversations toward. It also
-          decides whether your dashboard shows a Calendar or a Leads page.
+          Choose the outcome your assistant works toward when a customer reaches out.
         </p>
       </div>
 
@@ -228,7 +225,10 @@ export default function GoalSettingsForm({
         disabled={saving}
         disabledOptions={signupLocked ? ["signup"] : undefined}
         helper={registrationLocked ? LOCKED_GOAL_HELPER : undefined}
-        optionDetails={GOAL_OPTION_DETAILS}
+        optionDetails={{
+          book: schedulingDetail,
+          signup: "Your assistant sends the link you set below. Everyone it sends the link to shows up on your Leads page.",
+        }}
         goalUrlLabel="Link your assistant sends"
       />
 
@@ -237,7 +237,9 @@ export default function GoalSettingsForm({
           role="status"
           className="rounded-[14px] border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-[rgba(245,158,11,0.25)] dark:bg-[rgba(245,158,11,0.12)] dark:text-[#fcd9a5]"
         >
-          {GOAL_SWITCH_NOTICE[switchingTo]}
+          {switchingTo === "book"
+            ? `Your assistant will focus on appointment requests and your Leads page will close. ${schedulingNotice}`
+            : "Your assistant will send your website link and your dashboard will show Leads. Your previous appointment records are kept."}
         </p>
       )}
 

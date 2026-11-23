@@ -18,9 +18,20 @@ beforeEach(() => {
   m.context.mockResolvedValue({ status: "resolved", business: { id: "business" }, user: { id: "owner" }, entitlements: { plan: "sms_and_chat" } });
   m.readiness.mockResolvedValue({ smsReady: true, blockReason: null });
   m.feature.mockReturnValue(true); m.smsPlan.mockReturnValue(true);
-  m.readPage.mockImplementation(async (_b, _o, query) => ({ folder: query.focus ? "spam" : "inbox", conversations: [], selected: query.focus ? call : null, counts: { inbox: 120, spam: 200 }, total: 120, next: "next" }));
+  m.readPage.mockImplementation(async (_b, _o, query) => ({ folder: query.focus ? "spam" : query.folder, conversations: [], selected: query.focus ? call : null, counts: { inbox: 120, spam: 200 }, total: 120, next: "next" }));
 });
 describe("server-paginated inbox page", () => {
+  it.each([
+    ["spam", "spam"],
+    ["inbox", "inbox"],
+    ["unknown", "inbox"],
+    [["spam", "inbox"], "inbox"],
+  ] as const)("opens the requested folder for %j", async (value, expected) => {
+    const folder = typeof value === "string" ? value : [...value];
+    renderToStaticMarkup(await ConversationsPage({ searchParams: { folder } }));
+    expect(m.readPage).toHaveBeenCalledWith("business", "owner", expect.objectContaining({ folder: expected }));
+    expect(m.layout).toHaveBeenCalledWith(expect.objectContaining({ initialPage: expect.objectContaining({ folder: expected }) }));
+  });
   it("opens an authorized deep link in the correct folder even outside the loaded page", async () => {
     renderToStaticMarkup(await ConversationsPage({ searchParams: { conversation: callId } }));
     expect(m.readPage).toHaveBeenCalledWith("business", "owner", { folder: "inbox", channel: "all", search: "", focus: callId });

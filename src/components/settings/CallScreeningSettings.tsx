@@ -100,7 +100,7 @@ export default function CallScreeningSettings() {
           <p className={clsx("mt-1 max-w-2xl text-sm", bodyFaint)}>
             Catch likely spam and robocalls{number ? <> to {number}</> : null} so your assistant doesn&rsquo;t text them back.
             You can review anything that gets flagged in{" "}
-            <Link href="/conversations" className="underline underline-offset-4">Conversations &rarr; Spam</Link>.
+            <Link href="/conversations?folder=spam" className="underline underline-offset-4">Conversations &rarr; Spam</Link>.
           </p>
         </div>
         <button type="button" onClick={() => load(true)} disabled={busy}

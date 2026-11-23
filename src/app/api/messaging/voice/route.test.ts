@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   unwrap: vi.fn(),
   reject: vi.fn(),
   answer: vi.fn(),
+  captureScreening: vi.fn(),
+  finishScreening: vi.fn(),
   hangup: vi.fn(),
   startPlayback: vi.fn(),
   speak: vi.fn(),
@@ -30,6 +32,7 @@ vi.mock("@/lib/voice/access.server", () => ({
   isCustomerVoiceRolloutEnabledForBusiness: mocks.commercialRollout,
   hasCustomerVoiceRoutingConfiguration: mocks.commercialConfiguration,
 }));
+vi.mock("@/lib/call-screening/calls.server", () => ({ captureCallScreening: mocks.captureScreening, finishCallScreening: mocks.finishScreening }));
 vi.mock("@/lib/voice/routing", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/voice/routing")>(),
   handlePilotEvent: mocks.handleStoredVoiceEvent,
@@ -398,6 +401,8 @@ describe("commercial unanswered-call integration", () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.captureScreening.mockResolvedValue(undefined);
+  mocks.finishScreening.mockResolvedValue(undefined);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
   vi.spyOn(console, "log").mockImplementation(() => undefined);
@@ -436,6 +441,37 @@ afterEach(() => {
 });
 
 describe("POST /api/messaging/voice", () => {
+  it("stores a flag before answering and records that future callbacks require screening evidence", async () => {
+    const payload = { direction: "incoming", call_control_id: "screened", call_session_id: "session", from: ATTEMPT.caller_phone, to: "+15745550900", call_screening_result: "spam_likely" };
+    mocks.unwrap.mockResolvedValue({ data: { id: "evt-screened", event_type: "call.initiated", payload } });
+    queueResults({ data: { business_id: ATTEMPT.business_id }, error: null }, { data: { name: "Business", ai_settings: { language: "en" } }, error: null });
+    expect((await voiceWebhook(request())).status).toBe(200);
+    expect(mocks.captureScreening).toHaveBeenCalledWith(ATTEMPT.business_id, payload);
+    expect(mocks.captureScreening.mock.invocationCallOrder[0]).toBeLessThan(mocks.answer.mock.invocationCallOrder[0]);
+    expect(JSON.parse(Buffer.from(mocks.answer.mock.calls[0][1].client_state, "base64").toString())).toMatchObject({ screeningTracked: true });
+  });
+  it("releases the event for retry if evidence cannot be persisted", async () => {
+    mocks.unwrap.mockResolvedValue({ data: { id: "evt-screen-failure", event_type: "call.initiated", payload: { direction: "incoming", call_control_id: "screened", from: ATTEMPT.caller_phone, to: "+15745550900" } } });
+    queueResults({ data: { business_id: ATTEMPT.business_id }, error: null }, { data: { name: "Business" }, error: null });
+    mocks.captureScreening.mockRejectedValue(new Error("DB unavailable"));
+    expect((await voiceWebhook(request())).status).toBe(500);
+    expect(mocks.answer).not.toHaveBeenCalled();
+    expect(mocks.releaseProcessedEvent).toHaveBeenCalledWith("evt-screen-failure");
+  });
+  it("records termination before an AI callback handles the event and returns early", async () => {
+    mocks.unwrap.mockResolvedValue({ data: { id: "evt-screen-end", event_type: "call.hangup", payload: { call_control_id: "screened" } } });
+    mocks.handleStoredVoiceEvent.mockResolvedValue(true);
+    expect((await voiceWebhook(request())).status).toBe(200);
+    expect(mocks.finishScreening.mock.invocationCallOrder[0]).toBeLessThan(mocks.handleStoredVoiceEvent.mock.invocationCallOrder[0]);
+  });
+  it("ignores screening evidence on unsigned and outbound initiation", async () => {
+    mocks.unwrap.mockRejectedValueOnce(new Error("bad signature"));
+    expect((await voiceWebhook(request())).status).toBe(403);
+    mocks.unwrap.mockResolvedValue({ data: { id: "evt-screen-out", event_type: "call.initiated", payload: { direction: "outgoing", call_screening_result: "spam_likely" } } });
+    expect((await voiceWebhook(request())).status).toBe(200);
+    expect(mocks.captureScreening).not.toHaveBeenCalled();
+    expect(mocks.finishScreening).not.toHaveBeenCalled();
+  });
   it("uses forwarding-disabled state to play ringback before the voicemail disclosure", async () => {
     mocks.unwrap.mockResolvedValueOnce(
       voiceEvent(
@@ -1074,7 +1110,8 @@ describe("POST /api/messaging/voice", () => {
     expect(mocks.sendMissedCallSMS).toHaveBeenCalledWith(
       ATTEMPT.caller_phone,
       ATTEMPT.business_id,
-      "sess_voicemail"
+      "sess_voicemail",
+      expect.objectContaining({ sourceCallControlId: expect.any(String) })
     );
   });
 
@@ -2357,7 +2394,8 @@ describe("POST /api/messaging/voice", () => {
       expect(mocks.sendMissedCallSMS).toHaveBeenCalledWith(
         ATTEMPT.caller_phone,
         ATTEMPT.business_id,
-        ATTEMPT.call_session_id
+        ATTEMPT.call_session_id,
+      expect.objectContaining({ sourceCallControlId: expect.any(String) })
       );
       expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
     }
@@ -2455,7 +2493,8 @@ describe("POST /api/messaging/voice", () => {
     expect(mocks.sendMissedCallSMS).toHaveBeenCalledWith(
       ATTEMPT.caller_phone,
       ATTEMPT.business_id,
-      ATTEMPT.call_session_id
+      ATTEMPT.call_session_id,
+      expect.objectContaining({ sourceCallControlId: expect.any(String) })
     );
     expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
   });
@@ -2519,7 +2558,8 @@ describe("POST /api/messaging/voice", () => {
       expect(mocks.sendMissedCallSMS).toHaveBeenCalledWith(
         ATTEMPT.caller_phone,
         ATTEMPT.business_id,
-        ATTEMPT.call_session_id
+        ATTEMPT.call_session_id,
+      expect.objectContaining({ sourceCallControlId: expect.any(String) })
       );
       expect(mocks.dial).not.toHaveBeenCalled();
       expect(mocks.bridge).not.toHaveBeenCalled();
@@ -2567,7 +2607,8 @@ describe("POST /api/messaging/voice", () => {
     expect(mocks.sendMissedCallSMS).toHaveBeenCalledWith(
       ATTEMPT.caller_phone,
       ATTEMPT.business_id,
-      ATTEMPT.call_session_id
+      ATTEMPT.call_session_id,
+      expect.objectContaining({ sourceCallControlId: expect.any(String) })
     );
     expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
   });
@@ -2690,7 +2731,8 @@ describe("POST /api/messaging/voice", () => {
       expect(mocks.sendMissedCallSMS).toHaveBeenCalledWith(
         ATTEMPT.caller_phone,
         ATTEMPT.business_id,
-        ATTEMPT.call_session_id
+        ATTEMPT.call_session_id,
+      expect.objectContaining({ sourceCallControlId: expect.any(String) })
       );
       expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
     }
@@ -2781,7 +2823,8 @@ describe("POST /api/messaging/voice", () => {
     expect(mocks.sendMissedCallSMS).toHaveBeenCalledWith(
       ATTEMPT.caller_phone,
       ATTEMPT.business_id,
-      ATTEMPT.call_session_id
+      ATTEMPT.call_session_id,
+      expect.objectContaining({ sourceCallControlId: expect.any(String) })
     );
     expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
   });
@@ -2881,7 +2924,8 @@ describe("POST /api/messaging/voice", () => {
     expect(mocks.sendMissedCallSMS).toHaveBeenCalledWith(
       ATTEMPT.caller_phone,
       ATTEMPT.business_id,
-      ATTEMPT.call_session_id
+      ATTEMPT.call_session_id,
+      expect.objectContaining({ sourceCallControlId: expect.any(String) })
     );
     expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
   });
@@ -2962,7 +3006,8 @@ describe("POST /api/messaging/voice", () => {
     expect(mocks.sendMissedCallSMS).toHaveBeenCalledWith(
       ATTEMPT.caller_phone,
       ATTEMPT.business_id,
-      ATTEMPT.call_session_id
+      ATTEMPT.call_session_id,
+      expect.objectContaining({ sourceCallControlId: expect.any(String) })
     );
     expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
   });
@@ -3031,7 +3076,8 @@ describe("POST /api/messaging/voice", () => {
     expect(mocks.sendMissedCallSMS).toHaveBeenCalledWith(
       ATTEMPT.caller_phone,
       ATTEMPT.business_id,
-      "cc_inbound"
+      "cc_inbound",
+      expect.objectContaining({ sourceCallControlId: expect.any(String) })
     );
     expect(mocks.releaseProcessedEvent).toHaveBeenCalledWith(
       "evt_voice_call_recording_saved"
@@ -3052,7 +3098,8 @@ describe("POST /api/messaging/voice", () => {
     expect(mocks.sendMissedCallSMS).toHaveBeenCalledWith(
       ATTEMPT.caller_phone,
       ATTEMPT.business_id,
-      "sess_recording_error"
+      "sess_recording_error",
+      expect.objectContaining({ sourceCallControlId: expect.any(String) })
     );
     expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
   });

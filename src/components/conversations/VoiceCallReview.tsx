@@ -75,7 +75,7 @@ export function VoiceCallReviewContent({ call }: { call: VoiceCallReview }) {
   return <div className="min-w-0 space-y-6 [overflow-wrap:anywhere]">
     <section className="rounded-xl border border-[#ece4d8] p-4 dark:border-white/10" aria-label="Call summary">
       <Status status={call.call} />
-      <p className={`mt-3 flex flex-wrap gap-x-1 gap-y-1 text-sm ${body}`}><span>Received <time dateTime={call.receivedAt}>{timestamp(call.receivedAt)}</time></span>{call.durationSeconds !== null ? <span>· {offset(call.durationSeconds)} conversation</span> : null}</p>
+      <p className={`mt-3 flex flex-wrap gap-x-1 gap-y-1 text-sm ${body}`}><span>Received <time dateTime={call.receivedAt}>{timestamp(call.receivedAt)}</time></span>{call.durationSeconds !== null ? <span>· {offset(call.durationSeconds)} {call.callKind === "phone" ? "call" : "conversation"}</span> : null}</p>
     </section>
     <section aria-labelledby="call-contact-heading" className="space-y-2">
       <h4 id="call-contact-heading" className={`text-sm font-semibold ${ink}`}>Caller details</h4>
@@ -106,7 +106,7 @@ export function VoiceCallReviewContent({ call }: { call: VoiceCallReview }) {
     </section>
     <section aria-labelledby="call-recording-heading" className="space-y-3">
       <h4 id="call-recording-heading" className={`text-sm font-semibold ${ink}`}>Recording</h4>
-      {call.recordings.length ? call.recordings.map((recording) => <Recording key={recording.id} recording={recording} />) : <p className={`text-sm ${body}`}>Recording not yet available. Refresh to check again.</p>}
+      {call.recordings.length ? call.recordings.map((recording) => <Recording key={recording.id} recording={recording} />) : <p className={`text-sm ${body}`}>{call.callKind === "phone" ? "No recording is available in this call record." : "Recording not yet available. Refresh to check again."}</p>}
     </section>
   </div>;
 }

@@ -1,4 +1,5 @@
-import { sendTenantSms } from "./tenantSmsSend.server";
+import { sendTenantSms, TenantSmsSendError } from "./tenantSmsSend.server";
+import { callFollowupAllowed } from "@/lib/call-screening/calls.server";
 import { getOutboundSendContext } from "./lookup";
 import { isE164PhoneNumber } from "@/lib/phone/e164";
 import {
@@ -30,7 +31,7 @@ export async function sendMissedCallSMS(
   callerPhone: string,
   businessId: string,
   callSessionOrControlId: string,
-  delivery?: { claim: () => Promise<boolean> },
+  delivery?: { claim?: () => Promise<boolean>; sourceCallControlId?: string; screeningExpected?: boolean },
 ): Promise<void> {
   // PERMANENT conditions return without throwing — a webhook retry can
   // never fix them, and throwing would 500-loop the caller's event across
@@ -48,6 +49,11 @@ export async function sendMissedCallSMS(
   }
 
   try {
+    // Check before creating a contact, empty SMS thread, or paused-system message.
+    if (!(await callFollowupAllowed({ businessId, callerPhone,
+      identity: delivery?.sourceCallControlId ?? callSessionOrControlId,
+      expected: delivery?.screeningExpected,
+    }))) return;
     const entitlements = await resolveBusinessEntitlements(businessId);
     if (!canUseFeature(entitlements, "missed_call_sms")) {
       console.warn(
@@ -204,7 +210,7 @@ export async function sendMissedCallSMS(
 
     // Voice fallback claims persist before crossing the provider boundary.
     // A timeout after this point is ambiguous and must never cause a resend.
-    if (delivery && !(await delivery.claim())) return;
+    if (delivery?.claim && !(await delivery.claim())) return;
     const result = await sendTenantSms({
       businessId,
       from: phoneNumberRow.phone_number,
@@ -214,6 +220,8 @@ export async function sendMissedCallSMS(
       purpose: "missed_call",
       idempotencyKey: `missed-call:${callSessionOrControlId}`,
       conversationId: conversation.id,
+      sourceCallControlId: delivery?.sourceCallControlId ?? callSessionOrControlId,
+      screeningExpected: delivery?.screeningExpected,
     });
     if (result.replayed) return;
 
@@ -265,6 +273,7 @@ export async function sendMissedCallSMS(
       );
     }
   } catch (error) {
+    if (error instanceof TenantSmsSendError && error.reason === "sms_call_screened") return;
     // Rethrow so callers can record-and-let-retry: a swallowed send failure
     // silently loses the product's core deliverable. This throws ONLY for
     // genuine send-path failures — a usage-gate block returns normally above

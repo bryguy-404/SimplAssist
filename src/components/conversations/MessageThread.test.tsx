@@ -38,7 +38,7 @@ describe("conversation channel display", () => {
     );
     expect(html).toContain("Loading transcript");
     expect(html).toContain("Loading call review");
-    expect(html).toContain("This voice transcript is read-only.");
+    expect(html).toContain("This call record is read-only.");
     expect(html).not.toMatch(
       /No messages in this conversation yet|<textarea|Take Over|Let AI Handle/,
     );

@@ -22,7 +22,7 @@ beforeEach(() => {
     const capture = { table, filters: [] as [string, unknown][] }; calls.push(capture);
     const result = () => Promise.resolve({ data: table === "conversations" && capture.filters.some(([field, value]) => field === "channel" && value === "sms") ? rows.sms_conversations : rows[table], error: null });
     const query: Record<string, unknown> = {};
-    for (const method of ["select", "order", "in"]) query[method] = vi.fn(() => query);
+    for (const method of ["select", "order", "in", "is"]) query[method] = vi.fn(() => query);
     query.eq = vi.fn((field, value) => { capture.filters.push([field, value]); return query; });
     query.maybeSingle = result;
     query.then = (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) => result().then(resolve, reject);
@@ -30,6 +30,20 @@ beforeEach(() => {
   });
 });
 describe("customer voice read model", () => {
+  it("shows a normal routed call honestly without AI actions or invented recordings", async () => {
+    rows.conversations = { id: "phone", contact_id: "contact", call_kind: "phone" };
+    rows.voice_sessions = null;
+    rows.inbound_call_screening = { started_at: "2026-11-02T12:00:00Z", ended_at: "2026-11-02T12:00:15Z" };
+    const review = await loadVoiceCallReview("business", "phone");
+    expect(review).toMatchObject({ callKind: "phone", durationSeconds: 15, actions: [], recordings: [], confirmedContact: null });
+    expect(calls.map(c => c.table)).not.toContain("voice_actions");
+    expect(calls.every(c => c.filters.some(([key, value]) => key === "business_id" && value === "business"))).toBe(true);
+  });
+  it("does not invent a call length when recovery only proves the call is no longer alive", async () => {
+    rows.conversations = { id: "phone", contact_id: "contact", call_kind: "phone" }; rows.voice_sessions = null;
+    rows.inbound_call_screening = { started_at: "2026-11-02T12:00:00Z", ended_at: "2026-11-02T12:15:00Z", ended_time_verified: false };
+    expect((await loadVoiceCallReview("business", "phone"))?.durationSeconds).toBeNull();
+  });
   it("scopes every read and exposes only customer fields independent of rollout flags", async () => {
     vi.stubEnv("VOICE_ACTIONS_ROLLOUT", "false");
     const review = await loadVoiceCallReview("business", "voice");

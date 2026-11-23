@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   send: vi.fn(),
+  screening: vi.fn(),
   anthropicCreate: vi.fn(),
   from: vi.fn(),
   resolveBusinessEntitlements: vi.fn(),
@@ -18,7 +20,8 @@ const mocks = vi.hoisted(() => ({
   recordBusinessMetricEventBestEffort: vi.fn(),
 }));
 
-vi.mock("./tenantSmsSend.server", () => ({ sendTenantSms: mocks.send }));
+vi.mock("./tenantSmsSend.server", async (original) => ({ ...await original<typeof import("./tenantSmsSend.server")>(), sendTenantSms: mocks.send }));
+vi.mock("@/lib/call-screening/calls.server", () => ({ callFollowupAllowed: mocks.screening }));
 vi.mock("./client", () => ({
   telnyx: { messages: { send: mocks.send } },
 }));
@@ -66,6 +69,30 @@ vi.mock("@/lib/metrics/recording.server", () => ({
 }));
 
 import { sendMissedCallSMS } from "./missed-call";
+import { TenantSmsSendError } from "./tenantSmsSend.server";
+
+describe("screened automatic follow-ups", () => {
+  it("suppresses before contact, conversation, paused notice, quota or provider effects", async () => {
+    mocks.screening.mockResolvedValue(false);
+    await sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID, { sourceCallControlId: "inbound", screeningExpected: true });
+    expect(mocks.screening).toHaveBeenCalledWith({ businessId: BUSINESS_ID, callerPhone: CALLER, identity: "inbound", expected: true });
+    for (const fn of [mocks.findOrCreateContact, mocks.getOrCreateConversation, mocks.insertPausedSystemMessageIfNeeded, mocks.preflightOutboundSms, mocks.send]) expect(fn).not.toHaveBeenCalled();
+  });
+  it("retries an unavailable screening check without creating an SMS thread", async () => {
+    mocks.screening.mockRejectedValue(new Error("screening unavailable"));
+    await expect(sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID)).rejects.toThrow("screening unavailable");
+    expect(mocks.getOrCreateConversation).not.toHaveBeenCalled();
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+  it("treats a late provider-boundary suppression as handled without sending metrics", async () => {
+    setRows("en");
+    mocks.send.mockRejectedValueOnce(new TenantSmsSendError("sms_call_screened", "not_sent"));
+    await expect(sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID)).resolves.toBeUndefined();
+    expect(mocks.addMessage).not.toHaveBeenCalled();
+    expect(mocks.recordOutboundSmsUsage).not.toHaveBeenCalled();
+    expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
+  });
+});
 
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
 const CALLER = "+15745550100";
@@ -101,6 +128,7 @@ function setRows(language: "en" | "es" | "both") {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.screening.mockResolvedValue(true);
   tableResults.clear();
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   vi.spyOn(console, "warn").mockImplementation(() => undefined);

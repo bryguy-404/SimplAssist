@@ -131,6 +131,16 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 
 ## Railway operations
 
+Call screening is opt-in and uses the rollout and verification procedure in
+[`docs/call-screening-implementation.md`](docs/call-screening-implementation.md).
+`CALL_SCREENING_ENABLED=1` exposes the setting broadly;
+`CALL_SCREENING_PILOT_BUSINESS_ID` exposes it for one exact business UUID while
+the broad switch is off. Both default closed and must stay server-only. Neither
+switch disables processing of existing carrier flags or retained call history.
+Apply migration `20261122081018_call_screening_and_spam_inbox.sql` before the
+compatible application. A customer must still explicitly enable screening;
+the application only requests `disabled` or `flag_calls`, never `reject_calls`.
+
 Owner booking SMS alerts use the separate, default-off platform sender and
 independent worker described in
 [`docs/owner-booking-alerts-operations.md`](docs/owner-booking-alerts-operations.md).
@@ -155,3 +165,5 @@ the matching `CRON_SECRET`; do not add a Railway cron service or a duplicate
 scheduler. Hosted migration, environment, WAF/CDN, scheduler, Stripe, Telnyx,
 deployment, flag, and traffic-drain actions require a separately approved
 release step.
+
+- `ACCOUNT_SIGNUP_ALERTS_ENABLED` - exact `true` enables Bryan's new-account milestone emails after the account-alert migration is applied. Defaults off; see [activation and verification](docs/account-signup-alerts.md).

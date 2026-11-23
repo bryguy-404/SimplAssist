@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { ServiceAgreementLink } from '@/components/agreements/ServiceAgreementLink';
 import OwnerVoiceSettings from '@/components/settings/OwnerVoiceSettings';
+import CallScreeningSettings from '@/components/settings/CallScreeningSettings';
 import OwnerBookingAlerts from '@/components/owner-booking-alerts/OwnerBookingAlerts';
 import { getOwnerVoiceSettings } from '@/lib/voice/access.server';
 import BookingSettingsForm from '@/components/settings/BookingSettingsForm';
@@ -123,6 +124,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
       </div>}
 
       <OwnerVoiceSettings initialSettings={voiceSettings} />
+      <CallScreeningSettings />
 
       <OwnerBookingAlerts key={business.id} />
 

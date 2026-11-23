@@ -222,7 +222,8 @@ export class TollFreeNumberUnsupportedError extends Error {
 // duplicate, and a mid-pagination failure makes the result ambiguous.
 export async function findOwnedNumberId(
   phoneNumber: string,
-  businessId: string
+  businessId: string,
+  requestOptions?: { maxRetries?: number; timeout?: number; signal?: AbortSignal }
 ): Promise<string | null> {
   // Digits-only for the filter: the SDK documents "non-numerical characters
   // will result in no values being returned" for filter[phone_number].
@@ -233,7 +234,7 @@ export async function findOwnedNumberId(
   const digitsOnly = phoneNumber.replace(/\D/g, "");
   const result = await telnyx.phoneNumbers.list({
     filter: { phone_number: digitsOnly, customer_reference: businessId },
-  });
+  }, ...(requestOptions ? [requestOptions] as const : [] as const));
 
   const exactMatches: Array<{
     id?: string;

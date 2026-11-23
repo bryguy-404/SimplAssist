@@ -405,7 +405,7 @@ export function MessageThread({
               <span className="whitespace-nowrap">
                 ·{" "}
                 {conversation.channel === "voice"
-                  ? "AI voice call"
+                  ? conversation.call_kind === "phone" ? "Phone call" : "AI voice call"
                   : conversation.channel === "sms"
                     ? "SMS"
                     : "Web Chat"}
@@ -475,7 +475,7 @@ export function MessageThread({
                 : conversation.channel === "web_chat"
                   ? "AI chat"
                   : conversation.channel === "voice"
-                    ? "Call transcript"
+                    ? conversation.call_kind === "phone" ? "Call details" : "Call transcript"
                     : "Manual replies"}
           </span>
         )}
@@ -507,10 +507,10 @@ export function MessageThread({
               key={conversation.id}
               conversationId={conversation.id}
             />
-            <VoiceTranscriptPanel
+            {conversation.call_kind === "phone" ? <p className="text-sm text-stone-500 dark:text-stone-400">No transcript is available for this call.</p> : <VoiceTranscriptPanel
               key={`transcript-${conversation.id}`}
               conversationId={conversation.id}
-            />
+            />}
           </div>
         ) : null}
         {conversation.channel === "voice" &&
@@ -607,7 +607,7 @@ export function MessageThread({
         )}
         {conversation.channel === "voice" ? (
           <p className="px-4 py-3 text-sm text-stone-500">
-            This voice transcript is read-only. Text sending and live takeover
+            This call record is read-only. Text sending and live takeover
             are unavailable.
           </p>
         ) : webChatLocked ? (

@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { pilotRoutingDependencies } from "@/lib/voice/routing.server";
 import { drainFallback } from "@/lib/voice/routing";
 import { maintainVoicePilot } from "@/lib/voice/maintenance";
+import { reconcileCallScreening } from "@/lib/call-screening/settings.server";
 
 export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
@@ -22,6 +23,11 @@ export async function POST(request: NextRequest) {
   )
     return new NextResponse("Not found", { status: 404 });
   const deps = pilotRoutingDependencies();
+  // Independent of voice admission health: a carrier outage must not take
+  // otherwise healthy AI answering offline. Requests remain durable for retry.
+  const screening = reconcileCallScreening().catch(() => {
+    console.warn("[screening] Maintenance needs retry");
+  });
   try {
     await reconcileTenantSmsSends();
     await maintainVoicePilot(deps.db, deps.telnyx, (id) =>
@@ -34,6 +40,7 @@ export async function POST(request: NextRequest) {
       await reconcileBookingNotifications();
       await reconcileBookingSummarySends();
     }
+    await screening;
     return NextResponse.json(
       { ok: true },
       { headers: { "Cache-Control": "no-store" } },

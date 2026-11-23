@@ -4,6 +4,7 @@ import { supabaseAdmin as db } from "@/lib/supabase/admin";
 import { telnyx } from "./client";
 import { preflightOutboundSms } from "@/lib/billing/usage";
 import type { OutboundSmsPurpose } from "./outboundSmsOperational.server";
+import { callFollowupAllowed } from "@/lib/call-screening/calls.server";
 
 export interface TenantSmsInput {
   businessId: string;
@@ -15,6 +16,8 @@ export interface TenantSmsInput {
   idempotencyKey: string;
   reviewEnrollmentId?: string | null;
   conversationId?: string | null;
+  sourceCallControlId?: string;
+  screeningExpected?: boolean;
 }
 interface Reservation {
   id: string;
@@ -141,6 +144,7 @@ export async function sendTenantSms(args: TenantSmsInput) {
       throw new TenantSmsSendError("sms_idempotency_conflict", "not_sent");
     return result(existing.data as Reservation, true);
   }
+  await requireUnscreenedFollowup(args);
   let usage: Awaited<ReturnType<typeof preflightOutboundSms>>;
   try {
     usage = await preflightOutboundSms({
@@ -187,6 +191,13 @@ export async function sendTenantSms(args: TenantSmsInput) {
   }
   let providerId: string | null = null;
   try {
+    await requireUnscreenedFollowup(args);
+  } catch (error) {
+    const reason = error instanceof TenantSmsSendError ? error.reason : "sms_screening_unavailable";
+    await settle(reservation.id, "not_sent", null, reason);
+    throw error;
+  }
+  try {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL;
     const webhook = appUrl ? new URL("/api/messaging/webhook", appUrl) : null;
     webhook?.searchParams.set("smsReservation", reservation.id);
@@ -224,6 +235,19 @@ export async function sendTenantSms(args: TenantSmsInput) {
     );
   }
   return result(await settle(reservation.id, "accepted", providerId), false);
+}
+
+async function requireUnscreenedFollowup(args: TenantSmsInput) {
+  if (args.purpose !== "missed_call") return;
+  const identity = args.sourceCallControlId ?? (args.idempotencyKey.startsWith("missed-call:") ? args.idempotencyKey.slice(12) : "");
+  if (!identity) throw new TenantSmsSendError("sms_screening_unavailable", "not_sent");
+  let allowed: boolean;
+  try {
+    allowed = await callFollowupAllowed({ businessId: args.businessId, identity, callerPhone: args.to, expected: args.screeningExpected });
+  } catch {
+    throw new TenantSmsSendError("sms_screening_unavailable", "not_sent");
+  }
+  if (!allowed) throw new TenantSmsSendError("sms_call_screened", "not_sent");
 }
 
 export async function processTenantSmsInbound(args: {

@@ -10,7 +10,7 @@ const ACTION_COLUMNS = "id,business_id,session_id,kind,status,payload,result,con
 /** Caller must first resolve fresh workspace access; every read is scoped again here. */
 export async function loadVoiceCallReview(businessId: string, conversationId: string): Promise<VoiceCallReview | null> {
   const conversation = await supabaseAdmin.from("conversations")
-    .select("id,contact_id").eq("id", conversationId).eq("business_id", businessId)
+    .select("id,contact_id,call_kind").eq("id", conversationId).eq("business_id", businessId)
     .eq("channel", "voice").maybeSingle();
   if (conversation.error) throw new Error("voice_review_unavailable");
   if (!conversation.data) return null;
@@ -20,7 +20,26 @@ export async function loadVoiceCallReview(businessId: string, conversationId: st
     .eq("business_id", businessId).eq("conversation_id", conversationId)
     .eq("response_mode", "voice").maybeSingle();
   if (session.error) throw new Error("voice_review_unavailable");
-  if (!session.data) return null;
+  if (!session.data) {
+    if (voiceConversation.call_kind !== "phone") return null;
+    const [screening, stored] = await Promise.all([
+      supabaseAdmin.from("inbound_call_screening").select("started_at,ended_at,ended_time_verified")
+        .eq("business_id", businessId).eq("conversation_id", conversationId).is("deleted_at", null).maybeSingle(),
+      supabaseAdmin.from("contacts").select("id,name,phone_number,email")
+        .eq("business_id", businessId).eq("id", voiceConversation.contact_id).maybeSingle(),
+    ]);
+    if (screening.error || stored.error) throw new Error("voice_review_unavailable");
+    if (!screening.data) return null;
+    const call = screening.data;
+    const elapsed = call.ended_at && call.ended_time_verified !== false ? (Date.parse(call.ended_at) - Date.parse(call.started_at)) / 1000 : null;
+    return {
+      conversationId, callKind: "phone", receivedAt: call.started_at, startedAt: call.started_at, endedAt: call.ended_at,
+      durationSeconds: elapsed !== null && Number.isFinite(elapsed) ? Math.max(0, Math.round(elapsed)) : null,
+      call: { label: call.ended_at ? "Call ended" : "Call in progress", detail: "This call used your normal forwarding or voicemail route. No AI conversation is recorded.", tone: "neutral" },
+      contact: stored.data ? { id: stored.data.id, name: reviewText(stored.data.name, 200), phone: reviewText(stored.data.phone_number, 32), email: reviewText(stored.data.email) } : null,
+      confirmedContact: null, actions: [], recordings: [],
+    };
+  }
   const call = session.data;
   const [contactResult, actionsResult, recordingsResult, leadsResult] = await Promise.all([
     supabaseAdmin.from("contacts").select("id,name,phone_number,email")

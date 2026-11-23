@@ -4,8 +4,10 @@ const m = vi.hoisted(() => ({
   rpc: vi.fn(),
   send: vi.fn(),
   usage: vi.fn(),
+  screening: vi.fn(),
 }));
 vi.mock("server-only", () => ({}));
+vi.mock("@/lib/call-screening/calls.server", () => ({ callFollowupAllowed: m.screening }));
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { from: m.from, rpc: m.rpc },
 }));
@@ -30,6 +32,7 @@ const args = {
 let row: Record<string, unknown> | null;
 beforeEach(() => {
   vi.clearAllMocks();
+  m.screening.mockResolvedValue(true);
   row = null;
   vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.test");
   m.from.mockImplementation(() => {
@@ -68,6 +71,31 @@ beforeEach(() => {
   m.send.mockResolvedValue({ data: { id: "provider" } });
 });
 describe("tenant SMS delivery boundary", () => {
+  it("checks again after reservation and releases quota when the call is newly flagged", async () => {
+    m.screening.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    await expect(sendTenantSms({ ...args, purpose: "missed_call", idempotencyKey: "missed-call:session", sourceCallControlId: "inbound", screeningExpected: true })).rejects.toMatchObject({ reason: "sms_call_screened", outcome: "not_sent" });
+    expect(m.screening).toHaveBeenCalledTimes(2);
+    expect(m.send).not.toHaveBeenCalled();
+    expect(row).toMatchObject({ status: "not_sent", failure_reason: "sms_call_screened" });
+  });
+  it("does not reserve for an already screened call or classify explicit requested messages", async () => {
+    m.screening.mockResolvedValue(false);
+    await expect(sendTenantSms({ ...args, purpose: "missed_call", idempotencyKey: "missed-call:session" })).rejects.toMatchObject({ reason: "sms_call_screened" });
+    expect(m.rpc).not.toHaveBeenCalled();
+    expect(m.send).not.toHaveBeenCalled();
+    m.screening.mockClear();
+    await sendTenantSms(args);
+    expect(m.screening).not.toHaveBeenCalled();
+    expect(m.send).toHaveBeenCalledOnce();
+  });
+  it("preserves an accepted receipt after a late spam decision without sending again", async () => {
+    const followup = { ...args, purpose: "missed_call" as const, idempotencyKey: "missed-call:session" };
+    await sendTenantSms(followup);
+    m.screening.mockResolvedValue(false); m.screening.mockClear();
+    expect(await sendTenantSms(followup)).toMatchObject({ replayed: true });
+    expect(m.send).toHaveBeenCalledOnce();
+    expect(m.screening).not.toHaveBeenCalled();
+  });
   it("stops a queued send when the shared brand is rejected after reservation", async () => {
     const original = m.rpc.getMockImplementation()!;
     m.rpc.mockImplementation((name, p) => name === "shared_brand_sms_allowed"

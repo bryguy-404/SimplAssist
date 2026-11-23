@@ -8,6 +8,7 @@ import {
 } from "@/lib/messaging/idempotency";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { sendMissedCallSMS } from "@/lib/messaging/missed-call";
+import { captureCallScreening, finishCallScreening } from "@/lib/call-screening/calls.server";
 import {
   buildSmsComplianceCopy,
   resolveComplianceCopyLocale,
@@ -86,6 +87,7 @@ interface VoiceState {
   voicePhase?: VoicePhase;
   voicePilotSessionId?: string;
   voiceTextFallbackEnabled?: boolean;
+  screeningTracked?: boolean;
 }
 
 interface ForwardingAttempt {
@@ -156,6 +158,8 @@ export async function POST(request: NextRequest) {
 
   try {
     try {
+      // Persist termination before the AI callback can return early or drain a fallback.
+      if (eventType === "call.hangup") await finishCallScreening(payload, eventData?.occurred_at);
       // Stored callback ownership survives admission switches being disabled.
       if (await handlePilotEvent(pilotRoutingDependencies(), eventType ?? "", payload, true, {
         eventId, occurredAt: eventData?.occurred_at,
@@ -298,6 +302,12 @@ async function handleCallInitiated(payload: Record<string, unknown>) {
     : business.ai_settings;
   const language = (aiSettings?.language ?? "en") as Language;
 
+  try {
+    await captureCallScreening(businessId, payload);
+  } catch (error) {
+    throw new RetryableWebhookError("Call screening capture needs retry", { cause: error });
+  }
+
   let pilotSessionId: string | undefined;
   if (process.env.VOICE_PILOT_ROLLOUT === "true") {
     try {
@@ -316,6 +326,7 @@ async function handleCallInitiated(payload: Record<string, unknown>) {
     callSessionId: typeof payload.call_session_id === "string" ? payload.call_session_id : callControlId,
     businessId,
     from,
+    screeningTracked: true,
     businessName,
     businessEmail: business?.email ?? null,
     businessPhoneNumber: business?.phone_number ?? null,
@@ -1114,7 +1125,8 @@ async function handleRecordingSaved(payload: Record<string, unknown>) {
   await sendMissedCallSMS(
     state.from,
     state.businessId,
-    voicemailMetricSourceId(payload, state.callControlId)
+    voicemailMetricSourceId(payload, state.callControlId),
+    { sourceCallControlId: state.callControlId, screeningExpected: state.screeningTracked }
   );
 }
 
@@ -1137,7 +1149,8 @@ async function handleRecordingError(payload: Record<string, unknown>) {
   await sendMissedCallSMS(
     state.from,
     state.businessId,
-    voicemailMetricSourceId(payload, state.callControlId)
+    voicemailMetricSourceId(payload, state.callControlId),
+    { sourceCallControlId: state.callControlId, screeningExpected: state.screeningTracked }
   );
 }
 
@@ -1546,7 +1559,8 @@ async function triggerForwardingFallback(args: {
     await sendMissedCallSMS(
       attempt.caller_phone,
       attempt.business_id,
-      attempt.call_session_id
+      attempt.call_session_id,
+      { sourceCallControlId: attempt.inbound_call_control_id, screeningExpected: args.voiceState?.screeningTracked }
     );
   } catch (err) {
     // Record the failure AND re-open the fallback claim: handleCallHangup

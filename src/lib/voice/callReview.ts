@@ -1,6 +1,7 @@
 /** Customer call history. Provider identifiers, usage and action evidence stay server-side. */
 export interface VoiceCallReview {
   conversationId: string;
+  callKind?: "ai" | "phone";
   receivedAt: string;
   startedAt: string | null;
   endedAt: string | null;

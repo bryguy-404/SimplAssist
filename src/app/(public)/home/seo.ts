@@ -48,6 +48,16 @@ const VOICE_FAQS = [
     answer:
       "With Full Suite and Voice mode enabled, SimplAssist answers calls you can't pick up and has a spoken conversation with the caller. It introduces itself as your business's AI assistant, asks what the caller needs, and answers using your services, hours, FAQs, and other saved business information. Callers can ask follow-up questions, and SimplAssist can collect their name and contact details. If Google Calendar booking is connected and enabled, it can check availability and help book an appointment after confirming the details with the caller. You can review saved call transcripts and recordings in your dashboard.",
   },
+  {
+    question: "Can I keep my existing phone number and have SimplAssist answer calls I miss?",
+    answer:
+      "Yes. If your phone provider supports conditional call forwarding, your existing number can ring your phone first, then forward unanswered calls to your assigned SimplAssist number. You don't need to port your existing number. With Full Suite and AI voice answering enabled, SimplAssist can answer those forwarded calls. Forwarding is configured through your phone provider, and we can help you check the setup and test it. Texts sent by SimplAssist come from your SimplAssist number. If you use one number for personal and business calls, unanswered personal calls follow the same forwarding rules.",
+  },
+  {
+    question: "Can I keep using my existing website's quote form or booking process?",
+    answer:
+      "Yes. You can configure SimplAssist to direct customers to your existing quote form or booking page. On Full Suite, the voice assistant can explain the next step and offer to text callers your link with their permission. Customers then complete the request on your website. Sending the link does not itself submit a quote request or confirm a booking.",
+  },
 ] as const satisfies readonly HomepageFaq[];
 
 const BASE_HOME_FAQS = [

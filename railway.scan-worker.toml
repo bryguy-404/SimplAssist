@@ -1,8 +1,0 @@
-[build]
-builder = "NIXPACKS"
-
-[deploy]
-startCommand = "npm run start:scan-worker"
-healthcheckPath = "/health"
-healthcheckTimeout = 300
-restartPolicyType = "ALWAYS"

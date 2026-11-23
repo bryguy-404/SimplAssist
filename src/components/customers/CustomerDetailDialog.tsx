@@ -43,6 +43,7 @@ import {
   requestError,
   SOURCE_LABELS,
 } from "./customerUi";
+import { formatPhoneForDisplay } from "@/lib/phone/display";
 
 const CustomerReviewPermission = dynamic(
   () => import("@/components/reviews/CustomerReviewPermission"),
@@ -303,7 +304,7 @@ export default function CustomerDetailDialog({
                         href={`tel:${customerPhone(customer)}`}
                         className={inlineLink}
                       >
-                        {customerPhone(customer)}
+                        {formatPhoneForDisplay(customerPhone(customer))}
                       </a>
                     ) : (
                       "No phone added"

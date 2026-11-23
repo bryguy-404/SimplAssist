@@ -1,4 +1,5 @@
 import type { CustomerRecord } from "@/lib/customers/types";
+import { formatPhoneForDisplay } from "@/lib/phone/display";
 
 export const CUSTOMER_VIEWS = [
   ["all", "Everyone"],
@@ -73,7 +74,7 @@ export function customerName(
     customer.name ||
     customer.company ||
     customer.email ||
-    customerPhone(customer) ||
+    formatPhoneForDisplay(customerPhone(customer)) ||
     "Unnamed customer"
   );
 }

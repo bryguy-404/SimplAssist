@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { requireAdminUser } from "@/lib/admin/auth";
 import { loadVoiceCallDetails } from "@/lib/voice/admin.server";
 import { VoiceCallFeedback } from "../VoicePilotControls";
+import { formatPhoneForDisplay } from "@/lib/phone/display";
 
 export const dynamic = "force-dynamic";
 export default async function VoiceCallPage({
@@ -28,7 +29,7 @@ export default async function VoiceCallPage({
         </Link>
         <h1 className="mt-4 text-3xl font-bold">Test call</h1>
         <p className="mt-2 text-stone-500">
-          {session.caller_phone || "Deleted account"} ·{" "}
+          {formatPhoneForDisplay(session.caller_phone) || "Deleted account"} ·{" "}
           {new Date(session.created_at).toLocaleString("en-US", {
             timeZone: "America/Indiana/Indianapolis",
           })}

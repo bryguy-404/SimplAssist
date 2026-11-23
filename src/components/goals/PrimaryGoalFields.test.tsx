@@ -47,9 +47,9 @@ describe("PrimaryGoalFields", () => {
     ].map((value) => renderedCopy(value));
 
     expect(copy).toEqual([
-      renderedCopy("When a new customer reaches out, what's the win for you?"),
-      renderedCopy("I run on a schedule — jobs, visits, or appointments"),
-      renderedCopy("Direct customers to a website"),
+      renderedCopy("What should your assistant help customers do?"),
+      renderedCopy("Book a time with me — jobs, visits, or appointments"),
+      renderedCopy("Go to my website — to sign up, order, or learn more"),
       renderedCopy(
         "Pick the main one. Your AI still handles everything else customers ask — this just sets what it steers toward. You can change it anytime in Settings."
       ),

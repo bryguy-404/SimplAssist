@@ -26,6 +26,7 @@ import {
 } from "@/lib/theme-v2/theme";
 import { reviewReason, reviewRequest, reviewTime } from "./reviewUi";
 import { LEGAL_FIELDS, REPRESENTATIVE_FIELDS, ReviewSmsRegistrationFields, ReviewSmsRegistrationNotice } from "./ReviewSmsRegistration";
+import { formatPhoneForDisplay } from "@/lib/phone/display";
 
 const ENDPOINT = "/api/reviews/sms";
 const STATES: Record<ReviewSmsState, string> = {
@@ -156,7 +157,7 @@ function SmsSetupForm({
             Your existing texting number
           </p>
           <p className={`mt-2 text-sm ${body}`}>
-            {phone ||
+            {formatPhoneForDisplay(phone) ||
               "Your number needs to be confirmed before approval. Contact support."}
           </p>
         </div>
@@ -479,7 +480,7 @@ export default function ReviewSmsPanel({
               <div className="space-y-4">
                 <p className={`text-sm ${body}`}>
                   Preferred number:{" "}
-                  {String(account.draft.phoneNumber || "Not selected")}
+                  {formatPhoneForDisplay(String(account.draft.phoneNumber || "")) || "Not selected"}
                 </p>
                 {!registrationUnavailable ? <button
                   type="button"

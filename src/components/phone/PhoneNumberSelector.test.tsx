@@ -133,7 +133,7 @@ describe("PhoneNumberSelector pending-number replacement", () => {
     });
 
     expect(markup).toContain("Number Selected");
-    expect(markup).toContain("+15745550123");
+    expect(markup).toContain("(574) 555-0123");
     expect(markup).toContain("Change number");
   });
 
@@ -144,7 +144,7 @@ describe("PhoneNumberSelector pending-number replacement", () => {
       initialConsentAgreed: true,
     });
 
-    expect(markup).toContain("+15745550123");
+    expect(markup).toContain("(574) 555-0123");
     expect(markup).not.toContain("Change number");
   });
 });

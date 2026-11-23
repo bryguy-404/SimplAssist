@@ -17,6 +17,7 @@ import { TEXTING_UPGRADE_STEPS, type TextingUpgradeQuote, type TextingUpgradeSta
 import { primaryCtaInlineClass, secondaryCtaClass } from "@/lib/glass";
 import { card, statusWarning } from "@/lib/theme-v2/theme";
 import { supportHref } from "@/lib/support/constants";
+import { formatPhoneForDisplay } from "@/lib/phone/display";
 
 const ENDPOINT = "/api/billing/texting-upgrade";
 const labels: Record<TextingUpgradeStep, string> = { plan: "Choose plan", business: "Business details", verification: "Business verification", use_case: "Texting details", phone: "Phone number", review: "Review and pay", status: "Texting status" };
@@ -160,7 +161,7 @@ export default function TextingUpgradeWizard({ initialState }: { initialState?: 
           <ReviewRow label="Business verification" value={state.brandVerification?.legal_business_name ? `${state.brandVerification.legal_business_name} · EIN ending ${state.brandVerification.ein?.slice(-4) ?? "not entered"} · ${state.brandVerification.authorized_rep_name ?? ""} (${state.brandVerification.authorized_rep_email ?? ""})` : "Not completed"} onEdit={state.actions.canSave ? () => navigate("verification") : undefined} />
           <ReviewRow label="Texting details" value={state.brandVerification?.use_case_description ?? "Not completed"} onEdit={state.actions.canSave ? () => navigate("use_case") : undefined} />
           {state.brandVerification?.sample_messages?.length ? <div className="text-sm"><h3 className="font-medium">Sample messages</h3><ul className="mt-2 list-disc space-y-2 pl-5">{state.brandVerification.sample_messages.map((message, index) => <li key={index}>{message}</li>)}</ul><p className="mt-3"><strong>Opt-in:</strong> {state.brandVerification.opt_in_description}</p></div> : null}
-          <ReviewRow label="Phone number" value={state.activePhoneNumber ?? state.pendingPhoneNumber ?? "Not selected"} onEdit={state.actions.canSave ? () => navigate("phone") : undefined} />
+          <ReviewRow label="Phone number" value={formatPhoneForDisplay(state.activePhoneNumber ?? state.pendingPhoneNumber) || "Not selected"} onEdit={state.actions.canSave ? () => navigate("phone") : undefined} />
           {state.quote ? <TextingUpgradePrice quote={state.quote} /> : <p>The exact amount is calculated after your saved details are checked. Your current subscription has not changed.</p>}
           {state.selectedPlan === "sms_only" && <StarterAcknowledgement checked={starterAcknowledged} onChange={setStarterAcknowledged} />}
           <p className="text-sm">Payment starts your upgraded subscription and carrier registration. Texting remains unavailable until approval; your existing Chat Only service continues during review. Carrier approval is not guaranteed. Carrier corrections and refund requests go through support under the existing setup-fee policy. The setup fee is non-refundable after registration is submitted. To request subscription cancellation, <Link className="underline" href={supportHref("billing")}>contact billing support</Link>.</p>

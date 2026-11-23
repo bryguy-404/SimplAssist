@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { bookingStatusLabel, bookingTextStatus, type BookingReview } from '@/lib/booking/review';
 import { body, ink } from '@/lib/theme-v2/theme';
+import { formatPhoneForDisplay } from '@/lib/phone/display';
 export function BookingReviewPanel({ conversationId }: { conversationId: string }) {
   const [state,setState] = useState<{ id: string; items?: BookingReview[]; error?: boolean }>({id:conversationId});
   const [refresh,setRefresh] = useState(0);
@@ -28,8 +29,8 @@ export function BookingReviewPanel({ conversationId }: { conversationId: string 
       <h4 className={`font-semibold ${ink}`}>{bookingStatusLabel(item.status)}</h4>
       <p>{item.snapshot.offering.label}: {item.snapshot.offering.serviceName} · {item.snapshot.offering.durationMinutes} minutes</p>
       <p>{item.snapshot.startTime?.replace('T',' ') || item.snapshot.requestedTime || 'Time not specified'} ({item.snapshot.timezone})</p>
-      <p>{item.snapshot.offering.format==='phone_callback' ? `Business callback to ${item.snapshot.phone || 'phone not provided'}` : item.snapshot.offering.format==='business_visit' ? `Business visit: ${item.snapshot.offering.businessAddress}` : item.snapshot.offering.format==='customer_site' ? `Customer site: ${item.snapshot.customerAddress || 'address not provided'}` : 'Location not specified'}</p>
-      <p>{item.snapshot.name || 'Name not provided'} · {item.snapshot.phone || 'Phone not provided'} · {item.snapshot.email || 'No email invitation'}</p>
+      <p>{item.snapshot.offering.format==='phone_callback' ? `Business callback to ${formatPhoneForDisplay(item.snapshot.phone) || 'phone not provided'}` : item.snapshot.offering.format==='business_visit' ? `Business visit: ${item.snapshot.offering.businessAddress}` : item.snapshot.offering.format==='customer_site' ? `Customer site: ${item.snapshot.customerAddress || 'address not provided'}` : 'Location not specified'}</p>
+      <p>{item.snapshot.name || 'Name not provided'} · {formatPhoneForDisplay(item.snapshot.phone) || 'Phone not provided'} · {item.snapshot.email || 'No email invitation'}</p>
       <p className="text-xs">Details recorded for this appointment; the saved contact may differ. {item.snapshot.mode==='collect_info' ? 'This request is not a confirmed appointment.' : item.status==='confirmed' && item.snapshot.email ? 'A calendar invitation was requested; email delivery is not verified here.' : ''}</p>
       {item.notifications.map(n=><p key={n.id}>{n.purpose==='review'?'Review text':'Confirmation text'}: {bookingTextStatus(n.status)} {n.conversationId ? <Link className="underline" href={`/conversations?conversation=${encodeURIComponent(n.conversationId)}`}>View text</Link> : null}</p>)}
     </article>)}

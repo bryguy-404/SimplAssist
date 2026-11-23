@@ -3,6 +3,7 @@ import Link from "next/link";
 import { requireAdminUser } from "@/lib/admin/auth";
 import { loadVoicePilotDashboard } from "@/lib/voice/admin.server";
 import { VoicePilotControls } from "./VoicePilotControls";
+import { formatPhoneForDisplay } from "@/lib/phone/display";
 
 export const dynamic = "force-dynamic";
 export default async function VoicePilotPage({
@@ -137,7 +138,7 @@ export default async function VoicePilotPage({
                         })}
                       </Link>
                     </td>
-                    <td>{call.caller_phone || "Deleted account"}</td>
+                    <td>{formatPhoneForDisplay(call.caller_phone) || "Deleted account"}</td>
                     <td>{call.outcome || call.status}</td>
                     <td>{(Number(call.used_seconds) / 60).toFixed(2)}</td>
                     <td>{call.usage_confirmed ? "Confirmed" : "Pending"}</td>

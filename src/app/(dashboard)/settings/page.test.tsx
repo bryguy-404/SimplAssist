@@ -474,8 +474,10 @@ describe('SettingsPage registration-sensitive settings', () => {
       'phone_numbers'
     );
     expect(markup).not.toContain('Phone Number');
+    expect(markup).not.toContain('Phone &amp; calls');
     expect(markup).not.toContain('Phone number section');
     expect(markup).not.toContain('Compliance');
+    expect(markup).not.toContain('Privacy policy');
     expect(markup).not.toContain('Compliance panel');
     expect(markup).toContain('id="booking-alerts"');
     expect(markup).toContain('Owner booking alerts');
@@ -577,7 +579,7 @@ describe("Settings voice integration", () => {
     mocks.getOwnerVoiceSettings.mockResolvedValue({ ...VOICE_USAGE, visible: false });
     const html = renderToStaticMarkup(await SettingsPage({}));
     expect(mocks.getOwnerVoiceSettings).toHaveBeenCalledWith(BUSINESS_ID);
-    expect(html).not.toContain("Call answering");
+    expect(html).not.toContain("Missed calls");
     expect(html).not.toContain("Save call settings");
   });
   it("preserves usage and call history after access is lost", async () => {
@@ -592,6 +594,6 @@ describe("Settings voice integration", () => {
     mocks.getOwnerVoiceSettings.mockRejectedValue(new Error("schema temporarily unavailable"));
     const html = renderToStaticMarkup(await SettingsPage({}));
     expect(html).toContain("Business Email");
-    expect(html).not.toContain("Call answering");
+    expect(html).not.toContain("Missed calls");
   });
 });

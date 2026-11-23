@@ -30,6 +30,7 @@ import {
   PRIMARY_GOAL_COPY,
   isEditablePrimaryGoal,
 } from "@/lib/goals/primaryGoal";
+import { formatPhoneForDisplay } from "@/lib/phone/display";
 
 const RECOMMENDED_PLAN: SubscriptionPlan = 'sms_and_chat';
 const SETUP_FEE = SETUP_FEE_CENTS / 100;
@@ -551,7 +552,7 @@ export default function ReviewAndLaunch({
                 ? (data.businessInfo.business_type_other || 'Other')
                 : (BUSINESS_TYPE_LABELS[data.businessInfo.business_type] || data.businessInfo.business_type)
             } />
-        <SummaryRow label="Phone" value={data.businessInfo.phone} />
+        <SummaryRow label="Phone" value={formatPhoneForDisplay(data.businessInfo.phone) || data.businessInfo.phone} />
         <SummaryRow
           label="Address"
           value={`${data.businessInfo.address}, ${data.businessInfo.city}, ${getUsStateName(data.businessInfo.state)} ${data.businessInfo.zip}`}
@@ -662,7 +663,7 @@ export default function ReviewAndLaunch({
       {/* Phone Number */}
       {!isChatOnly && <Section title="Phone Number" onEdit={() => onEditStep(7)}>
         {data.phoneNumber ? (
-          <SummaryRow label="AI Phone Number" value={data.phoneNumber} />
+          <SummaryRow label="AI Phone Number" value={formatPhoneForDisplay(data.phoneNumber)} />
         ) : (
           <div className="text-sm text-stone-500 dark:text-[#bdbdbf]">
             <p>No phone number selected</p>

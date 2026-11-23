@@ -15,6 +15,10 @@ export interface PrimaryGoalFieldsProps {
   disabled?: boolean;
   disabledOptions?: readonly EditablePrimaryGoal[];
   helper?: ReactNode;
+  /** Optional plain-language line under each option (used in Settings). */
+  optionDetails?: Partial<Record<EditablePrimaryGoal, string>>;
+  /** Optional visible label for the website-link field (used in Settings). */
+  goalUrlLabel?: string;
 }
 
 export function PrimaryGoalFields({
@@ -25,6 +29,8 @@ export function PrimaryGoalFields({
   disabled = false,
   disabledOptions = [],
   helper,
+  optionDetails,
+  goalUrlLabel,
 }: PrimaryGoalFieldsProps) {
   return (
     <fieldset
@@ -70,6 +76,11 @@ export function PrimaryGoalFields({
               <span className="font-medium text-stone-900 dark:text-[#f5f5f5]">
                 {option.label}
               </span>
+              {optionDetails?.[option.value] && (
+                <span className="mt-1.5 block text-xs leading-relaxed text-stone-500 dark:text-[#bdbdbf]">
+                  {optionDetails[option.value]}
+                </span>
+              )}
             </label>
           );
         })}
@@ -82,6 +93,14 @@ export function PrimaryGoalFields({
         {helper ?? PRIMARY_GOAL_COPY.helper}
       </p>
 
+      {primaryGoal === "signup" && goalUrlLabel && (
+        <label
+          htmlFor="goal_url"
+          className="block pt-1 text-sm font-medium text-stone-700 dark:text-[#d7d7d9]"
+        >
+          {goalUrlLabel}
+        </label>
+      )}
       {primaryGoal === "signup" && (
         <input
           type="url"

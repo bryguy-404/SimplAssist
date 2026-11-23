@@ -1,10 +1,10 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { bookingSettingsUpdateSchema, type BookingOffering, type BookingSettings } from '@/lib/booking/contracts';
-import { card } from '@/lib/theme-v2/theme';
+import { bodyFaint, btnPrimaryInline, btnSecondaryInline, card, ink, statusDanger, statusSuccess } from '@/lib/theme-v2/theme';
 
 const initial: BookingOffering = { format: 'phone_callback', label: 'Appointment', durationMinutes: 30, businessAddress: null };
-const inputClass = 'w-full rounded-xl border border-stone-300 bg-transparent px-3 py-2 dark:border-white/20';
+const inputClass = 'mt-1 w-full rounded-[14px] border border-[#e3dacc] bg-white px-3 py-2 text-stone-900 dark:border-white/[0.12] dark:bg-white/[0.06] dark:text-[#f5f5f5]';
 export function BookingOfferingFields({ value, onChange, prefix }: { value: BookingOffering; onChange: (value: BookingOffering) => void; prefix: string }) {
   return <div className="grid gap-4 sm:grid-cols-2">
     <label htmlFor={`${prefix}-format`}>Appointment format<select id={`${prefix}-format`} className={inputClass} value={value.format} onChange={e => onChange({ ...value, format: e.target.value as BookingOffering['format'], businessAddress: e.target.value === 'business_visit' ? '' : null })}>
@@ -48,10 +48,12 @@ export default function BookingSettingsForm({ services }: { services: Array<{ id
     finally { setBusy(false); }
   }
   return <section className={`p-6 space-y-4 ${card}`} aria-label="Booking details">
-    <h2 className="text-lg font-semibold">Booking details</h2>
-    <p className="text-sm">Choose what customers book. Your AI booking mode still decides whether to collect a request or confirm a calendar appointment.</p>
-    {error && <p role="alert">{error}</p>}
-    {!settings ? <button type="button" onClick={() => void load()} disabled={busy}>{busy ? 'Loading…' : 'Refresh'}</button> : <>
+    <div>
+      <h2 className={`text-lg font-semibold ${ink}`}>Booking details</h2>
+      <p className={`mt-1 text-sm ${bodyFaint}`}>What customers are booking: the kind of appointment, what to call it, and how long it takes. Whether your assistant confirms it on your calendar or only collects the request is set under Booking in Assistant behavior above.</p>
+    </div>
+    {error && <p role="alert" className={`rounded-[14px] p-3 text-sm ${statusDanger}`}>{error}</p>}
+    {!settings ? <button type="button" className={btnSecondaryInline} onClick={() => void load()} disabled={busy}>{busy ? 'Loading…' : 'Refresh'}</button> : <>
       {!settings.defaults && <p role="status">Your existing appointments use 30 minutes and no specified location. Choose a format below to update them.</p>}
       <fieldset disabled={busy} className="space-y-4">
         <BookingOfferingFields prefix="booking-default" value={settings.defaults ?? initial} onChange={defaults => { setSaved(false); setSettings({ ...settings, defaults }); }} />
@@ -68,9 +70,9 @@ export default function BookingSettingsForm({ services }: { services: Array<{ id
             {override.mode === 'override' && <BookingOfferingFields prefix={`booking-${service.id}`} value={override.offering} onChange={offering => update({ mode: 'override', offering })} />}
           </div>;
         })}
-        <div className="flex gap-4"><button type="button" className="rounded-full bg-orange-500 px-4 py-2 text-black" onClick={() => void save()}>Save booking details</button><button type="button" onClick={() => void load()}>Refresh</button></div>
+        <div className="flex flex-wrap gap-3"><button type="button" className={btnPrimaryInline} onClick={() => void save()}>Save booking details</button><button type="button" className={btnSecondaryInline} onClick={() => void load()}>Refresh</button></div>
       </fieldset>
-      {saved && <p role="status">Booking details saved.</p>}
+      {saved && <p role="status" className={`rounded-[14px] p-3 text-sm ${statusSuccess}`}>Booking details saved.</p>}
     </>}
   </section>;
 }

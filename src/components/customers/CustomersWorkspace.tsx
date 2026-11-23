@@ -49,6 +49,7 @@ import {
   requestError,
   type CustomerFilters,
 } from "./customerUi";
+import { formatPhoneForDisplay } from "@/lib/phone/display";
 
 const CustomerDetailDialog = dynamic(() => import("./CustomerDetailDialog"));
 const CustomerImportDialog = dynamic(() => import("./CustomerImportDialog"));
@@ -574,7 +575,7 @@ export default function CustomersWorkspace({
                         >
                           <p>{customer.email || "No email"}</p>
                           <p className="mt-1">
-                            {customerPhone(customer) || "No phone"}
+                            {formatPhoneForDisplay(customerPhone(customer)) || "No phone"}
                           </p>
                         </td>
                         <td className="px-5 py-4">

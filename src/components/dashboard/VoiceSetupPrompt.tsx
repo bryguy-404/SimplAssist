@@ -44,7 +44,7 @@ export default function VoiceSetupPrompt({ settings }: { settings: OwnerVoiceSet
           <h2 id="voice-setup-title" className={`text-sm font-semibold ${ink}`}>Turn on your AI receptionist</h2>
           <p className={`mt-1 text-sm ${body}`}>
             Your Full Suite plan includes AI voice answering, but it is not turned on yet.
-            Open Call answering, select AI voice answering, and save your choice.
+            Open Missed calls, select AI voice answering, and save your choice.
           </p>
           <p className={`mt-2 text-sm ${body}`}>
             Keeping your existing business number? After enabling voice, set up forward-when-unanswered with your phone carrier and test a call.

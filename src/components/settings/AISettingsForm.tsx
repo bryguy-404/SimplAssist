@@ -190,10 +190,17 @@ export default function AISettingsForm({
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} onChange={() => setSuccess(false)} className="space-y-8">
+      <div>
+        <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Assistant behavior</h2>
+        <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">
+          How your assistant sounds, how quickly it replies, and what it must never say. One Save button at the bottom covers this whole card.
+        </p>
+      </div>
+
       {/* Section 1: Tone & Voice */}
       <section>
-        <h3 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Tone & Voice</h3>
-        <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">How your AI assistant communicates with customers.</p>
+        <h3 className="text-base font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Tone & Voice</h3>
+        <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">How your assistant sounds when it writes to customers.</p>
 
         {!canCustomizeAi && (
           <UpgradeNotice plan="Growth" planActive={planActive}>Tone and voice customization requires the</UpgradeNotice>
@@ -209,7 +216,7 @@ export default function AISettingsForm({
               {TONE_OPTIONS.map((opt) => (
                 <label
                   key={opt.value}
-                  className={`cursor-pointer p-4 border-2 rounded-lg text-center transition-colors ${
+                  className={`cursor-pointer p-4 border-2 rounded-[18px] text-center transition-colors ${
                     selectedTone === opt.value
                       ? 'border-[var(--brand-primary)] ring-2 ring-[rgb(var(--brand-primary-rgb)/.25)] bg-[var(--brand-accent-soft)] dark:border-[var(--brand-primary-dark)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.10)]'
                       : 'border-[#ece4d8] bg-[#faf7f2] hover:border-[#e3dacc] dark:border-white/[0.10] dark:bg-white/[0.04] dark:hover:border-white/[0.20]'
@@ -227,10 +234,10 @@ export default function AISettingsForm({
             className={!canCustomizeAi ? 'pointer-events-none opacity-60' : undefined}
             aria-disabled={!canCustomizeAi}
           >
-            <label className="block text-sm font-medium text-stone-700 dark:text-[#bdbdbf] mb-2">Business Voice</label>
+            <label className="block text-sm font-medium text-stone-700 dark:text-[#bdbdbf] mb-2">How it refers to your business</label>
             <div className="flex gap-3">
               <label
-                className={`flex-1 cursor-pointer p-3 border-2 rounded-lg text-center transition-colors ${
+                className={`flex-1 cursor-pointer p-3 border-2 rounded-[18px] text-center transition-colors ${
                   watch('business_voice') === 'we' ? 'border-[var(--brand-primary)] ring-2 ring-[rgb(var(--brand-primary-rgb)/.25)] bg-[var(--brand-accent-soft)] dark:border-[var(--brand-primary-dark)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.10)]' : 'border-[#ece4d8] bg-[#faf7f2] hover:border-[#e3dacc] dark:border-white/[0.10] dark:bg-white/[0.04] dark:hover:border-white/[0.20]'
                 }`}
               >
@@ -239,7 +246,7 @@ export default function AISettingsForm({
                 <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">We can help you with...</p>
               </label>
               <label
-                className={`flex-1 cursor-pointer p-3 border-2 rounded-lg text-center transition-colors ${
+                className={`flex-1 cursor-pointer p-3 border-2 rounded-[18px] text-center transition-colors ${
                   watch('business_voice') === 'business_name' ? 'border-[var(--brand-primary)] ring-2 ring-[rgb(var(--brand-primary-rgb)/.25)] bg-[var(--brand-accent-soft)] dark:border-[var(--brand-primary-dark)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.10)]' : 'border-[#ece4d8] bg-[#faf7f2] hover:border-[#e3dacc] dark:border-white/[0.10] dark:bg-white/[0.04] dark:hover:border-white/[0.20]'
                 }`}
               >
@@ -260,13 +267,16 @@ export default function AISettingsForm({
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
+            <p className="mt-1.5 text-xs text-stone-500 dark:text-[#bdbdbf]">
+              English or Spanish sets your assistant&rsquo;s replies, your missed-call text, and your voicemail greeting. &ldquo;Both&rdquo; answers in whichever language the customer writes in, and keeps the missed-call text and greeting in English. AI voice calls are English only.
+            </p>
           </div>
         </div>
       </section>
 
       {/* Section 2: Web Chat Greeting */}
       <section>
-        <h3 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Web Chat Greeting</h3>
+        <h3 className="text-base font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Web Chat Greeting</h3>
         {canCustomizeAi ? (
           <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">
             Configure your web chat greeting in <a href="/widget" className="text-[var(--brand-accent)] hover:text-[var(--brand-primary-active)] dark:text-[var(--brand-accent-dark)] dark:hover:text-[var(--brand-primary-soft-dark)] underline">Widget Settings</a>.
@@ -278,8 +288,8 @@ export default function AISettingsForm({
 
       {/* Section 3: Response Behavior */}
       {showSmsResponseDelay && <section>
-        <h3 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Response Behavior</h3>
-        <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">Control how quickly your AI responds to SMS messages.</p>
+        <h3 className="text-base font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Response Behavior</h3>
+        <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">How long your assistant waits before answering a text. A short pause can feel more natural than an instant reply.</p>
 
         {!canCustomizeAi && (
           <UpgradeNotice plan="Growth" planActive={planActive}>AI response controls require the</UpgradeNotice>
@@ -429,7 +439,7 @@ export default function AISettingsForm({
 
       {/* Section 5: Guardrails */}
       <section>
-        <h3 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">
+        <h3 className="text-base font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">
           <label htmlFor="ai-settings-guardrails">Guardrails</label>
         </h3>
         <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">Rules that guide what your AI can and can&apos;t say.</p>

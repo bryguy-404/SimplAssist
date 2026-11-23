@@ -23,10 +23,10 @@ function expectMigration052GoalUrl(value: string): void {
 describe("primary goal copy", () => {
   it("keeps the authoritative UI copy byte-identical and ordered", () => {
     expect(PRIMARY_GOAL_COPY).toEqual({
-      question: "When a new customer reaches out, what's the win for you?",
+      question: "What should your assistant help customers do?",
       options: {
-        book: "I run on a schedule — jobs, visits, or appointments",
-        signup: "Direct customers to a website",
+        book: "Book a time with me — jobs, visits, or appointments",
+        signup: "Go to my website — to sign up, order, or learn more",
       },
       helper:
         "Pick the main one. Your AI still handles everything else customers ask — this just sets what it steers toward. You can change it anytime in Settings.",

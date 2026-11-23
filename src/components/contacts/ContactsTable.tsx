@@ -19,6 +19,7 @@ import {
   statusWarning,
   statusNeutral,
 } from "@/lib/theme-v2/theme";
+import { phoneMatchesSearch } from "@/lib/phone/display";
 
 type Filter = "all" | "sms" | "web_chat" | "voice" | "hot";
 type Sort = "recent" | "status" | "name";
@@ -109,7 +110,7 @@ export default function ContactsTable({
       result = result.filter(
         (c) =>
           (c.name && c.name.toLowerCase().includes(q)) ||
-          (c.phone_number && c.phone_number.includes(q)) ||
+          phoneMatchesSearch(c.phone_number, q) ||
           (c.email && c.email.toLowerCase().includes(q))
       );
     }

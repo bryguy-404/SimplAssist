@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useBrand } from "@/components/branding/BrandProvider";
 import { replaceDefaultBrandName } from "@/lib/branding/presentation";
+import { formatPhoneForDisplay } from "@/lib/phone/display";
 
 const FALLBACK_CANONICAL_ORIGIN = "https://simplassist.com";
 
@@ -197,7 +198,7 @@ export default function PhoneNumberSelector({
           Number Selected
         </h3>
         <p className="mt-2 text-2xl font-bold text-green-900">
-          {purchased.phone_number}
+          {formatPhoneForDisplay(purchased.phone_number)}
         </p>
         <p className="mt-1 text-sm text-green-600">
           {purchased.pending === true
@@ -296,7 +297,7 @@ export default function PhoneNumberSelector({
             >
               <div>
                 <p className="font-medium text-slate-900 dark:text-[#f5f5f5]">
-                  {n.phoneNumber}
+                  {formatPhoneForDisplay(n.phoneNumber)}
                 </p>
                 <p className="text-sm text-slate-500 dark:text-[#bdbdbf]">
                   {n.friendlyName}

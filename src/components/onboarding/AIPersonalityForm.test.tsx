@@ -17,9 +17,9 @@ import AIPersonalityForm, {
 } from "./AIPersonalityForm";
 
 const AUTHORITATIVE_COPY = [
-  "When a new customer reaches out, what's the win for you?",
-  "I run on a schedule — jobs, visits, or appointments",
-  "Direct customers to a website",
+  "What should your assistant help customers do?",
+  "Book a time with me — jobs, visits, or appointments",
+  "Go to my website — to sign up, order, or learn more",
   "Pick the main one. Your AI still handles everything else customers ask — this just sets what it steers toward. You can change it anytime in Settings.",
 ] as const;
 

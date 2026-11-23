@@ -228,7 +228,7 @@ export function CarrierReviewStatus({
 
       {state.billing.plan === 'full' && !carrierRejected && registration.status !== 'failed' && (
         <p className="text-sm text-stone-600 dark:text-[#bdbdbf]">
-          Full Suite includes AI voice answering. Once setup is complete, go to Settings → Call answering,
+          Full Suite includes AI voice answering. Once setup is complete, go to Settings → Missed calls,
           choose AI voice answering, and save. Voice answering stays off until you enable it.
         </p>
       )}

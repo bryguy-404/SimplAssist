@@ -41,6 +41,16 @@ type GoalSettingsDraftAction =
 
 const LOCKED_GOAL_HELPER =
   "Pick the main one. Your AI still handles everything else customers ask — this just sets what it steers toward.";
+const GOAL_OPTION_DETAILS = {
+  book: "Your assistant works toward getting customers on your schedule. You get a Calendar page and can connect Google Calendar.",
+  signup:
+    "Your assistant sends customers the link you set below. Everyone it sends the link to shows up on your Leads page.",
+} as const;
+const GOAL_SWITCH_NOTICE = {
+  book: "Switching to scheduling replaces your Leads page with a Calendar page, and your assistant starts working toward booking a time instead of sending your link. Nothing is deleted. Your link is kept in case you switch back.",
+  signup:
+    "Switching to a website link replaces your Calendar page and booking settings with a Leads page, and your assistant sends your link instead of offering appointments. Nothing is deleted. Your calendar comes back if you switch back.",
+} as const;
 const GOAL_SETTINGS_SAVE_FALLBACK =
   "Could not save your AI settings. Please try again.";
 
@@ -158,6 +168,12 @@ export default function GoalSettingsForm({
   }, [initialGoalUrl, initialPrimaryGoal, registrationLocked]);
   const signupLocked =
     registrationLocked && initialPrimaryGoal !== "signup";
+  const switchingTo =
+    isEditablePrimaryGoal(initialPrimaryGoal) &&
+    draft.primaryGoal !== null &&
+    draft.primaryGoal !== initialPrimaryGoal
+      ? draft.primaryGoal
+      : null;
   const payload = buildPrimaryGoalUpdate({
     primary_goal: draft.primaryGoal,
     goal_url: draft.goalUrl,
@@ -190,8 +206,18 @@ export default function GoalSettingsForm({
   return (
     <form
       onSubmit={onSubmit}
-      className="mb-8 space-y-4 border-b border-[#ece4d8] pb-8 dark:border-white/[0.10]"
+      className="space-y-4"
     >
+      <div>
+        <h2 className="mb-1 text-lg font-semibold text-stone-900 dark:text-[#f5f5f5]">
+          Main goal
+        </h2>
+        <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">
+          The one outcome your assistant steers conversations toward. It also
+          decides whether your dashboard shows a Calendar or a Leads page.
+        </p>
+      </div>
+
       <PrimaryGoalFields
         primaryGoal={draft.primaryGoal}
         goalUrl={draft.goalUrl}
@@ -202,7 +228,18 @@ export default function GoalSettingsForm({
         disabled={saving}
         disabledOptions={signupLocked ? ["signup"] : undefined}
         helper={registrationLocked ? LOCKED_GOAL_HELPER : undefined}
+        optionDetails={GOAL_OPTION_DETAILS}
+        goalUrlLabel="Link your assistant sends"
       />
+
+      {switchingTo && (
+        <p
+          role="status"
+          className="rounded-[14px] border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-[rgba(245,158,11,0.25)] dark:bg-[rgba(245,158,11,0.12)] dark:text-[#fcd9a5]"
+        >
+          {GOAL_SWITCH_NOTICE[switchingTo]}
+        </p>
+      )}
 
       {signupLocked && (
         <p className="text-xs leading-relaxed text-stone-500 dark:text-[#bdbdbf]">
@@ -216,7 +253,7 @@ export default function GoalSettingsForm({
         </p>
       )}
 
-      <div className="flex items-center gap-4 pt-4">
+      <div className="flex items-center gap-4 pt-2">
         <button
           type="submit"
           disabled={saving || !payload}

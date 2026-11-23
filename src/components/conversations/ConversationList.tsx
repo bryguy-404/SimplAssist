@@ -10,6 +10,7 @@ import { getConversationAccessState } from "./accessState";
 import { canDeleteConversation, MAX_CONVERSATION_DELETE_BATCH } from "@/lib/conversations/deletion";
 import type { InboxQuery } from "@/lib/conversations/inbox";
 import { spamLabel } from "@/lib/call-screening/domain";
+import { phoneMatchesSearch } from "@/lib/phone/display";
 
 interface ConversationListProps {
   conversations: ConversationWithContact[];
@@ -145,7 +146,7 @@ export function ConversationList({
       result = result.filter((c) => {
         const name = c.contact?.name?.toLowerCase() ?? "";
         const phone = c.contact?.phone_number ?? "";
-        return name.includes(q) || phone.includes(q);
+        return name.includes(q) || phoneMatchesSearch(phone, q);
       });
     }
 

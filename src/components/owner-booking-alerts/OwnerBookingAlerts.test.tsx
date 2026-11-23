@@ -108,8 +108,8 @@ describe('owner booking alert enrollment', () => {
       status: 'pending_verification', recipient: '+15745550111', pendingRecipient: '+15745550222' })}
       verification={verification} />);
     expect(html).toContain('Saved alert number:');
-    expect(html).toContain('+15745550111');
-    expect(html).toContain('Verify +15745550222');
+    expect(html).toContain('(574) 555-0111');
+    expect(html).toContain('Verify (574) 555-0222');
     expect(html).toContain('existing number stays saved until the replacement is verified');
     expect(html).not.toContain('Business texts are on for confirmed');
     expect(html).toContain('Open my texting app');
@@ -131,7 +131,7 @@ describe('owner booking alert enrollment', () => {
       status: 'pending_verification', recipient: '+15745550111', pendingRecipient: '+15745550222',
       pendingRecipientSuppressed: true })} verification={verification} />);
     expect(html).toContain('This mobile previously stopped SimplAssist alerts');
-    expect(html).toContain('From +15745550222');
+    expect(html).toContain('From (574) 555-0222');
     expect(html).toContain('then send your verification text');
     expect(html).toContain('other saved alert number is unchanged');
     expect(html).not.toContain('You opted out by text');

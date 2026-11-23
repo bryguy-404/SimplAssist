@@ -15,6 +15,7 @@ import {
   BOOKING_ALERT_POLL_INTERVAL_MS, canPollVerification, loadBookingAlerts,
   updateBookingAlerts, type BookingAlertUpdate,
 } from './client';
+import { formatPhoneForDisplay } from '@/lib/phone/display';
 
 type Verification = NonNullable<OwnerBookingAlertSettings['verification']>;
 type Feedback = { kind: 'error' | 'success'; text: string } | null;
@@ -71,29 +72,29 @@ export function OwnerBookingAlertsContent({
       For booking alerts, choose the booking goal and enable direct booking with a connected calendar.
     </p> : null}
     {settings?.recipient ? <p className={`mt-4 text-sm ${ink}`}>
-      {ready ? 'Texts go to ' : 'Saved alert number: '}<span className="font-semibold">{settings.recipient}</span>.
+      {ready ? 'Texts go to ' : 'Saved alert number: '}<span className="font-semibold">{formatPhoneForDisplay(settings.recipient)}</span>.
       {settings.pendingRecipient && settings.enabled ? ' Your existing number stays saved until the replacement is verified.' : null}
     </p> : null}
     {settings?.status === 'stopped' && settings.sender ? <p className={`mt-3 text-sm ${ink}`}>
-      Text <strong>START</strong> to <span className="font-semibold">{settings.sender}</span> from your mobile.
+      Text <strong>START</strong> to <span className="font-semibold">{formatPhoneForDisplay(settings.sender)}</span> from your mobile.
       Restarting texts does not automatically enable other businesses on this mobile number.
     </p> : null}
 
     {settings?.pendingRecipient && canEnroll && !editing ? <div className="mt-5 space-y-3 rounded-2xl border border-[#e3dacc] p-4 dark:border-white/[0.12]">
-      <h3 className={`font-semibold ${ink}`}>Verify {settings.pendingRecipient}</h3>
+      <h3 className={`font-semibold ${ink}`}>Verify {formatPhoneForDisplay(settings.pendingRecipient)}</h3>
       {settings.pendingRecipientSuppressed && settings.sender ? <p className={`rounded-xl p-3 text-sm ${statusWarning}`}>
-        This mobile previously stopped SimplAssist alerts. From {settings.pendingRecipient}, send <strong>START</strong> to {settings.sender},
+        This mobile previously stopped SimplAssist alerts. From {formatPhoneForDisplay(settings.pendingRecipient)}, send <strong>START</strong> to {formatPhoneForDisplay(settings.sender)},
         then send your verification text.
         {settings.recipient && settings.recipient !== settings.pendingRecipient ? ' Your other saved alert number is unchanged.' : null}
       </p> : null}
       {verification ? <>
-        <p className={`text-sm ${bodyFaint}`}>From this mobile, send the exact text below to {verification.sender}. Your phone’s normal text-message rates may apply.</p>
+        <p className={`text-sm ${bodyFaint}`}>From this mobile, send the exact text below to {formatPhoneForDisplay(verification.sender)}. Your phone’s normal text-message rates may apply.</p>
         <p className={`select-all break-all rounded-xl bg-stone-100 p-3 font-mono text-base dark:bg-white/[0.06] ${ink}`}>{verification.message}</p>
         <div className="flex flex-wrap gap-3">
           <a href={verification.smsUrl} className={btnPrimaryInline}>Open my texting app</a>
           <button type="button" onClick={onCopy} className={btnSecondaryInline}>Copy text</button>
         </div>
-        <p className={`text-sm ${bodyFaint}`}>On a computer? Open Messages on your phone and type this text to {verification.sender}. Opening the texting app does not send it for you.</p>
+        <p className={`text-sm ${bodyFaint}`}>On a computer? Open Messages on your phone and type this text to {formatPhoneForDisplay(verification.sender)}. Opening the texting app does not send it for you.</p>
         <p role="status" className={`text-sm ${bodyFaint}`}>
           {pollingStopped ? 'Automatic checking has paused. If you sent the text, choose Check verification. If it expired, create a new verification text.' : 'Waiting for your text. This page will check for verification for a short time.'}
         </p>

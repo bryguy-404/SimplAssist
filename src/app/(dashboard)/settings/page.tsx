@@ -25,8 +25,40 @@ import { getDashboardEntitledContext } from '@/lib/dashboard/context';
 import { requireWorkspacePageAccess } from '@/lib/customer/workspaceRouteResponse.server';
 import { isSettingsRegistrationLocked } from '@/lib/settings/registrationLock.server';
 import Link from 'next/link';
+import type { ReactNode } from 'react';
 import { BookOpen, ChevronRight } from 'lucide-react';
 import { isRicherWebsiteScanEnabledForBusiness } from '@/lib/website-scans/rollout.server';
+
+const cardTitle = 'text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1';
+const cardIntro = 'text-sm text-stone-500 dark:text-[#bdbdbf] mb-4';
+
+/** A labelled run of related cards, so the page reads as a few topics instead of one long list. */
+function SettingsGroup({
+  id,
+  title,
+  description,
+  children,
+}: {
+  id: string;
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
+  return (
+    <section id={id} aria-labelledby={`${id}-heading`} className="scroll-mt-6 space-y-5">
+      <div className="px-1">
+        <h2
+          id={`${id}-heading`}
+          className="text-xs font-semibold uppercase tracking-[0.12em] text-stone-500 dark:text-[#9c9c9f]"
+        >
+          {title}
+        </h2>
+        <p className="mt-1 text-sm text-stone-600 dark:text-[#bdbdbf]">{description}</p>
+      </div>
+      {children}
+    </section>
+  );
+}
 
 type SettingsPageProps = {
   searchParams?: {
@@ -75,11 +107,54 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
 
   if (!aiSettings) redirect('/onboarding');
 
+  const groups = [
+    smsEnabled
+      ? {
+          id: 'phone-and-calls',
+          title: 'Phone & calls',
+          description: 'Your number and what happens when someone calls it.',
+        }
+      : {
+          id: 'phone-and-calls',
+          title: 'Alerts',
+          description: 'Get a heads-up when your assistant takes action for you.',
+        },
+    {
+      id: 'your-assistant',
+      title: 'Your assistant',
+      description: 'What your assistant knows, how it talks, and what it works toward.',
+    },
+    {
+      id: 'your-business',
+      title: 'Your business',
+      description: 'The contact details and hours your assistant shares with customers.',
+    },
+    {
+      id: 'account',
+      title: 'Account & legal',
+      description: 'Your agreement, policy pages, and account controls.',
+    },
+  ] as const;
+  const [phoneGroup, assistantGroup, businessGroup, accountGroup] = groups;
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
       <div>
         <h1 className="text-2xl font-bold text-stone-900 dark:text-[#f5f5f5]">Settings</h1>
-        <p className="mt-1 text-stone-500 dark:text-[#bdbdbf]">Configure how your AI assistant behaves and communicates.</p>
+        <p className="mt-1 text-stone-500 dark:text-[#bdbdbf]">
+          Set up your number, your assistant, and your business details.
+        </p>
+        <nav aria-label="Settings sections" className="mt-4 flex flex-wrap gap-2">
+          {groups.map((group) => (
+            <a
+              key={group.id}
+              href={`#${group.id}`}
+              className="rounded-full border border-[#e7e0d4] bg-white px-3.5 py-1.5 text-sm font-medium text-stone-700 transition-colors hover:border-[#d9d0c1] hover:bg-[#faf6ef] dark:border-white/[0.12] dark:bg-white/[0.07] dark:text-[#f5f5f5] dark:hover:bg-white/[0.11]"
+            >
+              {group.title}
+            </a>
+          ))}
+        </nav>
       </div>
 
       {showCalendarUnavailableStatus && (
@@ -92,182 +167,191 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
         </div>
       )}
 
-      {richerScanEnabled && <Link
-        href="/settings/knowledge"
-        className={`group flex items-center gap-4 p-6 transition-colors hover:border-[var(--brand-primary)] ${card}`}
-      >
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--brand-accent-soft)] text-[var(--brand-accent)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.12)] dark:text-[var(--brand-accent-dark)]">
-          <BookOpen className="h-5 w-5" aria-hidden="true" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <h2 className="font-semibold text-stone-900 dark:text-[#f5f5f5]">Assistant Knowledge</h2>
-          <p className="mt-1 text-sm text-stone-500 dark:text-[#bdbdbf]">
-            Review your assistant’s business briefing or rescan your website for updated services, FAQs, facts, and policies.
-          </p>
-        </div>
-        <ChevronRight className="h-5 w-5 shrink-0 text-stone-400 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
-      </Link>}
-
-      <ServiceAgreementLink />
-      {/* Phone Number */}
-      {smsEnabled && <div className={`p-6 ${card}`}>
-        <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Phone Number</h2>
-        <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">
-          The phone number customers use to text your AI assistant.
-        </p>
-        <PhoneNumberSection
-          phoneNumber={phoneNumberRow?.phone_number || null}
-          isActive={phoneNumberRow?.is_active || false}
-          callForwardingEnabled={business.call_forwarding_enabled ?? false}
-          forwardToNumber={business.forward_to_number ?? null}
-        />
-      </div>}
-
-      <OwnerVoiceSettings initialSettings={voiceSettings} />
-      <CallScreeningSettings />
-
-      <OwnerBookingAlerts key={business.id} />
-
-      {/* Business Email */}
-      <div className={`p-6 ${card}`}>
-        <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Business Email</h2>
-        <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">
-          Contact email your AI can share with customers when it needs to escalate.
-        </p>
-        <BusinessEmailForm businessId={business.id} initialEmail={business.email} />
-      </div>
-
-      {/* Compliance (Phase 6) — privacy/terms URLs submitted to Telnyx */}
-      {smsEnabled && <div className={`p-6 ${card}`}>
-        <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Compliance</h2>
-        <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">
-          Where your privacy policy and terms of service live. Carriers (T-Mobile, AT&amp;T, Verizon) check these when reviewing your SMS campaign.
-        </p>
-        <CompliancePanel
-          slug={business.slug}
-          business={{
-            name: business.name,
-            legal_operator_name: business.shared_registration_id ? business.legal_business_name : null,
-            public_address_visibility: business.public_address_visibility,
-            review_sms_signup_enabled: business.review_sms_signup_enabled,
-            review_consent_url: `/c/${business.slug}/review-texts`,
-            phone_number: business.phone_number,
-            sms_phone_number: phoneNumberRow?.phone_number ?? null,
-            email: business.email,
-            address: business.address,
-            city: business.city,
-            state: business.state,
-            zip: business.zip,
-            opt_in_description: business.opt_in_description,
-            language: aiSettings.language,
-          }}
-          initialMode={business.privacy_terms_mode ?? 'hosted'}
-          initialPrivacyUrl={business.privacy_url_override}
-          initialTermsUrl={business.terms_url_override}
-          registrationLocked={registrationLocked}
-        />
-      </div>}
-
-      {/* AI Settings */}
-      <div className={`p-6 ${card}`}>
-        <GoalSettingsForm
-          initialPrimaryGoal={business.primary_goal}
-          initialGoalUrl={business.goal_url}
-          registrationLocked={registrationLocked}
-        />
-        <AISettingsForm
-          settings={aiSettings}
-          businessName={business.name}
-          calendarEmail={calendarToken?.google_email ?? null}
-          calendarConnected={!!calendarToken}
-          businessId={business.id}
-          canCustomizeAi={canCustomizeAi}
-          canUseCalendar={canUseCalendar}
-          calendarGoalAvailable={!signupMode}
-          canUseGuardrails={canUseGuardrails}
-          planActive={entitlements.active}
-          fullSuiteAvailable={fullSuiteAvailable}
-          showSmsResponseDelay={smsEnabled}
-        />
-      </div>
-
-      {!signupMode && canUseCalendar && <BookingSettingsForm services={services || []} />}
-
-      {/* Services */}
-      <div className={`p-6 ${card}`}>
-        <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Services</h2>
-        <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">Manage the services your business offers. Your AI will use this information when talking to customers.</p>
-        {canCustomizeAi ? (
-          <ServicesManager businessId={business.id} initialServices={services || []} />
-        ) : (
-          <LockedFeatureCard
-            compact
-            title="Service customization is paused"
-            description={entitlements.active
-              ? "Growth lets your AI use your service catalog when answering customers."
-              : "Reactivate your subscription to use your saved service catalog in AI conversations."}
-            requiredPlan={entitlements.active ? "Growth" : null}
-            preservedDetail={`${services?.length ?? 0} saved service${services?.length === 1 ? '' : 's'} will remain available after upgrading.`}
+      <SettingsGroup {...phoneGroup}>
+        {/* Assistant number + ring-my-phone-first + keep-your-existing-number help */}
+        {smsEnabled && <div className={`p-6 ${card}`}>
+          <PhoneNumberSection
+            phoneNumber={phoneNumberRow?.phone_number || null}
+            isActive={phoneNumberRow?.is_active || false}
+            callForwardingEnabled={business.call_forwarding_enabled ?? false}
+            forwardToNumber={business.forward_to_number ?? null}
           />
-        )}
-      </div>
+        </div>}
 
-      {/* FAQs */}
-      <div className={`p-6 ${card}`}>
-        <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">FAQs</h2>
-        <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">Common questions and answers your AI can use to help customers.</p>
-        {canCustomizeAi ? (
-          <FAQManager businessId={business.id} initialFaqs={faqs || []} />
-        ) : (
-          <LockedFeatureCard
-            compact
-            title="FAQ customization is paused"
-            description={entitlements.active
-              ? "Growth lets your AI answer from your saved business FAQs."
-              : "Reactivate your subscription to use your saved FAQs in AI conversations."}
-            requiredPlan={entitlements.active ? "Growth" : null}
-            preservedDetail={`${faqs?.length ?? 0} saved FAQ${faqs?.length === 1 ? '' : 's'} will remain available after upgrading.`}
-          />
-        )}
-      </div>
+        <OwnerVoiceSettings initialSettings={voiceSettings} />
+        <CallScreeningSettings />
 
-      {/* Business Info */}
-      <div className={`p-6 ${card}`}>
-        <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Business Info</h2>
-        <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">
-          Keep the contact details and hours your AI shares with customers up to date.
-        </p>
+        <OwnerBookingAlerts key={business.id} />
+      </SettingsGroup>
 
-        <BusinessInfoEditor
-          initialPhoneNumber={business.phone_number}
-          initialAddress={business.address}
-          initialCity={business.city}
-          initialState={business.state}
-          initialZip={business.zip}
-          registrationLocked={registrationLocked || Boolean(business.shared_registration_id)}
-        />
-
-        <div className="mt-8 border-t border-[#e3dacc] pt-8 dark:border-white/[0.12]">
-          <h3 className="text-base font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">
-            Timezone &amp; Hours
-          </h3>
-          <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">
-            Set when your business is open. Your AI will inform customers of your hours.
-          </p>
-
-          <div className="mb-6">
-            <label className="block text-sm font-medium text-stone-700 dark:text-[#bdbdbf] mb-2">
-              Timezone
-            </label>
-            <TimezoneSelector businessId={business.id} initialTimezone={business.timezone} />
+      <SettingsGroup {...assistantGroup}>
+        {richerScanEnabled && <Link
+          href="/settings/knowledge"
+          className={`group flex items-center gap-4 p-6 transition-colors hover:border-[var(--brand-primary)] ${card}`}
+        >
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] bg-[var(--brand-accent-soft)] text-[var(--brand-accent)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.12)] dark:text-[var(--brand-accent-dark)]">
+            <BookOpen className="h-5 w-5" aria-hidden="true" />
           </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="font-semibold text-stone-900 dark:text-[#f5f5f5]">Assistant Knowledge</h2>
+            <p className="mt-1 text-sm text-stone-500 dark:text-[#bdbdbf]">
+              Review your assistant’s business briefing or rescan your website for updated services, FAQs, facts, and policies.
+            </p>
+          </div>
+          <ChevronRight className="h-5 w-5 shrink-0 text-stone-400 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+        </Link>}
 
-          <BusinessHoursEditor businessId={business.id} initialHours={businessHours || []} />
+        {/* Main goal — its own card and its own Save, separate from tone and rules */}
+        <div id="main-goal" className={`scroll-mt-6 p-6 ${card}`}>
+          <GoalSettingsForm
+            initialPrimaryGoal={business.primary_goal}
+            initialGoalUrl={business.goal_url}
+            registrationLocked={registrationLocked}
+          />
         </div>
-      </div>
 
-      {/* Danger Zone */}
-      <DangerZone />
+        {/* AI Settings */}
+        <div className={`p-6 ${card}`}>
+          <AISettingsForm
+            settings={aiSettings}
+            businessName={business.name}
+            calendarEmail={calendarToken?.google_email ?? null}
+            calendarConnected={!!calendarToken}
+            businessId={business.id}
+            canCustomizeAi={canCustomizeAi}
+            canUseCalendar={canUseCalendar}
+            calendarGoalAvailable={!signupMode}
+            canUseGuardrails={canUseGuardrails}
+            planActive={entitlements.active}
+            fullSuiteAvailable={fullSuiteAvailable}
+            showSmsResponseDelay={smsEnabled}
+          />
+        </div>
+
+        {!signupMode && canUseCalendar && <BookingSettingsForm services={services || []} />}
+
+        {/* Services */}
+        <div className={`p-6 ${card}`}>
+          <h2 className={cardTitle}>Services</h2>
+          <p className={cardIntro}>What your business offers. Your assistant uses this list when it answers customers.</p>
+          {canCustomizeAi ? (
+            <ServicesManager businessId={business.id} initialServices={services || []} />
+          ) : (
+            <LockedFeatureCard
+              compact
+              title="Service customization is paused"
+              description={entitlements.active
+                ? "Growth lets your AI use your service catalog when answering customers."
+                : "Reactivate your subscription to use your saved service catalog in AI conversations."}
+              requiredPlan={entitlements.active ? "Growth" : null}
+              preservedDetail={`${services?.length ?? 0} saved service${services?.length === 1 ? '' : 's'} will remain available after upgrading.`}
+            />
+          )}
+        </div>
+
+        {/* FAQs */}
+        <div className={`p-6 ${card}`}>
+          <h2 className={cardTitle}>FAQs</h2>
+          <p className={cardIntro}>Common questions and the answers your assistant should give.</p>
+          {canCustomizeAi ? (
+            <FAQManager businessId={business.id} initialFaqs={faqs || []} />
+          ) : (
+            <LockedFeatureCard
+              compact
+              title="FAQ customization is paused"
+              description={entitlements.active
+                ? "Growth lets your AI answer from your saved business FAQs."
+                : "Reactivate your subscription to use your saved FAQs in AI conversations."}
+              requiredPlan={entitlements.active ? "Growth" : null}
+              preservedDetail={`${faqs?.length ?? 0} saved FAQ${faqs?.length === 1 ? '' : 's'} will remain available after upgrading.`}
+            />
+          )}
+        </div>
+      </SettingsGroup>
+
+      <SettingsGroup {...businessGroup}>
+        {/* Business Info */}
+        <div className={`p-6 ${card}`}>
+          <h2 className={cardTitle}>Business Info</h2>
+          <p className={cardIntro}>
+            Keep the contact details and hours your assistant shares with customers up to date.
+          </p>
+
+          <BusinessInfoEditor
+            initialPhoneNumber={business.phone_number}
+            initialAddress={business.address}
+            initialCity={business.city}
+            initialState={business.state}
+            initialZip={business.zip}
+            registrationLocked={registrationLocked || Boolean(business.shared_registration_id)}
+          />
+
+          <div className="mt-8 border-t border-[#e3dacc] pt-8 dark:border-white/[0.12]">
+            <h3 className="text-base font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">
+              Timezone &amp; Hours
+            </h3>
+            <p className={cardIntro}>
+              Set when your business is open. Your assistant tells customers your hours.
+            </p>
+
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-stone-700 dark:text-[#bdbdbf] mb-2">
+                Timezone
+              </label>
+              <TimezoneSelector businessId={business.id} initialTimezone={business.timezone} />
+            </div>
+
+            <BusinessHoursEditor businessId={business.id} initialHours={businessHours || []} />
+          </div>
+        </div>
+
+        {/* Business Email */}
+        <div className={`p-6 ${card}`}>
+          <h2 className={cardTitle}>Business Email</h2>
+          <p className={cardIntro}>
+            The email your assistant gives customers when they need to reach a person.
+          </p>
+          <BusinessEmailForm businessId={business.id} initialEmail={business.email} />
+        </div>
+      </SettingsGroup>
+
+      <SettingsGroup {...accountGroup}>
+        {/* Privacy/terms URLs submitted to Telnyx (Phase 6 compliance panel) */}
+        {smsEnabled && <div className={`p-6 ${card}`}>
+          <h2 className={cardTitle}>Privacy policy &amp; terms</h2>
+          <p className={cardIntro}>
+            Where your privacy policy and terms of service live. Phone carriers (T-Mobile, AT&amp;T, Verizon) check these pages before they approve your business for texting.
+          </p>
+          <CompliancePanel
+            slug={business.slug}
+            business={{
+              name: business.name,
+              legal_operator_name: business.shared_registration_id ? business.legal_business_name : null,
+              public_address_visibility: business.public_address_visibility,
+              review_sms_signup_enabled: business.review_sms_signup_enabled,
+              review_consent_url: `/c/${business.slug}/review-texts`,
+              phone_number: business.phone_number,
+              sms_phone_number: phoneNumberRow?.phone_number ?? null,
+              email: business.email,
+              address: business.address,
+              city: business.city,
+              state: business.state,
+              zip: business.zip,
+              opt_in_description: business.opt_in_description,
+              language: aiSettings.language,
+            }}
+            initialMode={business.privacy_terms_mode ?? 'hosted'}
+            initialPrivacyUrl={business.privacy_url_override}
+            initialTermsUrl={business.terms_url_override}
+            registrationLocked={registrationLocked}
+          />
+        </div>}
+
+        <ServiceAgreementLink />
+
+        {/* Danger Zone */}
+        <DangerZone />
+      </SettingsGroup>
     </div>
   );
 }

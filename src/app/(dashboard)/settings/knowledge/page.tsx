@@ -1,4 +1,6 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { ArrowLeft } from 'lucide-react';
 import WebsiteKnowledgeManager from '@/components/settings/WebsiteKnowledgeManager';
 import { canUseFeature } from '@/lib/billing/entitlements';
 import { getDashboardEntitledContext } from '@/lib/dashboard/context';
@@ -47,7 +49,15 @@ export default async function AssistantKnowledgePage() {
   };
 
   return (
-    <WebsiteKnowledgeManager
+    <div className="space-y-4">
+      <Link
+        href="/settings#your-assistant"
+        className="inline-flex items-center gap-1.5 rounded-full border border-[#e7e0d4] bg-white px-3.5 py-1.5 text-sm font-medium text-stone-700 transition-colors hover:border-[#d9d0c1] hover:bg-[#faf6ef] dark:border-white/[0.12] dark:bg-white/[0.07] dark:text-[#f5f5f5] dark:hover:bg-white/[0.11]"
+      >
+        <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+        Back to Settings
+      </Link>
+      <WebsiteKnowledgeManager
       businessId={business.id}
       businessType={(businessProfile?.business_type || 'general') as BusinessType}
       websiteUrl={business.website_url}
@@ -59,6 +69,7 @@ export default async function AssistantKnowledgePage() {
         title: item.title,
         content: item.content,
       }))}
-    />
+      />
+    </div>
   );
 }

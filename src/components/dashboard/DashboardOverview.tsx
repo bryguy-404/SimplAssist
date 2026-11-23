@@ -11,6 +11,7 @@ import CallForwardingNudge from '@/components/dashboard/CallForwardingNudge';
 import { useBrand } from '@/components/branding/BrandProvider';
 import { orangeAccentIcon } from '@/lib/glass';
 import { card as cardSurface, ink, body, statusSuccess, statusInfo } from '@/lib/theme-v2/theme';
+import { formatPhoneForDisplay } from '@/lib/phone/display';
 
 interface DashboardStats {
   totalConversations: number;
@@ -170,7 +171,7 @@ export default function DashboardOverview({
                   {a2pStatus.smsReady ? 'Active' : 'Setup pending'}
                 </span>
               </div>
-              <p className={`text-lg font-bold ${ink}`}>{phoneNumber}</p>
+              <p className={`text-lg font-bold tabular-nums ${ink}`}>{formatPhoneForDisplay(phoneNumber)}</p>
               <p className="text-xs text-stone-400 dark:text-[#888]">
                 {a2pStatus.smsReady
                   ? 'Customers can text this number 24/7'
@@ -217,7 +218,7 @@ export default function DashboardOverview({
                   <div key={conv.id} className="p-4 hover:bg-[#faf6ef] dark:hover:bg-white/[0.04] transition-colors">
                     <div className="flex items-center justify-between mb-1">
                       <p className={`text-sm font-medium ${ink}`}>
-                        {conv.contact?.name || conv.contact?.phone_number || 'Unknown'}
+                        {conv.contact?.name || formatPhoneForDisplay(conv.contact?.phone_number) || 'Unknown'}
                       </p>
                       <span className="text-xs text-stone-400 dark:text-[#888]">
                         {formatDate(new Date(conv.last_message_at), 'MMM d, h:mm a')}
@@ -258,7 +259,7 @@ export default function DashboardOverview({
                 {hotLeads.map((lead) => (
                   <div key={lead.id} className="p-4 flex items-center justify-between hover:bg-[#faf6ef] dark:hover:bg-white/[0.04] transition-colors">
                     <div>
-                      <p className={`text-sm font-medium ${ink}`}>{lead.name || lead.phone_number || 'Unknown'}</p>
+                      <p className={`text-sm font-medium ${ink}`}>{lead.name || formatPhoneForDisplay(lead.phone_number) || 'Unknown'}</p>
                       <p className={`text-xs ${body}`}>
                         Last contact: {formatDate(new Date(lead.last_contacted_at), 'MMM d, yyyy')}
                       </p>

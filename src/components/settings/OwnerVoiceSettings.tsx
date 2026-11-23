@@ -270,13 +270,13 @@ export function OwnerVoiceSettingsContent({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 id={headingId} className={clsx("text-lg font-semibold", ink)}>
-            {variant === "usage" ? "Voice usage" : "Call answering"}
+            {variant === "usage" ? "Voice usage" : "Missed calls"}
           </h2>
           <p className={clsx("mt-1 text-sm", bodyFaint)}>
             {pilot ? "Your private pilot keeps its existing routing and approved caller list."
               : variant === "usage"
                 ? "Track voice minutes separately from text messages and web-chat replies."
-                : "Choose how your assistant responds when you miss a call."}
+                : "Choose what your assistant does when a call isn\u2019t answered."}
           </p>
         </div>
         <button type="button" disabled={Boolean(busy)} onClick={onRefresh}
@@ -293,11 +293,11 @@ export function OwnerVoiceSettingsContent({
       {variant === "settings" && !pilot ? (
         <form className="mt-5 space-y-4" onSubmit={(event) => { event.preventDefault(); onSave?.(); }}>
           <fieldset disabled={!editable || Boolean(busy)}>
-            <legend className={clsx("mb-2 text-sm font-medium", ink)}>When you miss a call</legend>
+            <legend className={clsx("mb-2 text-sm font-medium", ink)}>When a call isn&rsquo;t answered</legend>
             <div className="grid gap-3 sm:grid-cols-2">
               {(["text", "voice"] as const).map((mode) => (
                 <label key={mode} className={clsx(
-                  "flex items-start gap-3 rounded-xl border p-4 text-sm",
+                  "flex items-start gap-3 rounded-[18px] border p-4 text-sm",
                   draft.mode === mode ? "border-[var(--brand-primary)] bg-[var(--brand-accent-soft)] dark:bg-white/[0.06]"
                     : "border-[#ece4d8] dark:border-white/[0.12]",
                   ink,
@@ -308,7 +308,9 @@ export function OwnerVoiceSettingsContent({
                   <span>
                     <span className="block font-medium">{mode === "text" ? "Text follow-up" : "AI voice answering"}</span>
                     <span className={clsx("mt-1 block", bodyFaint)}>
-                      {mode === "text" ? "Send an eligible missed-call text." : "Let your AI speak with the caller."}
+                      {mode === "text"
+                        ? "The caller gets a text from your assistant so the conversation can continue by message. Sent when the caller\u2019s number is eligible to be texted."
+                        : "Your assistant picks up and talks with the caller. This uses your voice minutes."}
                     </span>
                   </span>
                 </label>
@@ -321,8 +323,8 @@ export function OwnerVoiceSettingsContent({
               onChange={(event) => onDraft?.({ ...draft, textFallbackEnabled: event.target.checked })}
               className="mt-1 accent-[var(--brand-primary)]" />
             <span>
-              Send an eligible text if voice cannot start or has a technical problem.
-              <span className={clsx("mt-1 block", bodyFaint)}>Your ordinary SMS allowance and rates still apply.</span>
+              Backup: text the caller if AI voice can&rsquo;t start or has a technical problem.
+              <span className={clsx("mt-1 block", bodyFaint)}>Only eligible numbers are texted. Your ordinary SMS allowance and rates still apply.</span>
             </span>
           </label>
           {editable ? (
@@ -341,17 +343,22 @@ export function OwnerVoiceSettingsContent({
         </p>
       ) : null}
       <VoiceMinuteUsage settings={settings} />
-      <p className={clsx("mt-4 text-sm", bodyFaint)}>
-        {pilot ? "Pilot minutes include time the voice session spends listening and waiting."
-          : "Voice minutes count after the opening notice, including conversation, listening, pauses, and checking answers until the caller hangs up. Ringing, connection setup, and the opening notice do not count."}
-      </p>
-      <p className={clsx("mt-2 text-sm", bodyFaint)}>
-        Extra voice minutes are not purchased or charged automatically.
-        {!pilot ? settings.preferences.textFallbackEnabled
-          ? " At the limit, eligible text follow-up is used."
-          : " At the limit, callers follow your existing voicemail path without a generic text."
-          : ""}
-      </p>
+      <details className="group mt-4">
+        <summary className={clsx("cursor-pointer text-sm font-medium underline-offset-4 hover:underline", ink)}>
+          How voice minutes are counted
+        </summary>
+        <p className={clsx("mt-2 text-sm", bodyFaint)}>
+          {pilot ? "Pilot minutes include time the voice session spends listening and waiting."
+            : "Voice minutes count after the opening notice, including conversation, listening, pauses, and checking answers until the caller hangs up. Ringing, connection setup, and the opening notice do not count."}
+        </p>
+        <p className={clsx("mt-2 text-sm", bodyFaint)}>
+          Extra voice minutes are not purchased or charged automatically.
+          {!pilot ? settings.preferences.textFallbackEnabled
+            ? " At the limit, eligible text follow-up is used."
+            : " At the limit, callers follow your existing voicemail path without a generic text."
+            : ""}
+        </p>
+      </details>
       <p className={clsx("mt-3 text-sm", bodyFaint)}>
         <Link href="/conversations" className="underline underline-offset-4">Past conversations and retained recordings</Link> remain available when voice answering is off.
         {variant === "usage" && !pilot ? <> <Link href="/settings" className="underline underline-offset-4">Manage call settings</Link>.</> : null}

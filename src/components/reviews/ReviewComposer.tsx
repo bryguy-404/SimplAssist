@@ -34,6 +34,7 @@ import {
   reviewSchedule,
   reviewTime,
 } from "./reviewUi";
+import { formatPhoneForDisplay } from "@/lib/phone/display";
 
 /** Render tracking URLs as inert text so opening a preview cannot register a click. */
 export function ReviewEmailPreview({
@@ -270,7 +271,7 @@ export default function ReviewComposer({
                           <span className={ink}>{recipient.name}</span>
                           <span className="mt-1 block text-xs">
                             {preview.channel === "sms"
-                              ? recipient.phone
+                              ? formatPhoneForDisplay(recipient.phone)
                               : recipient.email}
                           </span>
                         </td>

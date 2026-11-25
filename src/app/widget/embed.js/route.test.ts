@@ -2470,6 +2470,19 @@ describe("widget embed runtime", () => {
       expect(container.style["--sa-brand-ink"]).toBe(brandInk);
     });
 
+    it("gives the launcher a chat icon and a close icon to swap between", async () => {
+      const harness = await createHarness([{ status: 200, body: availableConfig }]);
+      await flushPromises();
+
+      const launcher = harness.document.querySelector(".sa-widget-btn");
+      if (!launcher) throw new Error("Widget launcher was not rendered");
+      expect(launcher.innerHTML).toContain("sa-widget-btn-icon-chat");
+      expect(launcher.innerHTML).toContain("sa-widget-btn-icon-close");
+      expect(harness.script).toContain(
+        ".sa-widget-container.sa-open .sa-widget-btn-icon-close{opacity:1;",
+      );
+    });
+
     it("draws its icons in the text colour instead of fixed white", async () => {
       const harness = await createHarness([{ status: 200, body: availableConfig }]);
       await flushPromises();

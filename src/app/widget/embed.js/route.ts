@@ -140,6 +140,11 @@ export async function GET() {
     '.sa-widget-container{position:fixed;z-index:2147483647;font-family:system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.5;}',
     '.sa-widget-btn{color:var(--sa-on-brand,#fff);width:60px;height:60px;padding:0;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,0.15);transition:transform 0.2s,box-shadow 0.2s;position:relative;}',
     '.sa-widget-btn:hover{transform:scale(1.05);box-shadow:0 6px 16px rgba(0,0,0,0.2);}',
+    '.sa-widget-btn-icon{position:absolute;top:50%;left:50%;display:block;transition:opacity 0.2s ease,transform 0.28s cubic-bezier(0.3,1.4,0.5,1);}',
+    '.sa-widget-btn-icon-chat{opacity:1;transform:translate(-50%,-50%);}',
+    '.sa-widget-btn-icon-close{opacity:0;transform:translate(-50%,-50%) rotate(-90deg) scale(0.5);}',
+    '.sa-widget-container.sa-open .sa-widget-btn-icon-chat{opacity:0;transform:translate(-50%,-50%) rotate(90deg) scale(0.5);}',
+    '.sa-widget-container.sa-open .sa-widget-btn-icon-close{opacity:1;transform:translate(-50%,-50%);}',
     '.sa-widget-badge{position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;width:22px;height:22px;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #fff;}',
     '.sa-widget-attention-dot{position:absolute;top:4px;right:4px;width:12px;height:12px;border-radius:50%;background:#ef4444;display:none;}',
     '.sa-widget-panel{--sa-brand:#0066FF;width:400px;height:auto;min-height:260px;max-height:500px;border-radius:18px;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,0.14);display:flex;flex-direction:column;background:#fff;position:absolute;bottom:72px;transition:opacity 0.25s,transform 0.25s;transform-origin:bottom;}',
@@ -206,7 +211,7 @@ export async function GET() {
     '.sa-widget-lead-status.sa-widget-lead-error{color:#b91c1c!important;}',
     '@media(max-width:600px), (max-height:500px) and (max-width:950px) and (pointer:coarse){.sa-widget-panel{width:auto;min-width:0;min-height:0;height:var(--sa-mobile-expanded-height,78dvh);max-height:var(--sa-mobile-expanded-height,78dvh);position:fixed;top:auto;left:max(12px,env(safe-area-inset-left));right:max(12px,env(safe-area-inset-right));bottom:calc(max(12px,env(safe-area-inset-bottom)) + var(--sa-vv-bottom-offset,0px));border-radius:18px;transform-origin:bottom center;}.sa-widget-panel.sa-mobile-compact{height:var(--sa-mobile-compact-height,48dvh);max-height:var(--sa-mobile-compact-height,48dvh);}.sa-widget-panel.sa-mobile-expanded{height:var(--sa-mobile-expanded-height,78dvh);max-height:var(--sa-mobile-expanded-height,78dvh);}.sa-widget-panel.sa-viewport-constrained{inset:var(--sa-vv-offset-top,0px) 0 auto 0;width:100vw;height:var(--sa-visual-height,100dvh);max-height:var(--sa-visual-height,100dvh);border-radius:0;}.sa-widget-messages{max-height:none;flex:1;min-height:0;padding-bottom:max(16px,env(safe-area-inset-bottom));}.sa-widget-container.sa-open .sa-widget-btn{display:none;}}',
     '@media(min-width:601px) and (max-width:950px) and (max-height:500px) and (pointer:coarse){.sa-widget-panel:not(.sa-viewport-constrained){width:min(560px,calc(100vw - 24px));}}',
-    '@media(prefers-reduced-motion:reduce){.sa-widget-panel,.sa-widget-btn,.sa-widget-send,.sa-widget-end,.sa-widget-quick-reply-btn{transition:none!important;animation:none!important;}.sa-widget-loading-dot,.sa-widget-cursor{animation:none!important;}}',
+    '@media(prefers-reduced-motion:reduce){.sa-widget-panel,.sa-widget-btn,.sa-widget-btn-icon,.sa-widget-send,.sa-widget-end,.sa-widget-quick-reply-btn{transition:none!important;animation:none!important;}.sa-widget-loading-dot,.sa-widget-cursor{animation:none!important;}}',
     '.sa-widget-btn.sa-btn-hidden{opacity:0;transform:scale(0.8);pointer-events:none;}',
     '.sa-widget-btn.sa-btn-visible{opacity:1;transform:scale(1);transition:opacity 0.4s ease,transform 0.4s ease;}',
     '.sa-widget-end-area{padding:0 16px 8px;text-align:center;background:#fff;flex-shrink:0;}',
@@ -258,7 +263,7 @@ export async function GET() {
   var inputArea = el('div', { class: 'sa-widget-input-area' });
   var input = el('input', { class: 'sa-widget-input', placeholder: 'Type your message...', type: 'text', maxlength: '2000', 'aria-label': 'Chat message' });
   var sendBtn = el('button', { class: 'sa-widget-send', type: 'button', 'aria-label': 'Send message' });
-  sendBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
+  sendBtn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5"/></svg>';
   var footerEl = el('div', { class: 'sa-widget-footer' });
   var footerLink = el('a', { href: baseUrl + '/', target: '_blank', rel: 'noopener noreferrer' }, 'Powered by SimplAssist');
   footerEl.appendChild(footerLink);
@@ -345,7 +350,9 @@ export async function GET() {
   function applyBrandColor(color) {
     btn.className = 'sa-widget-btn';
     btn.style.backgroundColor = color;
-    btn.innerHTML = '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+    btn.innerHTML =
+      '<svg class="sa-widget-btn-icon sa-widget-btn-icon-chat" width="30" height="30" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3.5c-5 0-9 3.5-9 8 0 2.2 1 4.2 2.6 5.6-.2 1.1-.7 2.1-1.5 2.9-.3.3-.1.9.4.9 1.9 0 3.6-.6 4.9-1.7.8.2 1.7.3 2.6.3 5 0 9-3.5 9-8s-4-8-9-8z"/></svg>' +
+      '<svg class="sa-widget-btn-icon sa-widget-btn-icon-close" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
     btn.appendChild(badge);
     btn.appendChild(attentionDot);
     panel.style.setProperty('--sa-brand', color);

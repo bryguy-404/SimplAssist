@@ -166,256 +166,249 @@ body:not(.sa-homepage-widget-route)
   }
 }
 
-/* Analytics consent card mascot: the logo's orange dot perches on the card's
-   top edge, bounces while "Allow analytics" is hovered, and performs once the
-   choice is saved. Durations pair with DOT_SHOW_MS / DOT_NOD_MS in
-   components/marketing/website-analytics.tsx. */
+/* Analytics consent card mascot: the logo's orange dot peeks over the card's
+   top edge, watches the pointer, leans in while "Allow analytics" is hovered,
+   and performs once the choice is saved. The confetti itself is drawn by
+   components/marketing/consent-confetti.ts. Durations pair with DOT_SHOW_MS,
+   DOT_BYE_MS and DOT_BURST_MS in components/marketing/website-analytics.tsx. */
 @layer components {
   .sa-consent {
-    animation: sa-consent-enter 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    --sa-dot: var(--brand-primary);
+    --sa-dot-size: 38px;
+    --sa-peek: 15px;
+    animation: sa-consent-in 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
   }
 
-  .sa-consent[data-mood="show"] {
-    animation: sa-consent-leave 300ms ease-in 1700ms both;
+  .dark .sa-consent {
+    --sa-dot: var(--brand-primary-dark);
   }
 
-  .sa-consent[data-mood="nod"] {
-    animation: sa-consent-leave 240ms ease-in 400ms both;
-  }
-
-  /* Zero-height rail along the card's top edge; the dot travels along it. */
+  /* The mascot lives on a zero-height track along the card's top edge. Three
+     nested boxes keep its motion simple: the runner moves sideways, the hopper
+     moves up and down (and squashes), and the dot itself spins. */
   .sa-consent-track {
     position: absolute;
-    left: 1.75rem;
-    right: 1.75rem;
-    top: 1px;
+    left: 26px;
+    right: 26px;
+    top: 0;
     height: 0;
     z-index: 0;
     pointer-events: none;
   }
 
-  /* Horizontal travel and the entrance pop live here, vertical bounce and
-     squash on the dot itself, so the two combine into arcs. */
   .sa-consent-runner {
-    position: absolute;
-    left: 0;
-    bottom: 0;
-    width: 22px;
-    height: 22px;
-    animation: sa-consent-dot-pop 620ms cubic-bezier(0.34, 1.56, 0.64, 1) 450ms both;
+    width: 100%;
   }
 
-  .sa-consent[data-mood="show"] .sa-consent-runner {
-    animation: sa-consent-dot-run 1000ms linear both;
+  .sa-consent-hopper {
+    position: absolute;
+    left: 0;
+    bottom: calc(var(--sa-peek) * -1);
+    width: var(--sa-dot-size);
+    height: var(--sa-dot-size);
+    transform-origin: 50% 100%;
+    animation: sa-consent-peek 700ms cubic-bezier(0.3, 1.5, 0.5, 1) 450ms backwards;
+    transition: transform 260ms cubic-bezier(0.3, 1.6, 0.5, 1);
   }
 
   .sa-consent-dot {
-    display: block;
+    position: relative;
     width: 100%;
     height: 100%;
     border-radius: 50%;
-    background: var(--brand-primary);
-    transform-origin: 50% 100%;
-    animation: sa-consent-dot-idle 3.2s ease-in-out 1.6s infinite;
+    background: var(--sa-dot);
+    box-shadow:
+      inset 0 -5px 0 rgba(0, 0, 0, 0.12),
+      inset 0 3px 0 rgba(255, 255, 255, 0.25);
+    animation: sa-consent-bob 3.6s ease-in-out 1.4s infinite;
   }
 
-  .dark .sa-consent-dot {
-    background: var(--brand-primary-dark);
+  .sa-consent-eyes {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 34%;
+    display: flex;
+    justify-content: center;
+    gap: 7px;
+    transition: transform 120ms ease-out;
   }
 
-  .sa-consent[data-mood="perk"] .sa-consent-dot {
-    animation: sa-consent-dot-perk 520ms infinite;
+  .sa-consent-eyes i {
+    width: 5px;
+    height: 7px;
+    border-radius: 50%;
+    background: #3a1505;
+    animation: sa-consent-blink 4.6s infinite;
+  }
+
+  /* Leans in when the pointer is on "Allow analytics". */
+  .sa-consent[data-eager][data-mood="idle"] .sa-consent-hopper {
+    transform: translateY(-9px) scale(1.04);
+  }
+
+  /* ---------- The show (allowed) ---------- */
+  .sa-consent[data-mood="show"] {
+    animation: sa-consent-out 300ms ease-in 2000ms both;
+  }
+
+  .sa-consent[data-mood="show"] .sa-consent-runner {
+    animation: sa-consent-run 2000ms linear both;
+  }
+
+  .sa-consent[data-mood="show"] .sa-consent-hopper {
+    transition: none;
+    animation: sa-consent-hop 2000ms both;
   }
 
   .sa-consent[data-mood="show"] .sa-consent-dot {
-    animation: sa-consent-dot-show 1000ms both;
+    animation: sa-consent-spin 2000ms both;
   }
 
-  .sa-consent[data-mood="nod"] .sa-consent-dot {
-    animation: sa-consent-dot-nod 380ms ease-in-out both;
+  .sa-consent[data-mood="show"] .sa-consent-eyes i {
+    animation: none;
   }
 
-  /* Confetti layer, anchored where the dot bursts: the centre of its final
-     leap, mid-card. Above the card so pieces rain down over it. */
-  .sa-consent-confetti {
-    position: absolute;
-    left: 50%;
-    top: -56px;
-    z-index: 20;
-    pointer-events: none;
+  /* ---------- The nod (declined) ---------- */
+  .sa-consent[data-mood="bye"] {
+    animation: sa-consent-out 260ms ease-in 160ms both;
   }
 
-  .sa-consent-confetto {
-    position: absolute;
-    width: var(--sa-w);
-    height: var(--sa-h);
-    margin: calc(var(--sa-h) / -2) 0 0 calc(var(--sa-w) / -2);
-    border-radius: var(--sa-br);
-    background: var(--sa-c);
-    opacity: 0;
+  .sa-consent[data-mood="bye"] .sa-consent-hopper {
+    transition: none;
+    animation: sa-consent-duck 380ms ease-in both;
   }
 
-  /* Sideways drift and the up-then-down arc run as separate animations
-     (`translate` vs `transform`) so each piece follows a thrown curve. */
-  .sa-consent[data-mood="show"] .sa-consent-confetto {
-    animation:
-      sa-consent-confetti-x var(--sa-t) cubic-bezier(0.12, 0.7, 0.3, 1) calc(860ms + var(--sa-d)) both,
-      sa-consent-confetti-y var(--sa-t) linear calc(860ms + var(--sa-d)) both;
-  }
-
-  @keyframes sa-consent-enter {
+  @keyframes sa-consent-in {
     from {
       opacity: 0;
-      transform: translateY(14px);
+      transform: translateY(18px);
     }
     to {
       opacity: 1;
-      transform: translateY(0);
+      transform: none;
     }
   }
 
-  @keyframes sa-consent-leave {
-    from {
-      opacity: 1;
-      transform: translateY(0);
-    }
+  @keyframes sa-consent-out {
     to {
       opacity: 0;
       transform: translateY(14px);
     }
   }
 
-  /* Starts hidden behind the card, then pops up over its top edge. */
-  @keyframes sa-consent-dot-pop {
+  @keyframes sa-consent-peek {
     from {
-      transform: translateY(26px);
+      transform: translateY(calc(var(--sa-dot-size) * 0.75));
     }
     to {
-      transform: translateY(0);
+      transform: none;
     }
   }
 
-  /* Mostly still, with one small hop per cycle. */
-  @keyframes sa-consent-dot-idle {
+  @keyframes sa-consent-bob {
     0%,
-    62%,
     100% {
-      transform: translateY(0) scale(1);
+      transform: none;
     }
-    69% {
-      transform: translateY(0) scale(1.12, 0.86);
+    50% {
+      transform: translateY(-3px);
+    }
+  }
+
+  @keyframes sa-consent-blink {
+    0%,
+    94%,
+    100% {
+      transform: none;
+    }
+    97% {
+      transform: scaleY(0.12);
+    }
+  }
+
+  @keyframes sa-consent-duck {
+    0% {
+      transform: none;
+    }
+    30% {
+      transform: translateY(-5px);
+    }
+    100% {
+      transform: translateY(calc(var(--sa-dot-size) * 0.8));
+    }
+  }
+
+  /* Sideways: wait for the crouch, then travel most of the card's width. */
+  @keyframes sa-consent-run {
+    0%,
+    9% {
+      transform: none;
+    }
+    92%,
+    100% {
+      transform: translateX(calc(100% - var(--sa-dot-size)));
+    }
+  }
+
+  /* Up and down: two hops along the top edge, each landing with a squash, then
+     the biggest leap, where the dot swells and pops into confetti. "On the
+     edge" is one peek-height above where the dot hides. */
+  @keyframes sa-consent-hop {
+    0% {
+      transform: none;
+      animation-timing-function: ease-in;
+    }
+    9% {
+      transform: translateY(5px) scale(1.14, 0.82);
+      animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1);
+    }
+    24% {
+      transform: translateY(-74px) scale(0.94, 1.08);
+      animation-timing-function: cubic-bezier(0.6, 0, 0.8, 0.3);
+    }
+    38% {
+      transform: translateY(calc(var(--sa-peek) * -1)) scale(1.2, 0.76);
+      animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1);
+    }
+    51% {
+      transform: translateY(-56px) scale(0.96, 1.05);
+      animation-timing-function: cubic-bezier(0.6, 0, 0.8, 0.3);
+    }
+    63% {
+      transform: translateY(calc(var(--sa-peek) * -1)) scale(1.18, 0.8);
+      animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1);
     }
     79% {
-      transform: translateY(-7px) scale(0.96, 1.05);
-    }
-    89% {
-      transform: translateY(0) scale(1.08, 0.92);
-    }
-    95% {
-      transform: translateY(0) scale(1);
-    }
-  }
-
-  @keyframes sa-consent-dot-perk {
-    0%,
-    100% {
-      transform: translateY(0) scale(1.18, 0.82);
-      animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1);
-    }
-    50% {
-      transform: translateY(-10px) scale(0.95, 1.06);
-      animation-timing-function: cubic-bezier(0.6, 0, 0.8, 0.3);
-    }
-  }
-
-  @keyframes sa-consent-dot-run {
-    0%,
-    8% {
-      left: 0;
-    }
-    84%,
-    100% {
-      left: calc(50% - 11px);
-    }
-  }
-
-  /* Wind-up, two hops, a big leap, then it bursts into confetti at the top. */
-  @keyframes sa-consent-dot-show {
-    0% {
-      transform: translateY(0) scale(1);
+      transform: translateY(-104px) scale(0.96, 1.04);
       animation-timing-function: ease-out;
     }
-    8% {
-      transform: translateY(0) scale(1.28, 0.68);
-      animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1);
+    82% {
+      transform: translateY(-104px) scale(1.35);
+      animation-timing-function: ease-in;
     }
-    22% {
-      transform: translateY(-34px) scale(0.92, 1.1);
-      animation-timing-function: cubic-bezier(0.6, 0, 0.8, 0.3);
-    }
-    36% {
-      transform: translateY(0) scale(1.24, 0.74);
-      animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1);
-    }
-    50% {
-      transform: translateY(-26px) scale(0.94, 1.08);
-      animation-timing-function: cubic-bezier(0.6, 0, 0.8, 0.3);
-    }
-    64% {
-      transform: translateY(0) scale(1.26, 0.72);
-      animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1);
-    }
-    84% {
-      transform: translateY(-46px) scale(1);
-      opacity: 1;
-      animation-timing-function: ease-out;
-    }
-    90% {
-      transform: translateY(-46px) scale(1.4);
-      opacity: 1;
-    }
+    85%,
     100% {
-      transform: translateY(-46px) scale(0);
-      opacity: 0;
+      transform: translateY(-104px) scale(0);
     }
   }
 
-  @keyframes sa-consent-dot-nod {
+  /* A full spin on the way up the last, biggest hop. */
+  @keyframes sa-consent-spin {
     0%,
-    100% {
-      transform: translateY(0) scale(1);
+    63% {
+      transform: none;
     }
-    45% {
-      transform: translateY(0) scale(1.2, 0.76);
+    80%,
+    100% {
+      transform: rotate(360deg);
     }
   }
 
-  @keyframes sa-consent-confetti-x {
-    from {
-      translate: 0 0;
-    }
-    to {
-      translate: var(--sa-dx) 0;
-    }
-  }
-
-  @keyframes sa-consent-confetti-y {
-    0% {
-      opacity: 0;
-      transform: translateY(0) rotate(0deg) rotateX(0deg);
-      animation-timing-function: cubic-bezier(0.1, 0.7, 0.3, 1);
-    }
-    6%,
-    72% {
-      opacity: 1;
-    }
-    32% {
-      transform: translateY(var(--sa-up)) rotate(calc(var(--sa-r) * 0.4)) rotateX(calc(var(--sa-f) * 0.35));
-      animation-timing-function: cubic-bezier(0.45, 0, 0.9, 0.6);
-    }
-    100% {
-      opacity: 0;
-      transform: translateY(var(--sa-fall)) rotate(var(--sa-r)) rotateX(var(--sa-f));
+  @media (max-width: 420px) {
+    .sa-consent {
+      --sa-dot-size: 34px;
+      --sa-peek: 13px;
     }
   }
 
@@ -423,6 +416,7 @@ body:not(.sa-homepage-widget-route)
     .sa-consent,
     .sa-consent * {
       animation: none !important;
+      transition: none !important;
     }
   }
 }

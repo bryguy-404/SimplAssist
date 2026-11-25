@@ -58,6 +58,7 @@ describe("AdminNavigation", () => {
       "Partners",
       "Tickets",
       "Waitlist",
+      "Gift codes",
     ]);
     expect(
       links.every(

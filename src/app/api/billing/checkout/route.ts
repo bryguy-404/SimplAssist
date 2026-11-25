@@ -46,6 +46,7 @@ import {
   resolveAssignedPartnerName,
 } from "@/lib/billing/partnerManagedBilling.server";
 import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
+import { carriedGiftCodes, GIFT_CODE_COOKIE } from "@/lib/gift/code";
 import type {
   BillingMode,
   OnboardingRegistrationStatus,
@@ -503,6 +504,11 @@ export async function POST(request: NextRequest) {
         : "/billing?canceled=true";
 
     const agreementId = await requireServiceAgreement(business.id, workspace.access.user.id, serviceAgreement, mode === "onboarding" ? "onboarding" : "billing_checkout");
+    const giftPromotionCodeId = await carriedGiftPromotionCodeId(
+      request,
+      workspace.access.user.user_metadata,
+      subscription,
+    );
     const checkoutUrl = await createCheckoutSession(
       business.id,
       selectedPlan,
@@ -513,6 +519,9 @@ export async function POST(request: NextRequest) {
       mode,
       !subscription && mode === "onboarding" && directSelectionFlowEnabled,
       agreementId,
+      // Passed only when there is one, so a customer without a code reaches
+      // Stripe through exactly the call that existed before gift codes.
+      ...((giftPromotionCodeId ? [giftPromotionCodeId] : []) as [string] | []),
     );
 
     return NextResponse.json({ url: checkoutUrl });
@@ -638,6 +647,34 @@ export async function POST(request: NextRequest) {
       { error: "Failed to create checkout session" },
       { status: 500 },
     );
+  }
+}
+
+/**
+ * The Stripe id of a gift code this customer is carrying (from the coupon
+ * page's cookie, or saved on their account at signup), re-checked with Stripe
+ * now. First purchases only. Any doubt at all means "no code": a stale, wrong
+ * or unverifiable code must never stand between a customer and Checkout.
+ */
+async function carriedGiftPromotionCodeId(
+  request: NextRequest,
+  userMetadata: unknown,
+  subscription: CheckoutSubscriptionRow | null,
+): Promise<string | null> {
+  if (subscription) return null;
+  try {
+    const codes = carriedGiftCodes(
+      request.cookies.get(GIFT_CODE_COOKIE)?.value,
+      userMetadata,
+    );
+    if (codes.length === 0) return null;
+    // Loaded only for a customer who actually carries a code.
+    const { resolveCarriedPromotionCodeId } = await import(
+      "@/lib/gift/lookup.server"
+    );
+    return await resolveCarriedPromotionCodeId(codes);
+  } catch {
+    return null;
   }
 }
 

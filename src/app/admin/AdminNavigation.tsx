@@ -14,6 +14,7 @@ const ADMIN_SECTIONS = [
   { href: "/admin/partners", label: "Partners" },
   { href: "/admin/tickets", label: "Tickets" },
   { href: "/admin/waitlist", label: "Waitlist" },
+  { href: "/admin/gift-codes", label: "Gift codes" },
 ] as const;
 
 type AdminSectionHref = (typeof ADMIN_SECTIONS)[number]["href"];

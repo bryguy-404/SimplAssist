@@ -1586,3 +1586,122 @@ vi.mock("@/lib/agreements/service.server", () => ({
     constructor(readonly code: string, readonly status = 503) { super(code); }
   },
 }));
+
+
+// Gift codes: a Stripe promotion code carried from the coupon page (cookie)
+// or saved on the account at signup is re-checked and pre-applied on a first
+// checkout. Nothing about it may ever block or alter an ordinary checkout.
+const giftMocks = vi.hoisted(() => ({ resolveCarriedPromotionCodeId: vi.fn() }));
+vi.mock("@/lib/gift/lookup.server", () => ({
+  resolveCarriedPromotionCodeId: giftMocks.resolveCarriedPromotionCodeId,
+}));
+
+describe("carried gift code", () => {
+  const AGREEMENT_ID = "12100000-0000-4000-8000-000000000001";
+
+  function configureReady(subscription: Record<string, unknown> | null = null) {
+    mocks.isPlanAvailable.mockReturnValue(true);
+    queueResults(
+      { data: { ...BUSINESS, onboarding_selected_plan: "sms_and_chat" }, error: null },
+      { data: subscription, error: null },
+    );
+  }
+
+  function checkoutRequest(cookie?: string) {
+    return new NextRequest("http://localhost:8080/api/billing/checkout", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(cookie ? { cookie } : {}),
+      },
+      body: JSON.stringify({ plan: "sms_and_chat", mode: "billing" }),
+    });
+  }
+
+  const ordinaryCall = [
+    BUSINESS.id, "sms_and_chat", "price_growth", "price_setup",
+    expect.stringContaining("/billing?success=true"),
+    expect.stringContaining("/billing?canceled=true"), "billing", false,
+    AGREEMENT_ID,
+  ];
+
+  it("pre-applies a still-valid code carried in the coupon page cookie", async () => {
+    configureReady();
+    giftMocks.resolveCarriedPromotionCodeId.mockResolvedValue("promo_valid123");
+
+    const response = await POST(checkoutRequest("theme=dark; sa_gift_code=FREEMONTH"));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ url: "https://checkout.test/session" });
+    expect(giftMocks.resolveCarriedPromotionCodeId).toHaveBeenCalledWith(["FREEMONTH"]);
+    expect(mocks.createCheckoutSession).toHaveBeenCalledWith(...ordinaryCall, "promo_valid123");
+  });
+
+  it("uses the code saved on the account when the cookie is gone", async () => {
+    configureReady();
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: true,
+      access: {
+        status: "resolved",
+        user: { id: "owner-1", user_metadata: { full_name: "Rosa", gift_code: "SAVED-CODE" } },
+        business: { id: BUSINESS.id, partner_id: null },
+        hostKind: "canonical",
+      },
+    });
+    giftMocks.resolveCarriedPromotionCodeId.mockResolvedValue("promo_saved456");
+
+    const response = await POST(checkoutRequest());
+
+    expect(response.status).toBe(200);
+    expect(giftMocks.resolveCarriedPromotionCodeId).toHaveBeenCalledWith(["SAVED-CODE"]);
+    expect(mocks.createCheckoutSession).toHaveBeenCalledWith(...ordinaryCall, "promo_saved456");
+  });
+
+  it("opens the ordinary checkout when the carried code is no longer valid", async () => {
+    configureReady();
+    giftMocks.resolveCarriedPromotionCodeId.mockResolvedValue(null);
+
+    const response = await POST(checkoutRequest("sa_gift_code=EXPIRED-CODE"));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ url: "https://checkout.test/session" });
+    expect(giftMocks.resolveCarriedPromotionCodeId).toHaveBeenCalledWith(["EXPIRED-CODE"]);
+    expect(mocks.createCheckoutSession).toHaveBeenCalledWith(...ordinaryCall);
+  });
+
+  it("opens the ordinary checkout when the code cannot be checked at all", async () => {
+    configureReady();
+    giftMocks.resolveCarriedPromotionCodeId.mockRejectedValue(new Error("Stripe is down"));
+
+    const response = await POST(checkoutRequest("sa_gift_code=FREEMONTH"));
+
+    expect(response.status).toBe(200);
+    expect(mocks.createCheckoutSession).toHaveBeenCalledWith(...ordinaryCall);
+  });
+
+  it("never looks a code up for a customer who is not carrying one", async () => {
+    configureReady();
+
+    const response = await POST(checkoutRequest("sa_gift_code=not a code!"));
+
+    expect(response.status).toBe(200);
+    expect(giftMocks.resolveCarriedPromotionCodeId).not.toHaveBeenCalled();
+    expect(mocks.createCheckoutSession).toHaveBeenCalledWith(...ordinaryCall);
+  });
+
+  it("does not pre-apply a carried code for a returning subscriber", async () => {
+    configureReady({
+      plan: "sms_and_chat",
+      status: "canceled",
+      setup_fee_paid_at: "2026-08-01T00:00:00.000Z",
+      stripe_customer_id: "cus_returning",
+      stripe_subscription_id: "sub_returning",
+    });
+
+    const response = await POST(checkoutRequest("sa_gift_code=FREEMONTH"));
+
+    expect(response.status).toBe(200);
+    expect(giftMocks.resolveCarriedPromotionCodeId).not.toHaveBeenCalled();
+    expect(mocks.createCheckoutSession).toHaveBeenCalledWith(...ordinaryCall);
+  });
+});

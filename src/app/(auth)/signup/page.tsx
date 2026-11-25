@@ -2,6 +2,7 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { getRequestBrand } from "@/lib/branding/requestBrand.server";
 import { resolveStrictAuthCallbackOrigin } from "@/lib/auth/callbackOrigin.server";
+import { giftCodeFromCookieHeader } from "@/lib/gift/code";
 import { body, ink, inlineLink } from "@/lib/theme-v2/theme";
 import PublicSignupForm from "./PublicSignupForm";
 
@@ -17,7 +18,10 @@ export default async function SignupPage() {
   }
 
   if (hostIdentity?.kind === "direct") {
-    return <PublicSignupForm />;
+    // Set by the coupon page's start button. Absent for everyone else, in
+    // which case signup is exactly what it has always been.
+    const giftCode = giftCodeFromCookieHeader(headers().get("cookie"));
+    return giftCode ? <PublicSignupForm giftCode={giftCode} /> : <PublicSignupForm />;
   }
 
   let brandName: string | null = null;

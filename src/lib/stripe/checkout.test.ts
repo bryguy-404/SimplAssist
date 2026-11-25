@@ -805,3 +805,97 @@ vi.mock("@/lib/agreements/service.server", () => ({
     constructor(readonly code: string, readonly status = 503) { super(code); }
   },
 }));
+
+
+// Gift codes: Stripe refuses allow_promotion_codes together with discounts, so
+// a Session carries either the pre-applied code or Stripe's own code field.
+describe("createCheckoutSession with a carried gift code", () => {
+  const chatOnly = (giftPromotionCodeId?: string | null) =>
+    createCheckoutSession(
+      BUSINESS_ID, "chat_only", "price_chat_only", null,
+      SUCCESS_URL, CANCEL_URL, "onboarding", true, undefined, giftPromotionCodeId,
+    );
+
+  it("pre-applies the code instead of offering the manual field", async () => {
+    await expect(chatOnly("promo_gift123")).resolves.toBe("https://checkout.stripe.test/session");
+
+    expect(mocks.createCheckoutSession).toHaveBeenCalledTimes(1);
+    const [params, options] = mocks.createCheckoutSession.mock.calls[0];
+    expect(params.discounts).toEqual([{ promotion_code: "promo_gift123" }]);
+    expect(params).not.toHaveProperty("allow_promotion_codes");
+    expect(params.line_items).toEqual([{ price: "price_chat_only", quantity: 1 }]);
+    expect(options).toEqual({
+      idempotencyKey: `chat-checkout-session-v1:${ATTEMPT_ID}:gift:promo_gift123`,
+    });
+    expect(mocks.recordChatOnlyCheckoutSession).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([undefined, null, "", "FREEMONTH", "promo_bad id"])(
+    "keeps the ordinary Session when there is no usable code id (%j)",
+    async (value) => {
+      await chatOnly(value);
+
+      expect(mocks.createCheckoutSession).toHaveBeenCalledTimes(1);
+      const [params, options] = mocks.createCheckoutSession.mock.calls[0];
+      expect(params.allow_promotion_codes).toBe(true);
+      expect(params).not.toHaveProperty("discounts");
+      expect(options).toEqual({ idempotencyKey: `chat-checkout-session-v1:${ATTEMPT_ID}` });
+    },
+  );
+
+  it("falls back to the ordinary Session when Stripe turns the code down", async () => {
+    mocks.createCheckoutSession.mockRejectedValueOnce(
+      Object.assign(new Error("This promotion code is expired."), {
+        type: "StripeInvalidRequestError",
+        code: "promotion_code_expired",
+      }),
+    );
+
+    await expect(chatOnly("promo_stale999")).resolves.toBe("https://checkout.stripe.test/session");
+
+    expect(mocks.createCheckoutSession).toHaveBeenCalledTimes(2);
+    const [params, options] = mocks.createCheckoutSession.mock.calls[1];
+    expect(params.allow_promotion_codes).toBe(true);
+    expect(params).not.toHaveProperty("discounts");
+    expect(options).toEqual({ idempotencyKey: `chat-checkout-session-v1:${ATTEMPT_ID}` });
+    expect(mocks.releaseChatOnlyCheckoutAttemptClaim).not.toHaveBeenCalled();
+    expect(mocks.recordChatOnlyCheckoutSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry without the code after an ambiguous provider failure", async () => {
+    mocks.createCheckoutSession.mockRejectedValueOnce(new Error("socket hang up"));
+
+    await expect(chatOnly("promo_gift123")).rejects.toThrow("socket hang up");
+
+    expect(mocks.createCheckoutSession).toHaveBeenCalledTimes(1);
+    expect(mocks.recordChatOnlyCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("treats a replay still in flight as in progress, not as a rejected code", async () => {
+    mocks.createCheckoutSession.mockRejectedValueOnce(
+      Object.assign(new Error("in use"), {
+        type: "StripeInvalidRequestError",
+        code: "idempotency_key_in_use",
+      }),
+    );
+
+    await expect(chatOnly("promo_gift123")).rejects.toBeInstanceOf(ChatOnlyCheckoutInProgressError);
+    expect(mocks.createCheckoutSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("hands the code to the SMS checkout only when there is one", async () => {
+    await createCheckoutSession(
+      BUSINESS_ID, "sms_and_chat", "price_growth", "price_setup",
+      SUCCESS_URL, CANCEL_URL, "onboarding", true, "agreement-1", "promo_gift123",
+    );
+    expect(mocks.createSmsCheckout).toHaveBeenLastCalledWith(
+      expect.objectContaining({ plan: "sms_and_chat", promotionCodeId: "promo_gift123" }),
+    );
+
+    await createCheckoutSession(
+      BUSINESS_ID, "sms_and_chat", "price_growth", "price_setup",
+      SUCCESS_URL, CANCEL_URL, "onboarding", true, "agreement-1",
+    );
+    expect(mocks.createSmsCheckout.mock.calls.at(-1)![0]).not.toHaveProperty("promotionCodeId");
+  });
+});

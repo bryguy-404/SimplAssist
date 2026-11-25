@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Mail } from "lucide-react";
+import { Gift, Mail } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase/client";
 import {
   body,
@@ -19,6 +19,7 @@ import {
 import { AuthPasswordFieldV2, LoadingDot } from "@/lib/theme-v2/ui";
 import { SignupConfirmation } from "./SignupConfirmation";
 import { trackMarketingEvent } from "@/lib/analytics/marketing";
+import { GIFT_CODE_METADATA_KEY } from "@/lib/gift/code";
 
 const signupSchema = z
   .object({
@@ -34,7 +35,12 @@ const signupSchema = z
 
 type SignupForm = z.infer<typeof signupSchema>;
 
-export default function PublicSignupForm() {
+export default function PublicSignupForm({
+  giftCode,
+}: {
+  /** A code carried from the coupon page; saved on the new account. */
+  giftCode?: string;
+} = {}) {
   const [hydrated, setHydrated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -58,6 +64,9 @@ export default function PublicSignupForm() {
       options: {
         data: {
           full_name: data.fullName,
+          // Saved on the account so the code survives confirming the email
+          // on another device. Checkout re-checks it with Stripe.
+          ...(giftCode ? { [GIFT_CODE_METADATA_KEY]: giftCode } : {}),
         },
         emailRedirectTo: `${window.location.origin}/api/auth/callback`,
       },
@@ -100,6 +109,25 @@ export default function PublicSignupForm() {
       <p className={`mt-1 text-center text-sm ${body}`}>
         Create your account to get started.
       </p>
+
+      {giftCode ? (
+        <div
+          className="
+            mt-6 flex items-start gap-3 rounded-2xl border px-4 py-3 text-left
+            border-[var(--brand-accent-soft-border)] bg-[var(--brand-accent-soft)]
+            dark:border-white/[0.14] dark:bg-white/[0.06]
+          "
+        >
+          <Gift
+            className="mt-0.5 h-4 w-4 shrink-0 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]"
+            aria-hidden
+          />
+          <p className={`text-sm leading-snug ${body}`}>
+            Your code <strong className={`font-mono ${ink}`}>{giftCode}</strong> is
+            saved. It will be applied for you at checkout.
+          </p>
+        </div>
+      ) : null}
 
       <form method="post" onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-5">
         <div>

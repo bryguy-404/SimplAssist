@@ -10,6 +10,7 @@ import { isPlanAvailable } from "@/lib/billing/planAvailability";
 import { SETUP_FEE_CENTS, SUBSCRIPTION_PLANS, planFromStripePriceId, stripePriceIdForPlan } from "./config";
 import type { BillingChangeView, SmsPlan } from "./smsBilling";
 import { SmsBillingError } from "./smsBilling";
+import { isRejectedDiscountRequest, promotionCodeIdOrNull } from "./giftDiscount";
 export { SmsBillingError } from "./smsBilling";
 
 export const operationSchema = z.object({
@@ -111,7 +112,10 @@ function assertRetryWindow(op: SmsBillingOperation) {
   if (Date.now() - Date.parse(op.created_at) >= 23 * 3600_000) throw new SmsBillingError("sms_billing_recovery_required");
 }
 
-export async function createSmsCheckout(args: { agreementId?: string; businessId: string; plan: SmsPlan; priceId: string; setupFeePriceId: string | null; successUrl: string; cancelUrl: string; mode: string }): Promise<string> {
+export async function createSmsCheckout(args: { agreementId?: string; businessId: string; plan: SmsPlan; priceId: string; setupFeePriceId: string | null; successUrl: string; cancelUrl: string; mode: string;
+  /** A carried gift code Stripe has just confirmed. Stored on a NEW operation only; deliberately outside the fingerprint. */
+  promotionCodeId?: string | null }): Promise<string> {
+  const giftPromotionCodeId = promotionCodeIdOrNull(args.promotionCodeId);
   const ownerId = await owner(args.businessId);
   const current = await localSubscription(args.businessId);
   let previousTerminalProof: Record<string, string> = {};
@@ -129,7 +133,11 @@ export async function createSmsCheckout(args: { agreementId?: string; businessId
       plan: args.plan, price: args.priceId, successUrl: args.successUrl, cancelUrl: args.cancelUrl, mode: args.mode }),
     setup_fee_price_id: args.setupFeePriceId,
     ...previousTerminalProof,
-    quote: { successUrl: args.successUrl, cancelUrl: args.cancelUrl, mode: args.mode, setupFeeCents: args.setupFeePriceId ? SETUP_FEE_CENTS : 0 },
+    // The gift code rides in the stored quote, so every replay of this
+    // operation sends Stripe the same request. An operation that already
+    // exists keeps whatever it was created with.
+    quote: { successUrl: args.successUrl, cancelUrl: args.cancelUrl, mode: args.mode, setupFeeCents: args.setupFeePriceId ? SETUP_FEE_CENTS : 0,
+      ...(giftPromotionCodeId ? { promotionCodeId: giftPromotionCodeId } : {}) },
   } };
   let op = await rpcOperation("acquire_sms_billing_operation", request);
   if (op.setup_fee_price_id && args.setupFeePriceId && op.setup_fee_price_id !== args.setupFeePriceId) {
@@ -170,11 +178,27 @@ async function materializeSmsCheckout(original: SmsBillingOperation): Promise<St
   }
   const metadata = { business_id: op.business_id, plan: op.target_plan, mode: String(op.quote.mode),
     sms_billing_operation_id: op.id, ...(op.setup_fee_price_id ? { setup_fee_price_id: op.setup_fee_price_id } : {}) };
-  const session = await stripe.checkout.sessions.create({ customer: op.stripe_customer_id!, client_reference_id: op.business_id,
-    mode: "subscription", payment_method_types: ["card"], allow_promotion_codes: true, expires_at: seconds(op.expires_at),
+  const params = { customer: op.stripe_customer_id!, client_reference_id: op.business_id,
+    mode: "subscription", payment_method_types: ["card"], expires_at: seconds(op.expires_at),
     line_items: [{ price: op.target_price_id, quantity: 1 }, ...(op.setup_fee_price_id ? [{ price: op.setup_fee_price_id, quantity: 1 }] : [])],
     success_url: String(op.quote.successUrl), cancel_url: String(op.quote.cancelUrl), metadata, subscription_data: { metadata },
-  }, { idempotencyKey: "sms-checkout:" + op.id });
+  } satisfies Stripe.Checkout.SessionCreateParams;
+  // Stripe refuses allow_promotion_codes together with discounts. A stored gift
+  // code is applied up front; without one the customer keeps Stripe's own field.
+  const giftPromotionCodeId = promotionCodeIdOrNull(op.quote.promotionCodeId);
+  let session: Stripe.Checkout.Session | null = null;
+  if (giftPromotionCodeId) {
+    try {
+      session = await stripe.checkout.sessions.create({ ...params, discounts: [{ promotion_code: giftPromotionCodeId }] },
+        { idempotencyKey: "sms-checkout:" + op.id });
+    } catch (error) {
+      // The code stopped working after it was stored. Payment must not wait on
+      // it: fall back to the ordinary Session under a key of its own.
+      if (!isRejectedDiscountRequest(error)) throw error;
+    }
+  }
+  session ??= await stripe.checkout.sessions.create({ ...params, allow_promotion_codes: true },
+    { idempotencyKey: giftPromotionCodeId ? "sms-checkout-without-gift:" + op.id : "sms-checkout:" + op.id });
   await record(op, { checkout_session_id: session.id, stripe_customer_id: id(session.customer), state: "pending" });
   // Return customer identity acquired above to the caller's binding check.
   original.stripe_customer_id = op.stripe_customer_id;

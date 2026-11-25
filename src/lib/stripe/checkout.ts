@@ -22,6 +22,10 @@ import {
   syncCheckoutSession,
   type SyncedCheckout,
 } from "./subscriptionSync";
+import {
+  isRejectedDiscountRequest,
+  promotionCodeIdOrNull,
+} from "./giftDiscount";
 
 export { ChatOnlyStripePriceConfigurationError } from "./chatOnlyPrice";
 export {
@@ -81,7 +85,15 @@ export async function createCheckoutSession(
   mode: "onboarding" | "billing" = "billing",
   requireOnboardingIntent = false,
   agreementId?: string,
+  /**
+   * A carried gift code that Stripe has just confirmed is usable. When given,
+   * a newly created Session has it applied already; otherwise the Session
+   * keeps Stripe's own "Add promotion code" field, as before.
+   */
+  giftPromotionCodeId?: string | null,
 ): Promise<string | null> {
+  const promotionCodeId = promotionCodeIdOrNull(giftPromotionCodeId);
+
   if (plan === "chat_only") {
     if (setupFeePriceId !== null) {
       throw new ChatOnlyStripePriceConfigurationError();
@@ -101,12 +113,16 @@ export async function createCheckoutSession(
       cancelUrl,
       mode,
       agreementId,
+      promotionCodeId,
     });
   }
 
   // Keep onboarding/family authorization; payable SMS work uses durable identity.
   await claimCheckoutPlanFamily(businessId, plan, requireOnboardingIntent);
-  return createSmsCheckout({ businessId, plan, priceId: planPriceId, setupFeePriceId, successUrl, cancelUrl, mode, agreementId });
+  return createSmsCheckout({
+    businessId, plan, priceId: planPriceId, setupFeePriceId, successUrl, cancelUrl, mode, agreementId,
+    ...(promotionCodeId ? { promotionCodeId } : {}),
+  });
 }
 
 async function createSingleFlightChatOnlyCheckout(args: {
@@ -116,6 +132,7 @@ async function createSingleFlightChatOnlyCheckout(args: {
   successUrl: string;
   cancelUrl: string;
   mode: "onboarding" | "billing";
+  promotionCodeId?: string | null;
 }): Promise<string> {
   if (args.mode !== "onboarding") {
     throw new ChatOnlyCheckoutAttemptUnavailableError();
@@ -162,21 +179,43 @@ async function createSingleFlightChatOnlyCheckout(args: {
     checkout_session_expires_at: decision.sessionExpiresAt,
   };
 
-  let session: Stripe.Checkout.Session;
+  const sessionParams = {
+    client_reference_id: args.businessId,
+    mode: "subscription",
+    payment_method_types: ["card"],
+    line_items: [{ price: args.planPriceId, quantity: 1 }],
+    success_url: args.successUrl,
+    cancel_url: args.cancelUrl,
+    expires_at: expiresAtSeconds,
+    subscription_data: { metadata },
+    metadata,
+  } satisfies Stripe.Checkout.SessionCreateParams;
+
+  let session: Stripe.Checkout.Session | null = null;
   try {
-    session = await stripe.checkout.sessions.create(
-      {
-        client_reference_id: args.businessId,
-        mode: "subscription",
-        payment_method_types: ["card"],
-        allow_promotion_codes: true,
-        line_items: [{ price: args.planPriceId, quantity: 1 }],
-        success_url: args.successUrl,
-        cancel_url: args.cancelUrl,
-        expires_at: expiresAtSeconds,
-        subscription_data: { metadata },
-        metadata,
-      },
+    if (args.promotionCodeId) {
+      // The gift variant has its own idempotency key, so the unchanged request
+      // below stays byte-for-byte what a customer without a code gets. If the
+      // code's standing changes between two tries of one attempt, the earlier
+      // variant's Session is left unrecorded: its URL was never returned, so
+      // nobody can pay it, and it expires with the attempt.
+      try {
+        session = await stripe.checkout.sessions.create(
+          {
+            ...sessionParams,
+            discounts: [{ promotion_code: args.promotionCodeId }],
+          },
+          {
+            idempotencyKey: `chat-checkout-session-v1:${decision.attemptId}:gift:${args.promotionCodeId}`,
+          },
+        );
+      } catch (error) {
+        // Stripe turned the code down: carry on without it.
+        if (!isRejectedDiscountRequest(error)) throw error;
+      }
+    }
+    session ??= await stripe.checkout.sessions.create(
+      { ...sessionParams, allow_promotion_codes: true },
       {
         idempotencyKey: `chat-checkout-session-v1:${decision.attemptId}`,
       },

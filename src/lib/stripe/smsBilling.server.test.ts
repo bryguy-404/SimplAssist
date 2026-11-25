@@ -247,3 +247,69 @@ it("does not initiate a paid plan change if agreement saving fails", async () =>
   expect(mocks.update).not.toHaveBeenCalled();
   expect(mocks.rpc.mock.calls.some(([name]) => name === "confirm_sms_billing_operation")).toBe(false);
 });
+
+
+// Gift codes: the promotion code id is stored in a NEW operation's quote and
+// replayed from there, so one operation always sends Stripe the same request.
+describe("SMS Checkout with a carried gift code", () => {
+  const args = { businessId: business, plan: "full" as const, priceId: "price_full", setupFeePriceId: "price_setup", successUrl: "https://simplassist.com/onboarding?session_id={CHECKOUT_SESSION_ID}", cancelUrl: "https://simplassist.com/onboarding", mode: "onboarding" };
+  const session = { id: "cs_gift", livemode: false, customer: "cus_owner", metadata: { sms_billing_operation_id: operationId }, client_reference_id: business,
+    mode: "subscription", status: "open", url: "https://checkout.stripe.com/gift" };
+  const feePrice = { id: "price_setup", active: true, currency: "usd", unit_amount: 2500, type: "one_time" };
+  beforeEach(() => {
+    current = null;
+    mocks.price.mockImplementation(async (price: string) => price === "price_setup" ? feePrice : approvedPrice(price.replace("price_", "")));
+    mocks.createCheckout.mockResolvedValue(session);
+  });
+  const acquireRequest = () => mocks.rpc.mock.calls.find(([name]) => name === "acquire_sms_billing_operation")![1].p_request;
+
+  it("stores the code on the new operation and pre-applies it instead of the manual field", async () => {
+    expect(await createSmsCheckout({ ...args, promotionCodeId: "promo_gift123" })).toBe(session.url);
+    expect(acquireRequest().quote).toMatchObject({ promotionCodeId: "promo_gift123" });
+    expect(mocks.createCheckout).toHaveBeenCalledTimes(1);
+    const [params, options] = mocks.createCheckout.mock.calls[0];
+    expect(params.discounts).toEqual([{ promotion_code: "promo_gift123" }]);
+    expect(params).not.toHaveProperty("allow_promotion_codes");
+    expect(params.line_items).toEqual([{ price: "price_full", quantity: 1 }, { price: "price_setup", quantity: 1 }]);
+    expect(options).toEqual({ idempotencyKey: `sms-checkout:${operationId}` });
+  });
+  it("keeps the code out of the fingerprint, so carrying one never collides with an operation in progress", async () => {
+    await createSmsCheckout({ ...args, promotionCodeId: "promo_gift123" });
+    const withCode = acquireRequest().source_fingerprint;
+    op = null; mocks.rpc.mockClear();
+    await createSmsCheckout(args);
+    expect(acquireRequest().source_fingerprint).toBe(withCode);
+    expect(acquireRequest().quote).not.toHaveProperty("promotionCodeId");
+  });
+  it.each([undefined, null, "FREEMONTH"])("keeps the ordinary Session and key without a usable code id (%j)", async (promotionCodeId) => {
+    await createSmsCheckout({ ...args, promotionCodeId });
+    expect(acquireRequest().quote).not.toHaveProperty("promotionCodeId");
+    const [params, options] = mocks.createCheckout.mock.calls[0];
+    expect(params.allow_promotion_codes).toBe(true);
+    expect(params).not.toHaveProperty("discounts");
+    expect(options).toEqual({ idempotencyKey: `sms-checkout:${operationId}` });
+  });
+  it("replays the stored code, not the caller's, when an operation is resumed", async () => {
+    op = fixtureOperation({ kind: "checkout", state: "confirming", expected_subscription_id: null, expected_customer_id: null, source_plan: null,
+      confirmed_at: new Date(now * 1000).toISOString(), quote: { successUrl: args.successUrl, cancelUrl: args.cancelUrl, mode: args.mode, promotionCodeId: "promo_original" } });
+    await createSmsCheckout({ ...args, promotionCodeId: "promo_different" });
+    expect(mocks.createCheckout.mock.calls[0][0].discounts).toEqual([{ promotion_code: "promo_original" }]);
+  });
+  it("falls back to the ordinary Session, under its own key, when Stripe turns the stored code down", async () => {
+    mocks.createCheckout.mockReset();
+    mocks.createCheckout.mockRejectedValueOnce(Object.assign(new Error("This promotion code is expired."), { type: "StripeInvalidRequestError", code: "promotion_code_expired" }))
+      .mockResolvedValueOnce(session);
+    expect(await createSmsCheckout({ ...args, promotionCodeId: "promo_stale999" })).toBe(session.url);
+    expect(mocks.createCheckout).toHaveBeenCalledTimes(2);
+    const [params, options] = mocks.createCheckout.mock.calls[1];
+    expect(params.allow_promotion_codes).toBe(true);
+    expect(params).not.toHaveProperty("discounts");
+    expect(options).toEqual({ idempotencyKey: `sms-checkout-without-gift:${operationId}` });
+  });
+  it("does not retry without the code after an ambiguous provider failure", async () => {
+    mocks.createCheckout.mockReset();
+    mocks.createCheckout.mockRejectedValueOnce(new Error("socket hang up"));
+    await expect(createSmsCheckout({ ...args, promotionCodeId: "promo_gift123" })).rejects.toThrow("socket hang up");
+    expect(mocks.createCheckout).toHaveBeenCalledTimes(1);
+  });
+});

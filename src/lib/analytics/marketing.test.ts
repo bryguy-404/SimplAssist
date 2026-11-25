@@ -84,6 +84,53 @@ describe("marketing analytics boundaries", () => {
     expect((window as unknown as Record<string, unknown>)[`ga-disable-${GA_ID}`]).toBe(true);
   });
 
+  it("sends contact and pricing parameters without changing existing event payloads", async () => {
+    const analytics = await import("./marketing");
+    analytics.saveAnalyticsConsent("granted");
+    analytics.startMarketingAnalytics(GA_ID);
+    expect(analytics.trackMarketingEvent("contact_click", { link_type: "call", link_location: "hero" })).toBe(true);
+    analytics.trackMarketingEvent("contact_click", { link_type: "text", link_location: "footer" });
+    expect(analytics.trackMarketingEvent("pricing_view")).toBe(true);
+    analytics.trackMarketingEvent("signup_click");
+    analytics.trackMarketingEvent("demo_chat_open");
+    const events = calls().filter((call) => call[0] === "event");
+    const context = {
+      page_location: "https://simplassist.com/", page_title: "SimplAssist",
+      page_referrer: "https://www.google.com/",
+    };
+    expect(events).toEqual([
+      ["event", "contact_click", { ...context, page_path: "/", link_type: "call", link_location: "hero" }],
+      ["event", "contact_click", { ...context, page_path: "/", link_type: "text", link_location: "footer" }],
+      ["event", "pricing_view", { ...context, page_path: "/" }],
+      ["event", "signup_click", context],
+      ["event", "demo_chat_open", context],
+    ]);
+    expect(JSON.stringify(events)).not.toMatch(/private@example|secret|private\+query/);
+  });
+
+  it("keeps both new events behind the existing consent and route boundaries", async () => {
+    const analytics = await import("./marketing");
+    const trackBoth = () => {
+      expect(analytics.trackMarketingEvent("contact_click", { link_type: "call", link_location: "header" })).toBe(false);
+      expect(analytics.trackMarketingEvent("pricing_view")).toBe(false);
+    };
+    trackBoth();
+    expect(window.dataLayer).toBeUndefined();
+    analytics.saveAnalyticsConsent("granted");
+    analytics.startMarketingAnalytics(GA_ID);
+    Object.assign(window.location, { pathname: "/dashboard" });
+    trackBoth();
+    Object.assign(window.location, { pathname: "/", hostname: "app.partner.example" });
+    trackBoth();
+    Object.assign(window.location, { hostname: "simplassist.com" });
+    analytics.pauseMarketingAnalytics();
+    trackBoth();
+    analytics.startMarketingAnalytics(GA_ID);
+    analytics.saveAnalyticsConsent("denied");
+    trackBoth();
+    expect(calls().filter((call) => call[0] === "event")).toEqual([]);
+  });
+
   it("expires consent and ignores malformed stored preferences", async () => {
     const analytics = await import("./marketing");
     window.localStorage.setItem(analytics.ANALYTICS_CONSENT_KEY, "bad json");

@@ -17,10 +17,17 @@ export const ANALYTICS_SETTINGS_EVENT = "sa-analytics-settings";
 export const CONSENT_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
 export type AnalyticsConsent = "granted" | "denied";
 export type MarketingEvent =
+  | "contact_click"
   | "demo_chat_open"
   | "demo_voice_click"
+  | "pricing_view"
   | "signup_click"
   | "signup_request_submitted";
+
+type ContactClickParameters = {
+  link_type: "call" | "text";
+  link_location: string;
+};
 
 declare global {
   interface Window {
@@ -169,10 +176,19 @@ export function trackMarketingPageView() {
   window.gtag?.("event", "page_view", context);
 }
 
-export function trackMarketingEvent(event: MarketingEvent) {
-  if (!activeMeasurementId || paused || !canMeasure()) return;
-  window.gtag?.("event", event, {
+export function trackMarketingEvent(event: "contact_click", params: ContactClickParameters): boolean;
+export function trackMarketingEvent(event: Exclude<MarketingEvent, "contact_click">): boolean;
+export function trackMarketingEvent(event: MarketingEvent, params?: ContactClickParameters): boolean {
+  if (!activeMeasurementId || paused || !canMeasure() || !window.gtag) return false;
+  window.gtag("event", event, {
     ...marketingPageContext(window.location.pathname, document.referrer),
+    ...(event === "contact_click" || event === "pricing_view"
+      ? { page_path: window.location.pathname } : {}),
+    ...(event === "contact_click" ? {
+      link_type: params?.link_type,
+      link_location: params?.link_location,
+    } : {}),
     ...(event === "signup_request_submitted" ? { method: "email" } : {}),
   });
+  return true;
 }

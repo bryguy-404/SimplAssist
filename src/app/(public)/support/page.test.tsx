@@ -124,7 +124,8 @@ describe("SupportPage branding", () => {
     expect(html).toContain("Contact support");
     expect(html).toContain("Send message");
     expect(html).toContain('alt="SimplAssist"');
-    expect(html).toContain("bryan@simplassist.com");
+    expect(html).toContain("support@simplassist.com");
+    expect(html).not.toContain("bryan@simplassist.com");
     expect(html).toContain("SimplAssist, a product of Arambula Ventures LLC.");
     expect(html).toContain('href="https://simplassist.com/privacy"');
     expect(html).toContain('href="https://simplassist.com/terms"');
@@ -138,7 +139,7 @@ describe("SupportPage branding", () => {
       'src="https://assets.alphadogagency.ai/logo-light.png"',
     );
     expect(html).toContain("Alpha Dog Agency.");
-    expect(html).not.toContain("bryan@simplassist.com");
+    expect(html).not.toContain("support@simplassist.com");
     expect(html).not.toContain("SimplAssist");
     expect(html).toContain("Send message");
     expect(html).toContain('href="https://simplassist.com/privacy"');

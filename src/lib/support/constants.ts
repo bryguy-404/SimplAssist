@@ -3,14 +3,13 @@
  *
  * Every user-facing support mention (links, banners, legal pages, the email
  * module) imports from here — never hardcode the address or path elsewhere.
- * If a dedicated support@ alias is ever created, changing SUPPORT_EMAIL below
- * is the entire migration.
+ * The support alias receives mail in the existing Workspace inbox.
  *
  * No "server-only" and no env access: this module is imported by client
  * components (onboarding page, dashboard cards) and server code alike.
  */
 
-export const SUPPORT_EMAIL = "bryan@simplassist.com";
+export const SUPPORT_EMAIL = "support@simplassist.com";
 
 export const SUPPORT_PATH = "/support";
 

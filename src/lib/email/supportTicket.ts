@@ -67,6 +67,7 @@ export async function sendSupportTicketEmail(
     await sendBusinessEmail({
       brand,
       context: "supportTicket",
+      internal: true,
       message: {
         to: [SUPPORT_EMAIL],
         replyTo: input.email,

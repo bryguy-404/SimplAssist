@@ -1,3 +1,4 @@
+import { SIMPLASSIST_LEGAL_LINE } from "./legalFooter";
 import {
   describeGiftOffer,
   formatGiftExpiry,
@@ -135,6 +136,7 @@ export function renderGiftCodeEmail(input: GiftCodeEmailInput): RenderedGiftCode
     typeIt,
     "Questions? Just reply to this email.",
     "— The SimplAssist team",
+    SIMPLASSIST_LEGAL_LINE,
   ].join("\n\n");
 
   const code = escapeHtml(input.code);
@@ -189,6 +191,7 @@ ${expiryLine ? `<p class="sa-faint" style="margin:10px 0 0;font-family:${FONT};f
 <p class="sa-body" style="margin:14px 0 0;font-family:${FONT};font-size:14px;line-height:1.55;color:${BODY};">${escapeHtml(typeIt)}</p>
 </td></tr>
 <tr><td align="center" class="sa-faint" style="padding:20px 8px 0;font-family:${FONT};font-size:13px;line-height:1.6;color:${FAINT};">Questions? Just reply to this email.<br>— The SimplAssist team</td></tr>
+<tr><td align="center" class="sa-faint" style="padding:10px 8px 0;font-family:${FONT};font-size:12px;line-height:1.5;color:${FAINT};">${SIMPLASSIST_LEGAL_LINE}</td></tr>
 </table>
 </td></tr>
 </table>

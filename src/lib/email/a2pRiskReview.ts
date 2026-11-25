@@ -70,6 +70,7 @@ export async function sendA2pRiskReviewEmail(
     await sendBusinessEmail({
       brand,
       context: "a2pRiskReview",
+      internal: true,
       message: {
         to: recipients,
         subject: `A2P review needed: ${brand.name} — ${input.businessName}`,

@@ -247,6 +247,41 @@ describe("registration-status business branding", () => {
   });
 });
 
+describe("which emails carry the company's legal line", () => {
+  it("marks support and A2P review notifications internal, and customer emails not", async () => {
+    mocks.resolveBusinessEmailBrand.mockResolvedValue(DEFAULT_BRAND);
+
+    await sendSupportTicketEmail({
+      requestId: "req-1",
+      category: "billing",
+      name: "Rosa",
+      email: "rosa@example.com",
+      message: "Hello",
+      businessId: BUSINESS_ID,
+      businessName: "Rosa Plumbing",
+      userId: null,
+    });
+    expect(mocks.sendBusinessEmail.mock.calls.at(-1)![0]).toMatchObject({
+      context: "supportTicket",
+      internal: true,
+    });
+
+    await sendBrandApprovedEmail({
+      businessId: BUSINESS_ID,
+      businessName: "Rosa Plumbing",
+      recipients: ["rosa@example.com"],
+    });
+    const customer = mocks.sendBusinessEmail.mock.calls.at(-1)![0];
+    expect(customer.context).toBe("registrationStatus:brand_approved");
+    expect(customer).not.toHaveProperty("internal");
+  });
+
+  it("keeps the A2P review notification internal in source", () => {
+    const source = readFileSync(new URL("./a2pRiskReview.ts", import.meta.url), "utf8");
+    expect(source).toMatch(/context: "a2pRiskReview",\s+internal: true,/);
+  });
+});
+
 describe("operator notification business branding", () => {
   it("forwards the persisted business ID from risk screening into email resolution", () => {
     const source = readFileSync(

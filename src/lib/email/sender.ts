@@ -2,6 +2,7 @@ import "server-only";
 
 import { resend } from "./client";
 import type { BusinessEmailBrand } from "./businessEmailBrand.server";
+import { appendLegalFooter } from "./legalFooter";
 
 export type BusinessEmailMessage = Omit<
   Parameters<typeof resend.emails.send>[0],
@@ -17,6 +18,12 @@ export type SendBusinessEmailInput = {
    * Recovery links and other bearer secrets can be echoed by provider errors.
    */
   sensitive?: boolean;
+  /**
+   * A notification only SimplAssist staff receive (support tickets, review
+   * alerts). Customer emails sent under SimplAssist's own brand end with the
+   * company's legal line; internal ones and partner-branded ones do not.
+   */
+  internal?: boolean;
 };
 
 export async function sendBusinessEmail({
@@ -24,12 +31,16 @@ export async function sendBusinessEmail({
   context,
   message,
   sensitive = false,
+  internal = false,
 }: SendBusinessEmailInput): Promise<
   Awaited<ReturnType<typeof resend.emails.send>>
 > {
+  const outgoing =
+    brand.partnerId === null && !internal ? appendLegalFooter(message) : message;
+
   try {
     const result = await resend.emails.send({
-      ...message,
+      ...outgoing,
       from: brand.from,
     } as Parameters<typeof resend.emails.send>[0]);
 

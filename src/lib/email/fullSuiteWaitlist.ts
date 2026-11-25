@@ -4,6 +4,10 @@ import { publicAppOrigin } from "@/lib/billing/publicAppOrigin";
 import { FULL_SUITE_PACKAGE_SUMMARY } from "@/lib/billing/fullSuitePresentation";
 import { createWaitlistUnsubscribeToken } from "@/lib/waitlist/unsubscribeToken";
 import { resend, RESEND_FROM } from "./client";
+import {
+  SIMPLASSIST_LEGAL_LINE,
+  SIMPLASSIST_LEGAL_LINE_HTML,
+} from "./legalFooter";
 
 interface FullSuiteWaitlistConfirmationInput {
   signupId: string;
@@ -52,12 +56,15 @@ export async function sendFullSuiteWaitlistConfirmation(
           "We’ll email you when Full Suite launches.",
           "",
           `Unsubscribe: ${unsubscribeUrl}`,
+          "",
+          SIMPLASSIST_LEGAL_LINE,
         ].join("\n"),
         html: [
           "<p>You’re on the Full Suite waitlist.</p>",
           `<p>${escapeHtml(FULL_SUITE_PACKAGE_SUMMARY)}</p>`,
           "<p>We’ll email you when Full Suite launches.</p>",
           `<p><a href="${safeUnsubscribeUrl}">Unsubscribe from Full Suite updates</a></p>`,
+          SIMPLASSIST_LEGAL_LINE_HTML,
         ].join(""),
       },
       requestOptions

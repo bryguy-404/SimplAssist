@@ -1,4 +1,8 @@
 import {
+  SIMPLASSIST_LEGAL_LINE,
+  SIMPLASSIST_LEGAL_LINE_HTML,
+} from "./legalFooter";
+import {
   BUSINESS_METRIC_KEYS_V1,
   BUSINESS_METRIC_LABELS_V1,
   type BusinessMetricCountKeyV1,
@@ -116,6 +120,8 @@ function renderText(
     "Metric availability",
     "Availability labels distinguish recoverable history from live-only collection.",
     ...renderTextDefinitions(payload),
+    "",
+    SIMPLASSIST_LEGAL_LINE,
   );
 
   return lines.join("\n");
@@ -201,6 +207,7 @@ function renderHtml(
     "<h2>Metric availability</h2>",
     "<p>Availability labels distinguish recoverable history from live-only collection.</p>",
     `<ul>${definitions}</ul>`,
+    SIMPLASSIST_LEGAL_LINE_HTML,
     "</body></html>",
   ].join("");
 }

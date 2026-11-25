@@ -5,6 +5,10 @@ import { randomUUID } from "node:crypto";
 import { publicAppOrigin } from "@/lib/billing/publicAppOrigin";
 import { createWaitlistUnsubscribeToken } from "@/lib/waitlist/unsubscribeToken";
 import { resend, RESEND_FROM } from "./client";
+import {
+  SIMPLASSIST_LEGAL_LINE,
+  SIMPLASSIST_LEGAL_LINE_HTML,
+} from "./legalFooter";
 import { scheduleFullSuiteLaunchResend } from "./fullSuiteLaunchRateLimit";
 
 export type FullSuiteLaunchSendOutcome =
@@ -133,6 +137,8 @@ export async function sendFullSuiteLaunchEmail(
         `Explore Full Suite: ${pricingUrl}`,
         "",
         `Unsubscribe: ${unsubscribeUrl}`,
+        "",
+        SIMPLASSIST_LEGAL_LINE,
       ].join("\n"),
       html: [
         "<p><strong>Full Suite is live.</strong></p>",
@@ -141,6 +147,7 @@ export async function sendFullSuiteLaunchEmail(
         `<p><a href="${escapeHtml(
           unsubscribeUrl
         )}">Unsubscribe from Full Suite updates</a></p>`,
+        SIMPLASSIST_LEGAL_LINE_HTML,
       ].join(""),
     };
   } catch {

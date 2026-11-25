@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
+import { markFeedbackActivity } from "@/lib/feedback/client";
 import { ChevronLeft, ChevronRight, Mail, Search } from "lucide-react";
 import type {
   CustomerDetailResponse,
@@ -214,6 +215,7 @@ export default function ReviewComposer({
         method: "POST",
         body: JSON.stringify({ previewToken: preview.previewToken }),
       });
+      markFeedbackActivity();
       onCreated();
     } catch (cause) {
       setError(requestError(cause));

@@ -42,7 +42,7 @@ suite("real outbox to Resend HTTP delivery", () => {
           method: req.method, headers: {
             authorization: req.headers.authorization ?? "", "content-type": "application/json",
             ...(req.headers.accept ? { accept: req.headers.accept } : {}),
-            ...(req.headers.prefer ? { prefer: req.headers.prefer } : {}),
+            ...(req.headers.prefer ? { prefer: [req.headers.prefer].flat().join(", ") } : {}),
           }, body: ["GET", "HEAD"].includes(req.method ?? "GET") ? undefined : raw,
         });
         res.writeHead(upstream.status, Object.fromEntries(upstream.headers));

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/lib/feedback/delivery.server", () => ({ deliverFeedbackEmail: vi.fn() }));
 const reconcile = vi.hoisted(() => vi.fn());
 const alerts = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/onboarding/continueRegistration.server", () => ({ reconcilePendingBrandRegistrations: reconcile }));

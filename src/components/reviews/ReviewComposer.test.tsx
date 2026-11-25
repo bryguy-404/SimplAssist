@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactElement, ReactNode } from "react";
 import type { ReviewOverview, ReviewPreview } from "@/lib/reviews/types";
+const activity = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/feedback/client", () => ({ markFeedbackActivity: activity }));
 const harness = vi.hoisted(() => ({ states: [] as unknown[], cursor: 0 }));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
@@ -83,6 +85,7 @@ describe("review confirmation safety", () => {
     await confirmButton().props.onClick();
     expect(props.onCreated).not.toHaveBeenCalled();
     expect(props.onClose).not.toHaveBeenCalled();
+    expect(activity).not.toHaveBeenCalled();
     expect(label(render())).toContain("Connection interrupted");
     await confirmButton().props.onClick();
     expect(
@@ -92,6 +95,7 @@ describe("review confirmation safety", () => {
       ["/api/reviews/campaigns", { previewToken: "frozen-review-preview" }],
     ]);
     expect(props.onCreated).toHaveBeenCalledOnce();
+    expect(activity).toHaveBeenCalledOnce();
   });
   it("does not confirm an SMS campaign when its sending flag is off, even if email is active", async () => {
     harness.states[15] = {

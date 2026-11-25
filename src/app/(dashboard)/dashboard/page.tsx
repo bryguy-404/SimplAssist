@@ -6,6 +6,7 @@ import VoiceSetupPrompt from '@/components/dashboard/VoiceSetupPrompt';
 import { getOwnerVoiceSettings } from '@/lib/voice/access.server';
 import { getDashboardUpgradePrompt } from '@/lib/dashboard/upgradePrompt.server';
 import { getDashboardReviewSetup } from '@/lib/dashboard/reviewSetup.server';
+import DashboardFeedback from '@/components/dashboard/DashboardFeedback';
 import DashboardOverview from '@/components/dashboard/DashboardOverview';
 import BookingAlertNudge from '@/components/owner-booking-alerts/BookingAlertNudge';
 import { card } from '@/lib/theme-v2/theme';
@@ -164,7 +165,10 @@ export default async function DashboardPage() {
         <p className="text-3xl sm:text-4xl font-bold tracking-tight text-stone-900 dark:text-[#f5f5f5]">
           {welcomeLine}
         </p>
-        <h1 className="mt-2 text-2xl font-bold text-stone-900 dark:text-[#f5f5f5]">Dashboard</h1>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+          <h1 className="text-2xl font-bold text-stone-900 dark:text-[#f5f5f5]">Dashboard</h1>
+          <DashboardFeedback key={user.id} />
+        </div>
         <p className="mt-1 text-stone-500 dark:text-[#bdbdbf]">Overview of your business activity.</p>
       </div>
 

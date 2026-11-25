@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { markFeedbackActivity } from "@/lib/feedback/client";
 import Link from "next/link";
 import {
   Send,
@@ -77,6 +78,10 @@ export function MessageThread({
   canUseWebChat,
   demoMessages,
 }: MessageThreadProps) {
+  useEffect(() => {
+    if (demoMessages === undefined) markFeedbackActivity();
+  }, [conversation.id, demoMessages]);
+
   const [messages, setMessages] = useState<Message[]>(demoMessages ?? []);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);

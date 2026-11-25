@@ -9,7 +9,7 @@ import {
 import { getCanonicalAppOrigin } from "@/lib/branding/defaultBrand";
 import { sendGiftCodeEmail } from "@/lib/email/giftCode";
 import { cleanFirstName, renderGiftCodeEmail } from "@/lib/email/giftCodeTemplate";
-import { describeGiftOffer, giftPagePath } from "@/lib/gift/code";
+import { describeGiftOffer, giftStartPath } from "@/lib/gift/code";
 import { lookupGiftCode } from "@/lib/gift/lookup.server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
@@ -76,13 +76,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const giftUrl = `${getCanonicalAppOrigin()}${giftPagePath(lookup.code)}`;
+  const startUrl = `${getCanonicalAppOrigin()}${giftStartPath(lookup.code)}`;
   const rendered = renderGiftCodeEmail({
     firstName,
     code: lookup.code,
     offer: lookup.offer,
     expiresAt: lookup.expiresAt,
-    giftUrl,
+    startUrl,
   });
   const offerSummary = describeGiftOffer(lookup.offer);
 
@@ -94,7 +94,6 @@ export async function POST(request: NextRequest) {
         code: lookup.code,
         offer: offerSummary,
         expiresAt: lookup.expiresAt,
-        giftUrl,
         subject: rendered.subject,
         html: rendered.html,
       },

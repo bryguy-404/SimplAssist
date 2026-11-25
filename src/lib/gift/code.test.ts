@@ -5,7 +5,7 @@ import {
   formatGiftExpiry,
   giftCodeFromCookieHeader,
   giftHeadline,
-  giftPagePath,
+  giftStartPath,
   normalizeGiftCode,
   type GiftOffer,
 } from "./code";
@@ -105,8 +105,8 @@ describe("formatGiftExpiry", () => {
   });
 });
 
-describe("giftPagePath", () => {
-  it("builds the coupon page path", () => {
-    expect(giftPagePath("ROSA-FREE")).toBe("/gift/ROSA-FREE");
+describe("giftStartPath", () => {
+  it("builds the link that remembers the code and opens signup", () => {
+    expect(giftStartPath("ROSA-FREE")).toBe("/gift/ROSA-FREE/start");
   });
 });

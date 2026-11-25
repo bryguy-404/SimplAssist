@@ -652,7 +652,7 @@ export async function POST(request: NextRequest) {
 
 /**
  * The Stripe id of a gift code this customer is carrying (from the coupon
- * page's cookie, or saved on their account at signup), re-checked with Stripe
+ * email's cookie, or saved on their account at signup), re-checked with Stripe
  * now. First purchases only. Any doubt at all means "no code": a stale, wrong
  * or unverifiable code must never stand between a customer and Checkout.
  */

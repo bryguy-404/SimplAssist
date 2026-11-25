@@ -38,7 +38,7 @@ type SignupForm = z.infer<typeof signupSchema>;
 export default function PublicSignupForm({
   giftCode,
 }: {
-  /** A code carried from the coupon page; saved on the new account. */
+  /** A code carried from the coupon email; saved on the new account. */
   giftCode?: string;
 } = {}) {
   const [hydrated, setHydrated] = useState(false);

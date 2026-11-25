@@ -9,9 +9,10 @@ import {
 /**
  * The coupon email Bryan sends from /admin/gift-codes.
  *
- * Mail programs strip scripts, so there is no Copy button here: the code sits
- * in a large box that selects in one tap or double-click, and a button opens
- * the coupon page, which does have a real Copy button.
+ * One button takes the reader straight to signup with the code remembered, so
+ * it is already applied when they reach checkout. Mail programs strip scripts,
+ * so there is no Copy button: the code sits in a large box that is easy to
+ * select by hand, as the backup for typing it at checkout.
  *
  * Built to survive real inboxes: table layout, inline styles, no images. The
  * dot mascot is drawn from plain coloured table cells and the brand name is
@@ -26,8 +27,8 @@ export type GiftCodeEmailInput = {
   code: string;
   offer: GiftOffer;
   expiresAt: string | null;
-  /** Absolute link to the coupon page for this code. */
-  giftUrl: string;
+  /** Absolute link that remembers this code and opens signup. */
+  startUrl: string;
 };
 
 export type RenderedGiftCodeEmail = {
@@ -62,13 +63,15 @@ export function cleanFirstName(value: string | null | undefined): string | null 
   return name.length > 0 && name.length <= 60 ? name : null;
 }
 
-function assertGiftUrl(giftUrl: string): string {
-  const url = new URL(giftUrl);
+function assertStartUrl(startUrl: string): string {
+  const url = new URL(startUrl);
   if (
     (url.protocol !== "https:" && url.protocol !== "http:") ||
     url.username ||
     url.password ||
-    !url.pathname.startsWith("/gift/")
+    url.search ||
+    url.hash ||
+    !/^\/gift\/[A-Za-z0-9-]{3,64}\/start$/.test(url.pathname)
   ) {
     throw new Error("Gift email link is malformed");
   }
@@ -93,7 +96,7 @@ function dotHtml(): string {
 }
 
 export function renderGiftCodeEmail(input: GiftCodeEmailInput): RenderedGiftCodeEmail {
-  const giftUrl = assertGiftUrl(input.giftUrl);
+  const startUrl = assertStartUrl(input.startUrl);
   const firstName = cleanFirstName(input.firstName);
   const described = describeGiftOffer(input.offer);
   const baseHeadline = giftHeadline(input.offer);
@@ -112,9 +115,12 @@ export function renderGiftCodeEmail(input: GiftCodeEmailInput): RenderedGiftCode
   const intro =
     `Here’s a code for ${described} when you sign up for SimplAssist. ` +
     "It’s yours to use whenever you’re ready.";
+  const buttonLabel = isFreeGift(input.offer)
+    ? "Start free with this code"
+    : "Start with this code";
   const buttonNote =
-    "The button opens a page where you can copy the code in one tap and " +
-    "start signing up with it already applied.";
+    "The button takes you to create your account. Your code is remembered, " +
+    "so it’s already applied when you reach checkout. Nothing to type.";
   const typeIt =
     "Prefer to type it? At checkout, choose “Add promotion code” and paste the code there.";
   const expiryLine = expiry ? `Good until ${expiry}.` : null;
@@ -124,7 +130,7 @@ export function renderGiftCodeEmail(input: GiftCodeEmailInput): RenderedGiftCode
     intro,
     `Your code: ${input.code}`,
     ...(expiryLine ? [expiryLine] : []),
-    `Open your gift: ${giftUrl}`,
+    `${buttonLabel}: ${startUrl}`,
     buttonNote,
     typeIt,
     "Questions? Just reply to this email.",
@@ -132,7 +138,7 @@ export function renderGiftCodeEmail(input: GiftCodeEmailInput): RenderedGiftCode
   ].join("\n\n");
 
   const code = escapeHtml(input.code);
-  const href = escapeHtml(giftUrl);
+  const href = escapeHtml(startUrl);
 
   const html = `<!doctype html>
 <html lang="en">
@@ -176,7 +182,7 @@ ${dotHtml()}
 ${expiryLine ? `<p class="sa-faint" style="margin:10px 0 0;font-family:${FONT};font-size:13px;line-height:1.5;color:${FAINT};">${escapeHtml(expiryLine)}</p>` : ""}
 <table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:26px auto 0;">
 <tr><td align="center" bgcolor="${ORANGE}" style="background-color:${ORANGE};border-radius:999px;">
-<a href="${href}" target="_blank" style="display:inline-block;padding:15px 34px;font-family:${FONT};font-size:16px;line-height:1.2;font-weight:700;color:#ffffff;text-decoration:none;border-radius:999px;">Open my gift</a>
+<a href="${href}" target="_blank" style="display:inline-block;padding:15px 34px;font-family:${FONT};font-size:16px;line-height:1.2;font-weight:700;color:#ffffff;text-decoration:none;border-radius:999px;">${buttonLabel}</a>
 </td></tr>
 </table>
 <p class="sa-body" style="margin:18px 0 0;font-family:${FONT};font-size:14px;line-height:1.55;color:${BODY};">${escapeHtml(buttonNote)}</p>

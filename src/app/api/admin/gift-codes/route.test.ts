@@ -165,10 +165,10 @@ describe("POST /api/admin/gift-codes preview", () => {
       code: "ROSA-FREEMONTH",
       offer: "your first month free",
       expiresAt: "2027-01-31T23:59:59.000Z",
-      giftUrl: "https://simplassist.com/gift/ROSA-FREEMONTH",
       subject: "Rosa, here’s your free month of SimplAssist",
     });
     expect(preview.html).toContain("ROSA-FREEMONTH");
+    expect(preview.html).toContain('href="https://simplassist.com/gift/ROSA-FREEMONTH/start"');
     expect(mocks.sendGiftCodeEmail).not.toHaveBeenCalled();
     expect(mocks.from).not.toHaveBeenCalled();
   });
@@ -197,7 +197,7 @@ describe("POST /api/admin/gift-codes send", () => {
     const sent = mocks.sendGiftCodeEmail.mock.calls[0][0];
     expect(sent.recipient).toBe("rosa@example.com");
     expect(sent.idempotencyKey).toBe(`gift-code-send-v1/${sendId}`);
-    expect(sent.email.html).toContain("https://simplassist.com/gift/ROSA-FREEMONTH");
+    expect(sent.email.html).toContain('href="https://simplassist.com/gift/ROSA-FREEMONTH/start"');
     expect(mocks.updates).toEqual([
       { status: "sent", sent_at: expect.any(String), resend_email_id: "email_123" },
     ]);

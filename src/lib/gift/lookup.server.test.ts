@@ -7,12 +7,7 @@ vi.mock("@/lib/stripe/client", () => ({
   stripe: { promotionCodes: { list: mocks.list } },
 }));
 
-import {
-  lookupGiftCode,
-  lookupGiftCodeForPublicPage,
-  resetPublicGiftLookupsForTests,
-  resolveCarriedPromotionCodeId,
-} from "./lookup.server";
+import { lookupGiftCode, resolveCarriedPromotionCodeId } from "./lookup.server";
 
 const NOW = Date.parse("2026-11-25T12:00:00.000Z");
 const nowSeconds = NOW / 1000;
@@ -53,7 +48,6 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
-  resetPublicGiftLookupsForTests();
   mocks.list.mockResolvedValue({ data: [promotionCode()] });
 });
 
@@ -153,35 +147,5 @@ describe("resolveCarriedPromotionCodeId", () => {
     mocks.list.mockRejectedValue(new Error("network down"));
     expect(await resolveCarriedPromotionCodeId(["FREEMONTH"])).toBeNull();
     expect(await resolveCarriedPromotionCodeId([])).toBeNull();
-  });
-});
-
-describe("lookupGiftCodeForPublicPage", () => {
-  it("remembers an answer briefly instead of asking Stripe on every view", async () => {
-    await lookupGiftCodeForPublicPage("FREEMONTH");
-    await lookupGiftCodeForPublicPage("freemonth");
-    expect(mocks.list).toHaveBeenCalledTimes(1);
-
-    vi.setSystemTime(NOW + 61_000);
-    await lookupGiftCodeForPublicPage("FREEMONTH");
-    expect(mocks.list).toHaveBeenCalledTimes(2);
-  });
-
-  it("does not remember a Stripe outage", async () => {
-    mocks.list.mockRejectedValueOnce(new Error("network down"));
-    expect(await lookupGiftCodeForPublicPage("FREEMONTH")).toEqual({ status: "error" });
-    expect(await lookupGiftCodeForPublicPage("FREEMONTH")).toMatchObject({ status: "available" });
-  });
-
-  it("stops asking Stripe when someone hammers the page with guesses", async () => {
-    mocks.list.mockResolvedValue({ data: [] });
-    for (let guess = 0; guess < 40; guess += 1) {
-      expect(await lookupGiftCodeForPublicPage(`GUESS-${guess}`)).toEqual({ status: "unavailable" });
-    }
-    expect(await lookupGiftCodeForPublicPage("GUESS-NEXT")).toEqual({ status: "error" });
-    expect(mocks.list).toHaveBeenCalledTimes(40);
-
-    vi.setSystemTime(NOW + 61_000);
-    expect(await lookupGiftCodeForPublicPage("GUESS-NEXT")).toEqual({ status: "unavailable" });
   });
 });

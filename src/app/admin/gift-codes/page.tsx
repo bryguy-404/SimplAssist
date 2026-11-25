@@ -73,8 +73,9 @@ export default async function AdminGiftCodesPage() {
         <h1 className={`text-2xl font-bold ${ink}`}>Gift codes</h1>
         <p className={`mt-1 max-w-2xl text-sm ${bodyFaint}`}>
           Email someone a Stripe promotion code. They get the code in a big
-          box, plus a button to a page where they can copy it and sign up with
-          it already applied. Create the code in Stripe first, then enter it here.
+          box, plus a button that takes them to sign up with the code
+          remembered, so it is already applied when they reach checkout.
+          Create the code in Stripe first, then enter it here.
         </p>
       </section>
 

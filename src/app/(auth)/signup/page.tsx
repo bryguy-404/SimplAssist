@@ -18,7 +18,7 @@ export default async function SignupPage() {
   }
 
   if (hostIdentity?.kind === "direct") {
-    // Set by the coupon page's start button. Absent for everyone else, in
+    // Set by the coupon email's start button. Absent for everyone else, in
     // which case signup is exactly what it has always been.
     const giftCode = giftCodeFromCookieHeader(headers().get("cookie"));
     return giftCode ? <PublicSignupForm giftCode={giftCode} /> : <PublicSignupForm />;

@@ -1,11 +1,11 @@
 /**
  * Gift codes: Stripe promotion codes that Bryan hands to a customer.
  *
- * This module is pure (no Stripe, no cookies, no "server-only") so the public
- * coupon page, the signup form, the email and the tests can all share it.
+ * This module is pure (no Stripe, no cookies, no "server-only") so the signup
+ * form, the email and the tests can all share it.
  */
 
-/** Browser cookie that remembers a code between the coupon page and checkout. */
+/** Browser cookie that remembers a code between the email's button and checkout. */
 export const GIFT_CODE_COOKIE = "sa_gift_code";
 export const GIFT_CODE_COOKIE_MAX_AGE_SECONDS = 60 * 24 * 60 * 60;
 
@@ -24,7 +24,7 @@ export function normalizeGiftCode(value: unknown): string | null {
 
 /**
  * The codes a signed-in customer is carrying, most recent intent first: the
- * browser cookie from the coupon page, then the one saved on their account at
+ * browser cookie from the email's button, then the one saved on their account at
  * signup. Duplicates (ignoring case) are dropped.
  */
 export function carriedGiftCodes(
@@ -104,7 +104,7 @@ export function describeGiftOffer(offer: GiftOffer): string {
   return `${value} off ${period(offer)}`;
 }
 
-/** A headline for the coupon page and the email. */
+/** A headline for the email. */
 export function giftHeadline(offer: GiftOffer): string {
   if (isFreeGift(offer) && offer.duration !== "forever") {
     return offer.duration === "repeating" && offer.months && offer.months > 1
@@ -128,9 +128,12 @@ export function formatGiftExpiry(expiresAt: string | null): string | null {
   });
 }
 
-/** Where the coupon page for a code lives. */
-export function giftPagePath(code: string): string {
-  return `/gift/${encodeURIComponent(code)}`;
+/**
+ * The link behind the email's button: it remembers the code, then opens
+ * signup (see src/app/gift/[code]/start/route.ts).
+ */
+export function giftStartPath(code: string): string {
+  return `/gift/${encodeURIComponent(code)}/start`;
 }
 
 /** Reads the gift cookie out of a raw Cookie header. */

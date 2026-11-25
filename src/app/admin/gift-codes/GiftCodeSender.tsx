@@ -21,7 +21,6 @@ type Preview = {
   code: string;
   offer: string;
   expiresAt: string | null;
-  giftUrl: string;
   subject: string;
   html: string;
 };
@@ -56,7 +55,6 @@ export function GiftCodeSender() {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState<"preview" | "send" | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
-  const [linkCopied, setLinkCopied] = useState(false);
 
   const fields = { email: email.trim(), firstName: firstName.trim() || null, code: code.trim() };
 
@@ -112,16 +110,6 @@ export function GiftCodeSender() {
       setNotice({ kind: "error", message: GENERIC_ERROR });
     } finally {
       setBusy(null);
-    }
-  }
-
-  async function copyLink(url: string) {
-    try {
-      await navigator.clipboard.writeText(url);
-      setLinkCopied(true);
-      window.setTimeout(() => setLinkCopied(false), 2400);
-    } catch {
-      setLinkCopied(false);
     }
   }
 
@@ -214,14 +202,7 @@ export function GiftCodeSender() {
             >
               {busy === "send" ? "Sending…" : `Send to ${preview.to}`}
             </button>
-            <button type="button" onClick={() => copyLink(preview.giftUrl)} className={btnSecondary}>
-              {linkCopied ? "Link copied" : "Copy coupon page link"}
-            </button>
           </div>
-          <p className={`text-xs ${bodyFaint}`}>
-            Writing your own email instead? Paste the coupon page link:{" "}
-            <span className="select-all break-all font-mono">{preview.giftUrl}</span>
-          </p>
         </div>
       ) : null}
     </div>

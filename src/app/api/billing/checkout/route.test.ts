@@ -1588,7 +1588,7 @@ vi.mock("@/lib/agreements/service.server", () => ({
 }));
 
 
-// Gift codes: a Stripe promotion code carried from the coupon page (cookie)
+// Gift codes: a Stripe promotion code carried from the coupon email's button (cookie)
 // or saved on the account at signup is re-checked and pre-applied on a first
 // checkout. Nothing about it may ever block or alter an ordinary checkout.
 const giftMocks = vi.hoisted(() => ({ resolveCarriedPromotionCodeId: vi.fn() }));
@@ -1625,7 +1625,7 @@ describe("carried gift code", () => {
     AGREEMENT_ID,
   ];
 
-  it("pre-applies a still-valid code carried in the coupon page cookie", async () => {
+  it("pre-applies a still-valid code carried in the cookie from the coupon email", async () => {
     configureReady();
     giftMocks.resolveCarriedPromotionCodeId.mockResolvedValue("promo_valid123");
 

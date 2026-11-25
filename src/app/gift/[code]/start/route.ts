@@ -8,8 +8,10 @@ import {
 import { createClient } from "@/lib/supabase/server";
 
 /**
- * The coupon page's "start" button. Remembers the code in a cookie, then sends
- * a new visitor to signup and a signed-in one back into their setup.
+ * The link behind the coupon email's "Start" button. Remembers the code in a
+ * cookie, then sends a new visitor to signup and a signed-in one back into
+ * their setup. It never goes to Stripe: payment still comes at the end of
+ * onboarding, where the remembered code is applied.
  *
  * The code is not checked with Stripe here: Checkout checks it again at the
  * moment it matters, and a code that has stopped working simply is not applied.

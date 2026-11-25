@@ -166,6 +166,267 @@ body:not(.sa-homepage-widget-route)
   }
 }
 
+/* Analytics consent card mascot: the logo's orange dot perches on the card's
+   top edge, bounces while "Allow analytics" is hovered, and performs once the
+   choice is saved. Durations pair with DOT_SHOW_MS / DOT_NOD_MS in
+   components/marketing/website-analytics.tsx. */
+@layer components {
+  .sa-consent {
+    animation: sa-consent-enter 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .sa-consent[data-mood="show"] {
+    animation: sa-consent-leave 300ms ease-in 1700ms both;
+  }
+
+  .sa-consent[data-mood="nod"] {
+    animation: sa-consent-leave 240ms ease-in 400ms both;
+  }
+
+  /* Zero-height rail along the card's top edge; the dot travels along it. */
+  .sa-consent-track {
+    position: absolute;
+    left: 1.75rem;
+    right: 1.75rem;
+    top: 1px;
+    height: 0;
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  /* Horizontal travel and the entrance pop live here, vertical bounce and
+     squash on the dot itself, so the two combine into arcs. */
+  .sa-consent-runner {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 22px;
+    height: 22px;
+    animation: sa-consent-dot-pop 620ms cubic-bezier(0.34, 1.56, 0.64, 1) 450ms both;
+  }
+
+  .sa-consent[data-mood="show"] .sa-consent-runner {
+    animation: sa-consent-dot-run 1000ms linear both;
+  }
+
+  .sa-consent-dot {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: var(--brand-primary);
+    transform-origin: 50% 100%;
+    animation: sa-consent-dot-idle 3.2s ease-in-out 1.6s infinite;
+  }
+
+  .dark .sa-consent-dot {
+    background: var(--brand-primary-dark);
+  }
+
+  .sa-consent[data-mood="perk"] .sa-consent-dot {
+    animation: sa-consent-dot-perk 520ms infinite;
+  }
+
+  .sa-consent[data-mood="show"] .sa-consent-dot {
+    animation: sa-consent-dot-show 1000ms both;
+  }
+
+  .sa-consent[data-mood="nod"] .sa-consent-dot {
+    animation: sa-consent-dot-nod 380ms ease-in-out both;
+  }
+
+  /* Confetti layer, anchored where the dot bursts: the centre of its final
+     leap, mid-card. Above the card so pieces rain down over it. */
+  .sa-consent-confetti {
+    position: absolute;
+    left: 50%;
+    top: -56px;
+    z-index: 20;
+    pointer-events: none;
+  }
+
+  .sa-consent-confetto {
+    position: absolute;
+    width: var(--sa-w);
+    height: var(--sa-h);
+    margin: calc(var(--sa-h) / -2) 0 0 calc(var(--sa-w) / -2);
+    border-radius: var(--sa-br);
+    background: var(--sa-c);
+    opacity: 0;
+  }
+
+  /* Sideways drift and the up-then-down arc run as separate animations
+     (`translate` vs `transform`) so each piece follows a thrown curve. */
+  .sa-consent[data-mood="show"] .sa-consent-confetto {
+    animation:
+      sa-consent-confetti-x var(--sa-t) cubic-bezier(0.12, 0.7, 0.3, 1) calc(860ms + var(--sa-d)) both,
+      sa-consent-confetti-y var(--sa-t) linear calc(860ms + var(--sa-d)) both;
+  }
+
+  @keyframes sa-consent-enter {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes sa-consent-leave {
+    from {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    to {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+  }
+
+  /* Starts hidden behind the card, then pops up over its top edge. */
+  @keyframes sa-consent-dot-pop {
+    from {
+      transform: translateY(26px);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
+
+  /* Mostly still, with one small hop per cycle. */
+  @keyframes sa-consent-dot-idle {
+    0%,
+    62%,
+    100% {
+      transform: translateY(0) scale(1);
+    }
+    69% {
+      transform: translateY(0) scale(1.12, 0.86);
+    }
+    79% {
+      transform: translateY(-7px) scale(0.96, 1.05);
+    }
+    89% {
+      transform: translateY(0) scale(1.08, 0.92);
+    }
+    95% {
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes sa-consent-dot-perk {
+    0%,
+    100% {
+      transform: translateY(0) scale(1.18, 0.82);
+      animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1);
+    }
+    50% {
+      transform: translateY(-10px) scale(0.95, 1.06);
+      animation-timing-function: cubic-bezier(0.6, 0, 0.8, 0.3);
+    }
+  }
+
+  @keyframes sa-consent-dot-run {
+    0%,
+    8% {
+      left: 0;
+    }
+    84%,
+    100% {
+      left: calc(50% - 11px);
+    }
+  }
+
+  /* Wind-up, two hops, a big leap, then it bursts into confetti at the top. */
+  @keyframes sa-consent-dot-show {
+    0% {
+      transform: translateY(0) scale(1);
+      animation-timing-function: ease-out;
+    }
+    8% {
+      transform: translateY(0) scale(1.28, 0.68);
+      animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1);
+    }
+    22% {
+      transform: translateY(-34px) scale(0.92, 1.1);
+      animation-timing-function: cubic-bezier(0.6, 0, 0.8, 0.3);
+    }
+    36% {
+      transform: translateY(0) scale(1.24, 0.74);
+      animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1);
+    }
+    50% {
+      transform: translateY(-26px) scale(0.94, 1.08);
+      animation-timing-function: cubic-bezier(0.6, 0, 0.8, 0.3);
+    }
+    64% {
+      transform: translateY(0) scale(1.26, 0.72);
+      animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1);
+    }
+    84% {
+      transform: translateY(-46px) scale(1);
+      opacity: 1;
+      animation-timing-function: ease-out;
+    }
+    90% {
+      transform: translateY(-46px) scale(1.4);
+      opacity: 1;
+    }
+    100% {
+      transform: translateY(-46px) scale(0);
+      opacity: 0;
+    }
+  }
+
+  @keyframes sa-consent-dot-nod {
+    0%,
+    100% {
+      transform: translateY(0) scale(1);
+    }
+    45% {
+      transform: translateY(0) scale(1.2, 0.76);
+    }
+  }
+
+  @keyframes sa-consent-confetti-x {
+    from {
+      translate: 0 0;
+    }
+    to {
+      translate: var(--sa-dx) 0;
+    }
+  }
+
+  @keyframes sa-consent-confetti-y {
+    0% {
+      opacity: 0;
+      transform: translateY(0) rotate(0deg) rotateX(0deg);
+      animation-timing-function: cubic-bezier(0.1, 0.7, 0.3, 1);
+    }
+    6%,
+    72% {
+      opacity: 1;
+    }
+    32% {
+      transform: translateY(var(--sa-up)) rotate(calc(var(--sa-r) * 0.4)) rotateX(calc(var(--sa-f) * 0.35));
+      animation-timing-function: cubic-bezier(0.45, 0, 0.9, 0.6);
+    }
+    100% {
+      opacity: 0;
+      transform: translateY(var(--sa-fall)) rotate(var(--sa-r)) rotateX(var(--sa-f));
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sa-consent,
+    .sa-consent * {
+      animation: none !important;
+    }
+  }
+}
+
 /* react-colorful overrides */
 .react-colorful {
   width: 100% !important;

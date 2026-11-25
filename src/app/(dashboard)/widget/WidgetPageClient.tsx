@@ -5,6 +5,7 @@ import type { WidgetConfig } from '@/types/database';
 import WidgetConfigForm, { type WidgetConfigFormValues } from '@/components/widget/WidgetConfigForm';
 import WidgetPreview from '@/components/widget/WidgetPreview';
 import EmbedCodeGenerator from '@/components/widget/EmbedCodeGenerator';
+import { DEFAULT_MASCOT_COLOR } from '@/components/widget/MascotColorField';
 import { card } from '@/lib/theme-v2/theme';
 
 interface WidgetPageClientProps {
@@ -25,6 +26,7 @@ export default function WidgetPageClient({
     position: config.position,
     show_logo: config.show_logo,
     logo_url: config.logo_url || '',
+    mascot_color: config.mascot_color || DEFAULT_MASCOT_COLOR,
     welcome_message: config.welcome_message,
     proactive_invitation_enabled: config.proactive_invitation_enabled,
     lead_capture_enabled: config.lead_capture_enabled,

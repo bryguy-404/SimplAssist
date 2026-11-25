@@ -16,6 +16,7 @@ export type PublicWidgetConfigRow = {
   proactive_invitation_enabled: boolean;
   show_logo: boolean;
   logo_url: string | null;
+  mascot_color?: string | null;
   lead_capture_enabled: boolean;
   lead_capture_timing: "start" | "after_3_messages" | "on_booking";
   quick_replies: string[] | null;

@@ -522,6 +522,31 @@ describe("authenticated widget configuration mutations", () => {
     });
   });
 
+  it("saves a chosen mascot colour and rejects one that is not a hex value", async () => {
+    vi.stubEnv("WIDGET_EDGE_ORIGIN_SECRET", "");
+    const withMascot = { ...WIDGET_CONFIG_PATCH, mascot_color: "#F97316" };
+    queueDatabaseResults({
+      data: { id: "widget-1", business_id: BUSINESS_ID, ...withMascot },
+      error: null,
+    });
+
+    const saved = await patchConfig(configPatchRequest(withMascot));
+
+    expect(saved.status).toBe(200);
+    const updateChain = mocks.from.mock.results[0]?.value as {
+      update: ReturnType<typeof vi.fn>;
+    };
+    expect(updateChain.update).toHaveBeenCalledWith(withMascot);
+
+    mocks.from.mockClear();
+    const rejected = await patchConfig(
+      configPatchRequest({ ...WIDGET_CONFIG_PATCH, mascot_color: "orange" }),
+    );
+
+    expect(rejected.status).toBe(400);
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
   it("requires an explicit proactive invitation preference", async () => {
     const payload: Record<string, unknown> = { ...WIDGET_CONFIG_PATCH };
     delete payload.proactive_invitation_enabled;
@@ -738,6 +763,38 @@ describe("public widget entitlement boundaries", () => {
       eq: ReturnType<typeof vi.fn>;
     };
     expect(configChain.eq).toHaveBeenCalledWith("business_id", BUSINESS_ID);
+  });
+
+  it.each([
+    ["the saved colour", "#F97316", "#F97316"],
+    ["nothing before the column exists", undefined, null],
+  ])("publishes %s as the mascot colour", async (_label, stored, expected) => {
+    queueDatabaseResults(
+      {
+        data: {
+          id: "widget-1",
+          brand_color: "#123456",
+          position: "bottom_right",
+          welcome_message: "Welcome",
+          proactive_invitation_enabled: true,
+          show_logo: false,
+          logo_url: null,
+          mascot_color: stored,
+          lead_capture_enabled: true,
+          lead_capture_timing: "start",
+          quick_replies: [],
+        },
+        error: null,
+      },
+      { data: { name: "Acme" }, error: null },
+    );
+
+    const response = await getConfig(configRequest());
+
+    expect(await response.json()).toMatchObject({
+      available: true,
+      mascotColor: expected,
+    });
   });
 
   it.each([

@@ -120,6 +120,7 @@ export async function GET(request: NextRequest) {
       welcomeMessage: widgetConfig.welcome_message,
       showLogo: widgetConfig.show_logo,
       logoUrl: widgetConfig.logo_url,
+      mascotColor: widgetConfig.mascot_color ?? null,
       proactiveInvitationEnabled:
         widgetConfig.proactive_invitation_enabled,
       leadCaptureEnabled: widgetConfig.lead_capture_enabled,

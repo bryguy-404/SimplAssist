@@ -138,47 +138,68 @@ export async function GET() {
   var style = document.createElement('style');
   style.textContent = [
     '.sa-widget-container{position:fixed;z-index:2147483647;font-family:system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.5;}',
-    '.sa-widget-btn{width:60px;height:60px;padding:0;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,0.15);transition:transform 0.2s,box-shadow 0.2s;position:relative;}',
+    '.sa-widget-btn{color:var(--sa-on-brand,#fff);width:60px;height:60px;padding:0;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,0.15);transition:transform 0.2s,box-shadow 0.2s;position:relative;}',
     '.sa-widget-btn:hover{transform:scale(1.05);box-shadow:0 6px 16px rgba(0,0,0,0.2);}',
     '.sa-widget-badge{position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;width:22px;height:22px;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #fff;}',
     '.sa-widget-attention-dot{position:absolute;top:4px;right:4px;width:12px;height:12px;border-radius:50%;background:#ef4444;display:none;}',
     '.sa-widget-panel{--sa-brand:#0066FF;width:400px;height:auto;min-height:260px;max-height:500px;border-radius:18px;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,0.14);display:flex;flex-direction:column;background:#fff;position:absolute;bottom:72px;transition:opacity 0.25s,transform 0.25s;transform-origin:bottom;}',
     '.sa-widget-panel.sa-hidden{opacity:0;visibility:hidden;transform:translateY(12px) scale(0.95);pointer-events:none;}',
     '.sa-widget-panel.sa-visible{opacity:1;visibility:visible;transform:translateY(0) scale(1);}',
-    '.sa-widget-header{padding:14px 16px;color:#fff;display:flex;align-items:center;gap:12px;flex-shrink:0;}',
+    '.sa-widget-header{padding:14px 16px;color:var(--sa-on-brand,#fff);display:flex;align-items:center;gap:12px;flex-shrink:0;}',
     '.sa-widget-header-avatar{width:40px;height:40px;border-radius:50%;flex-shrink:0;overflow:hidden;background:rgba(255,255,255,0.22);position:relative;}',
     '.sa-widget-header-avatar img{width:100%;height:100%;object-fit:cover;display:block;}',
-    '.sa-widget-header-avatar-fallback{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;color:#fff;background:rgba(255,255,255,0.18);}',
-    '.sa-widget-header-avatar.sa-has-logo .sa-widget-header-avatar-fallback{display:none;}',
+    // The mascot: a dot with eyes that stands in for a logo. It idles, watches
+    // the pointer, looks down while the visitor types, tilts while a reply is
+    // on its way and smiles when one arrives. Colours come from applyMascotColors.
+    '.sa-widget-header-avatar.sa-has-pet{overflow:visible;background:transparent;}',
+    '.sa-widget-pet{--sa-pet:#fff;--sa-pet-ink:#1c1917;position:absolute;top:2px;right:2px;bottom:2px;left:2px;display:none;box-sizing:border-box;transform-origin:50% 100%;transition:transform 0.26s cubic-bezier(0.3,1.6,0.5,1);}',
+    '.sa-widget-header-avatar.sa-has-pet .sa-widget-pet{display:block;}',
+    '.sa-widget-pet-dot{position:absolute;top:0;right:0;bottom:0;left:0;box-sizing:border-box;border-radius:50%;background:var(--sa-pet);box-shadow:0 0 0 2px var(--sa-pet-ring,rgba(255,255,255,0.85)),inset 0 -5px 0 rgba(0,0,0,0.12),inset 0 3px 0 rgba(255,255,255,0.25);animation:sa-widget-pet-bob 3.6s ease-in-out infinite;}',
+    '.sa-widget-pet-eyes{position:absolute;left:0;right:0;top:32%;height:8px;display:flex;align-items:center;justify-content:center;gap:7px;transition:transform 0.12s ease-out;}',
+    '.sa-widget-pet-eye{display:block;box-sizing:border-box;width:5px;height:7px;border:0 solid var(--sa-pet-ink);border-radius:50%;background-color:var(--sa-pet-ink);animation:sa-widget-pet-blink 4.6s infinite;}',
+    '.sa-widget-pet[data-mood="listening"] .sa-widget-pet-eyes{transform:translate(1.5px,2.5px);}',
+    '.sa-widget-pet[data-mood="thinking"]{transform:rotate(-9deg);}',
+    '.sa-widget-pet[data-mood="thinking"] .sa-widget-pet-eyes{transform:translate(2px,-2.5px);}',
+    '.sa-widget-pet[data-mood="thinking"] .sa-widget-pet-dot{animation:sa-widget-pet-think 1.4s ease-in-out infinite;}',
+    '.sa-widget-pet.sa-pet-cheer{animation:sa-widget-pet-hop 0.56s;}',
+    '.sa-widget-pet.sa-pet-cheer .sa-widget-pet-eyes{animation:sa-widget-pet-squeeze 1.8s;}',
+    '.sa-widget-pet.sa-pet-cheer .sa-widget-pet-eye{animation:sa-widget-pet-smile 1.8s,sa-widget-pet-blink 4.6s 1.8s infinite;}',
+    '@keyframes sa-widget-pet-bob{0%,100%{transform:none;}50%{transform:translateY(-2px);}}',
+    '@keyframes sa-widget-pet-blink{0%,94%,100%{transform:none;}97%{transform:scaleY(0.12);}}',
+    '@keyframes sa-widget-pet-think{0%,100%{transform:rotate(-3deg);}50%{transform:rotate(4deg);}}',
+    '@keyframes sa-widget-pet-hop{0%,100%{transform:none;}25%{transform:translateY(2px) scale(1.12,0.86);}55%{transform:translateY(-7px) scale(0.95,1.08);}80%{transform:translateY(0) scale(1.08,0.92);}}',
+    '@keyframes sa-widget-pet-squeeze{0%,100%{gap:7px;}8%,88%{gap:4px;}}',
+    '@keyframes sa-widget-pet-smile{0%,100%{width:5px;height:7px;border-width:0;border-radius:50%;background-color:var(--sa-pet-ink);}8%,88%{width:9px;height:5px;border-width:2.5px 2.5px 0;border-radius:9px 9px 0 0;background-color:transparent;}}',
+    '@media(prefers-reduced-motion:reduce){.sa-widget-pet,.sa-widget-pet *{animation:none!important;transition:none!important;}}',
     '.sa-widget-header-center{flex:1;min-width:0;text-align:left;}',
     '.sa-widget-header-center h3{margin:0;font-size:16px;font-weight:600;line-height:1.25;}',
     '.sa-widget-header-subtitle{margin:4px 0 0;font-size:12px;font-weight:400;opacity:0.92;line-height:1.3;}',
     '.sa-widget-header-actions{display:flex;align-items:center;gap:10px;flex-shrink:0;}',
     '.sa-widget-status-dot{width:8px;height:8px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 2px rgba(255,255,255,0.35);flex-shrink:0;}',
-    '.sa-widget-close{width:44px;height:44px;background:none;border:none;color:#fff;cursor:pointer;padding:0;opacity:0.9;font-size:22px;line-height:1;display:flex;align-items:center;justify-content:center;}',
+    '.sa-widget-close{width:44px;height:44px;background:none;border:none;color:var(--sa-on-brand,#fff);cursor:pointer;padding:0;opacity:0.9;font-size:22px;line-height:1;display:flex;align-items:center;justify-content:center;}',
     '.sa-widget-close:hover{opacity:1;}',
     '.sa-widget-messages{flex:1 1 auto;align-self:stretch;overflow-y:auto;min-height:0;max-height:calc(500px - 200px);padding:16px;display:flex;flex-direction:column;gap:10px;background:#fff;}',
     '.sa-widget-msg{max-width:85%;padding:12px 14px;border-radius:14px;word-wrap:break-word;font-size:14px;line-height:1.45;}',
     '.sa-widget-msg-bot{align-self:flex-start;background:#eef1f4;color:#1a1a1a;border-bottom-left-radius:6px;}',
-    '.sa-widget-msg-user{align-self:flex-end;color:#fff;border-bottom-right-radius:6px;}',
+    '.sa-widget-msg-user{align-self:flex-end;color:var(--sa-on-brand,#fff);box-shadow:inset 0 0 0 1px var(--sa-brand-edge,transparent);border-bottom-right-radius:6px;}',
     '.sa-widget-input-area{padding:12px 16px;border-top:1px solid #e8eaed;display:flex;gap:10px;align-items:center;flex-shrink:0;background:#fff;}',
     '.sa-widget-input{flex:1;border:1px solid #d1d5db;border-radius:999px;padding:10px 16px;font-size:16px;outline:none;font-family:inherit;background:#fff;color:#1a1a1a;}',
     '.sa-widget-input::placeholder{color:#9ca3af;}',
-    '.sa-widget-input:focus{border-color:var(--sa-brand);box-shadow:0 0 0 2px rgba(0,0,0,0.06);}',
-    '.sa-widget-send{width:40px;height:40px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:opacity 0.2s;flex-shrink:0;}',
+    '.sa-widget-input:focus{border-color:var(--sa-brand-ink,var(--sa-brand));box-shadow:0 0 0 2px rgba(0,0,0,0.06);}',
+    '.sa-widget-send{color:var(--sa-on-brand,#fff);box-shadow:inset 0 0 0 1px var(--sa-brand-edge,transparent);width:40px;height:40px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:opacity 0.2s;flex-shrink:0;}',
     '.sa-widget-send:disabled{opacity:0.5;cursor:default;}',
     '.sa-widget-footer{padding:10px 12px;border-top:1px solid #e8eaed;background:#f3f4f6;flex-shrink:0;text-align:center;font-size:11px;line-height:1.4;}',
     '.sa-widget-footer a{color:#9ca3af;text-decoration:none;}',
     '.sa-widget-footer a:hover{color:#6b7280;text-decoration:underline;}',
-    '.sa-widget-loading-dot{width:12px;height:12px;border-radius:50%;background:var(--sa-brand,#ff8c42);flex-shrink:0;margin:10px 14px;align-self:flex-start;animation:sa-widget-dot-pulse 1.5s infinite;}',
+    '.sa-widget-loading-dot{width:12px;height:12px;border-radius:50%;background:var(--sa-brand-ink,var(--sa-brand,#ff8c42));flex-shrink:0;margin:10px 14px;align-self:flex-start;animation:sa-widget-dot-pulse 1.5s infinite;}',
     '@keyframes sa-widget-dot-pulse{0%{transform:scale(1);opacity:1;}50%{transform:scale(1.6);opacity:0.4;}100%{transform:scale(1);opacity:1;}}',
     '.sa-widget-cursor{display:inline-block;width:2px;height:1em;background:#1a1a1a;margin-left:1px;vertical-align:text-bottom;animation:sa-widget-blink 0.7s step-end infinite;}',
     '@keyframes sa-widget-blink{0%,100%{opacity:1;}50%{opacity:0;}}',
     '.sa-widget-lead-form{padding:20px 16px;display:flex;flex-direction:column;gap:12px;}',
     '.sa-widget-lead-form p{margin:0;font-size:14px;color:#4a5568;text-align:center;}',
     '.sa-widget-lead-input{border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:16px;outline:none;font-family:inherit;}',
-    '.sa-widget-lead-input:focus{border-color:var(--sa-brand);box-shadow:0 0 0 2px rgba(0,0,0,0.06);}',
-    '.sa-widget-lead-btn{border:none;color:#fff;border-radius:8px;padding:10px;font-size:14px;font-weight:600;cursor:pointer;}',
+    '.sa-widget-lead-input:focus{border-color:var(--sa-brand-ink,var(--sa-brand));box-shadow:0 0 0 2px rgba(0,0,0,0.06);}',
+    '.sa-widget-lead-btn{border:none;color:var(--sa-on-brand,#fff);box-shadow:inset 0 0 0 1px var(--sa-brand-edge,transparent);border-radius:8px;padding:10px;font-size:14px;font-weight:600;cursor:pointer;}',
     '.sa-widget-lead-btn:disabled{opacity:0.6;cursor:default;}',
     '.sa-widget-lead-skip{background:none;border:none;color:#9ca3af;cursor:pointer;font-size:12px;text-align:center;}',
     '.sa-widget-lead-status{min-height:18px;margin:0!important;font-size:12px!important;color:#6b7280!important;text-align:left!important;}',
@@ -192,8 +213,8 @@ export async function GET() {
     '.sa-widget-end{background:none;border:none;color:#9ca3af;cursor:pointer;padding:0;font-size:11px;font-weight:500;transition:color 0.2s;}',
     '.sa-widget-end:hover{color:#ef4444;}',
     '.sa-widget-quick-replies{display:flex;flex-wrap:wrap;gap:8px;padding:0 16px 12px;align-self:stretch;}',
-    '.sa-widget-quick-reply-btn{border:1.5px solid var(--sa-brand,#0066FF);color:var(--sa-brand,#0066FF);background:transparent;border-radius:999px;padding:8px 16px;font-size:13px;font-family:inherit;cursor:pointer;transition:background 0.2s,color 0.2s;line-height:1.3;white-space:normal;text-align:left;}',
-    '.sa-widget-quick-reply-btn:hover{background:var(--sa-brand,#0066FF);color:#fff;}'
+    '.sa-widget-quick-reply-btn{border:1.5px solid var(--sa-brand-ink,var(--sa-brand,#0066FF));color:var(--sa-brand-ink,var(--sa-brand,#0066FF));background:transparent;border-radius:999px;padding:8px 16px;font-size:13px;font-family:inherit;cursor:pointer;transition:background 0.2s,color 0.2s;line-height:1.3;white-space:normal;text-align:left;}',
+    '.sa-widget-quick-reply-btn:hover{background:var(--sa-brand-ink,var(--sa-brand,#0066FF));color:#fff;}'
   ].join('\\n');
   document.head.appendChild(style);
 
@@ -210,9 +231,15 @@ export async function GET() {
   var avatarWrap = el('div', { class: 'sa-widget-header-avatar' });
   var avatarImg = el('img', { class: 'sa-widget-header-avatar-img', alt: '' });
   avatarImg.style.display = 'none';
-  var avatarFallback = el('span', { class: 'sa-widget-header-avatar-fallback' }, '\\u2026');
+  var pet = el('span', { class: 'sa-widget-pet', 'aria-hidden': 'true', 'data-mood': 'idle' });
+  var petDot = el('span', { class: 'sa-widget-pet-dot' });
+  var petEyes = el('span', { class: 'sa-widget-pet-eyes' });
+  petEyes.appendChild(el('span', { class: 'sa-widget-pet-eye' }));
+  petEyes.appendChild(el('span', { class: 'sa-widget-pet-eye' }));
+  petDot.appendChild(petEyes);
+  pet.appendChild(petDot);
   avatarWrap.appendChild(avatarImg);
-  avatarWrap.appendChild(avatarFallback);
+  avatarWrap.appendChild(pet);
   var titleH3 = el('h3', { id: 'sa-widget-title' }, 'Loading...');
   var subtitleP = el('p', { class: 'sa-widget-header-subtitle' }, 'Typically replies instantly');
   var headerCenter = el('div', { class: 'sa-widget-header-center' });
@@ -231,7 +258,7 @@ export async function GET() {
   var inputArea = el('div', { class: 'sa-widget-input-area' });
   var input = el('input', { class: 'sa-widget-input', placeholder: 'Type your message...', type: 'text', maxlength: '2000', 'aria-label': 'Chat message' });
   var sendBtn = el('button', { class: 'sa-widget-send', type: 'button', 'aria-label': 'Send message' });
-  sendBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
+  sendBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
   var footerEl = el('div', { class: 'sa-widget-footer' });
   var footerLink = el('a', { href: baseUrl + '/', target: '_blank', rel: 'noopener noreferrer' }, 'Powered by SimplAssist');
   footerEl.appendChild(footerLink);
@@ -243,9 +270,16 @@ export async function GET() {
   input.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
   input.addEventListener('input', function() {
     if (input.value) markIntentionalInteraction();
+    nodPet();
   });
   input.addEventListener('focus', function() {
     if (isOpen) markIntentionalInteraction(true);
+    petListening = true;
+    updatePetMood();
+  });
+  input.addEventListener('blur', function() {
+    petListening = false;
+    updatePetMood();
   });
   panel.addEventListener('pointerdown', handlePanelPointerEngagement);
   sendBtn.addEventListener('click', sendMessage);
@@ -311,12 +345,22 @@ export async function GET() {
   function applyBrandColor(color) {
     btn.className = 'sa-widget-btn';
     btn.style.backgroundColor = color;
-    btn.innerHTML = '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+    btn.innerHTML = '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
     btn.appendChild(badge);
     btn.appendChild(attentionDot);
     panel.style.setProperty('--sa-brand', color);
     header.style.backgroundColor = color;
     sendBtn.style.backgroundColor = color;
+    // White text and icons disappear on a white or very light brand colour, so
+    // they turn dark there, brand-coloured text on white turns grey, and
+    // brand-coloured shapes get a faint edge. The cut-off leaves every colour
+    // that already reads well exactly as it was.
+    var lightBrand = HEX_COLOR.test(color || '') && colorLuminance(color) > 0.5;
+    container.style.setProperty('--sa-on-brand', lightBrand ? '#1c1917' : '#fff');
+    container.style.setProperty('--sa-brand-ink', lightBrand ? '#374151' : color);
+    container.style.setProperty('--sa-brand-edge', lightBrand ? '#d1d5db' : 'transparent');
+    header.style.borderBottom = lightBrand ? '1px solid #e8eaed' : '';
+    btn.style.border = lightBrand ? '1px solid #e5e7eb' : '';
   }
 
   function updateLauncherIndicators() {
@@ -340,27 +384,117 @@ export async function GET() {
     attentionDot.style.display = 'none';
   }
 
-  function applyHeaderAvatar(name, showLogo, logoUrl) {
-    var initial = (name && name.charAt(0)) ? name.charAt(0).toUpperCase() : '?';
-    avatarFallback.textContent = initial;
+  // A logo wins when one is uploaded and switched on; otherwise the mascot shows.
+  function applyHeaderAvatar(showLogo, logoUrl) {
     if (showLogo && logoUrl) {
       avatarWrap.classList.add('sa-has-logo');
+      avatarWrap.classList.remove('sa-has-pet');
       avatarImg.style.display = 'block';
-      avatarFallback.style.display = 'none';
       avatarImg.src = logoUrl;
     } else {
-      avatarWrap.classList.remove('sa-has-logo');
-      avatarImg.removeAttribute('src');
-      avatarImg.style.display = 'none';
-      avatarFallback.style.display = 'flex';
+      showMascotAvatar();
     }
   }
 
-  avatarImg.addEventListener('error', function() {
+  function showMascotAvatar() {
     avatarWrap.classList.remove('sa-has-logo');
+    avatarWrap.classList.add('sa-has-pet');
+    avatarImg.removeAttribute('src');
     avatarImg.style.display = 'none';
-    avatarFallback.style.display = 'flex';
-  });
+  }
+
+  avatarImg.addEventListener('error', showMascotAvatar);
+
+  var HEX_COLOR = /^#[0-9a-f]{6}$/i;
+  var DEFAULT_MASCOT_COLOR = '#FFFFFF';
+  var MASCOT_DARK_INK = '#1c1917';
+
+  function colorLuminance(hex) {
+    var value = parseInt(hex.slice(1), 16);
+    var channels = [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+    for (var c = 0; c < 3; c++) {
+      var share = channels[c] / 255;
+      channels[c] = share <= 0.03928 ? share / 12.92 : Math.pow((share + 0.055) / 1.055, 2.4);
+    }
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+  }
+
+  function colorContrast(a, b) {
+    var la = colorLuminance(a);
+    var lb = colorLuminance(b);
+    return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+  }
+
+  // On a light dot the eyes take the brand colour when it stands out, so a
+  // white dot looks cut from the header. Otherwise they go dark or white,
+  // whichever reads better against the dot.
+  function applyMascotColors(mascotColor, brandColor) {
+    var dot = HEX_COLOR.test(mascotColor || '') ? mascotColor : DEFAULT_MASCOT_COLOR;
+    var ink = MASCOT_DARK_INK;
+    if (
+      colorLuminance(dot) > 0.6 &&
+      HEX_COLOR.test(brandColor || '') &&
+      colorContrast(brandColor, dot) >= 3
+    ) ink = brandColor;
+    else if (colorContrast('#ffffff', dot) > colorContrast(ink, dot)) ink = '#ffffff';
+    // The ring keeps the dot's edge visible: white on most headers, a soft
+    // dark line on a white or very light one.
+    var lightHeader = HEX_COLOR.test(brandColor || '') && colorLuminance(brandColor) > 0.7;
+    pet.style.setProperty('--sa-pet', dot);
+    pet.style.setProperty('--sa-pet-ink', ink);
+    pet.style.setProperty('--sa-pet-ring', lightHeader ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.85)');
+  }
+
+  var petListening = false;
+  var petThinking = false;
+  var petLookFrame = 0;
+
+  // Waiting on a reply outranks listening to the visitor type.
+  function updatePetMood() {
+    var mood = petThinking ? 'thinking' : petListening ? 'listening' : 'idle';
+    if (pet.getAttribute('data-mood') === mood) return;
+    pet.setAttribute('data-mood', mood);
+    if (mood !== 'idle') petEyes.style.transform = '';
+  }
+
+  // A small hop and a smile: when the chat opens and when a reply arrives.
+  function cheerPet() {
+    pet.classList.remove('sa-pet-cheer');
+    void pet.offsetWidth; // restarts the animation if one is already playing
+    pet.classList.add('sa-pet-cheer');
+  }
+
+  // A small nod for each keystroke.
+  function nodPet() {
+    if (prefersReducedMotion || typeof petDot.animate !== 'function') return;
+    try {
+      petDot.animate([
+        { transform: 'none' },
+        { transform: 'translateY(2px) scale(1.05,0.94)' },
+        { transform: 'none' }
+      ], { duration: 190, easing: 'ease-out' });
+    } catch(e) {}
+  }
+
+  // The eyes follow the pointer a little while the chat is open and idle.
+  function petLook(event) {
+    if (prefersReducedMotion || !isOpen || petThinking || petListening || petLookFrame) return;
+    if (!avatarWrap.classList.contains('sa-has-pet')) return;
+    if (!window.requestAnimationFrame || typeof petDot.getBoundingClientRect !== 'function') return;
+    var x = event.clientX;
+    var y = event.clientY;
+    petLookFrame = window.requestAnimationFrame(function() {
+      petLookFrame = 0;
+      var box = petDot.getBoundingClientRect();
+      var dx = x - (box.left + box.width / 2);
+      var dy = y - (box.top + box.height / 2);
+      var distance = Math.sqrt(dx * dx + dy * dy) || 1;
+      var reach = Math.min(1, distance / 160) * 2.4;
+      petEyes.style.transform = 'translate(' + (dx / distance * reach).toFixed(2) + 'px,' + (dy / distance * reach).toFixed(2) + 'px)';
+    });
+  }
+
+  document.addEventListener('pointermove', petLook, { passive: true });
 
   function safeStorageGet(key) {
     try { return localStorage.getItem(key); } catch(e) { return null; }
@@ -787,6 +921,7 @@ export async function GET() {
     panel.removeAttribute('inert');
     try { panel.inert = false; } catch(e) {}
     container.classList.add('sa-open');
+    cheerPet();
     btn.setAttribute('aria-expanded', 'true');
     btn.setAttribute('aria-label', 'Close chat');
     attentionDismissed = true;
@@ -1243,6 +1378,8 @@ export async function GET() {
 
   function showLoading() {
     isLoading = true;
+    petThinking = true;
+    updatePetMood();
     var dots = el('div', { class: 'sa-widget-loading-dot', id: 'sa-loading' });
     messagesArea.appendChild(dots);
     scrollToBottom();
@@ -1250,6 +1387,8 @@ export async function GET() {
 
   function hideLoading() {
     isLoading = false;
+    petThinking = false;
+    updatePetMood();
     var dots = document.getElementById('sa-loading');
     if (dots) dots.remove();
   }
@@ -1494,7 +1633,9 @@ export async function GET() {
     }
     if (patch.showLogo !== undefined) config.showLogo = patch.showLogo;
     if (patch.logoUrl !== undefined) config.logoUrl = patch.logoUrl;
-    applyHeaderAvatar(config.businessName || 'Chat', !!config.showLogo, config.logoUrl || '');
+    if (patch.mascotColor !== undefined) config.mascotColor = patch.mascotColor;
+    applyHeaderAvatar(!!config.showLogo, config.logoUrl || '');
+    applyMascotColors(config.mascotColor, config.brandColor || '#0066FF');
     if (patch.welcomeMessage !== undefined) {
       if (patch.welcomeMessage !== oldWelcome) resetMessages = true;
       config.welcomeMessage = patch.welcomeMessage;
@@ -1636,6 +1777,7 @@ export async function GET() {
       if (data.response) {
         pendingClientMessageId = null;
         pendingClientMessageText = null;
+        cheerPet();
         addMsg(data.response, 'bot', function() {
           sendBtn.disabled = false;
           isLoading = false;
@@ -1717,8 +1859,9 @@ export async function GET() {
     emitWidgetLoadedTelemetryIfEligible();
     applyPoweredByAttribution(data);
     titleH3.textContent = data.businessName || 'Chat';
-    applyHeaderAvatar(data.businessName || 'Chat', !!data.showLogo, data.logoUrl || '');
+    applyHeaderAvatar(!!data.showLogo, data.logoUrl || '');
     applyBrandColor(data.brandColor || '#0066FF');
+    applyMascotColors(data.mascotColor, data.brandColor || '#0066FF');
     positionWidget(data.position || 'bottom_right');
     btn.classList.remove('sa-btn-hidden');
     btn.classList.add('sa-btn-visible');

@@ -22,6 +22,7 @@ export function buildPreviewPayload(values: WidgetConfigFormValues) {
     position: values.position,
     showLogo: values.show_logo,
     logoUrl: values.logo_url || '',
+    mascotColor: values.mascot_color,
     welcomeMessage: values.welcome_message,
     proactiveInvitationEnabled: values.proactive_invitation_enabled,
     forceProactiveInvitationOpen: values.proactive_invitation_enabled,

@@ -905,6 +905,8 @@ export interface WidgetConfig {
   proactive_invitation_enabled: boolean;
   show_logo: boolean;
   logo_url: string | null;
+  /** Hex colour of the header mascot shown when no logo is displayed. */
+  mascot_color: string;
   lead_capture_enabled: boolean;
   lead_capture_timing: LeadCaptureTiming;
   quick_replies: string[];

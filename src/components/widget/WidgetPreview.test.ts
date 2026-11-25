@@ -8,6 +8,7 @@ const BASE_VALUES = {
   position: "bottom_right" as const,
   show_logo: false,
   logo_url: "",
+  mascot_color: "#FACC15",
   welcome_message: "Hello",
   proactive_invitation_enabled: true,
   lead_capture_enabled: true,
@@ -28,6 +29,7 @@ describe("widget live preview payload", () => {
         }),
       ).toMatchObject({
         welcomeMessage: "Hello",
+        mascotColor: "#FACC15",
         proactiveInvitationEnabled: enabled,
         forceProactiveInvitationOpen: enabled,
         quickReplies: ["Pricing"],

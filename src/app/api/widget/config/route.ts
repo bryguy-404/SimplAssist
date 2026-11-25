@@ -45,6 +45,8 @@ const widgetConfigMutationSchema = z
     position: z.enum(["bottom_right", "bottom_left"]),
     show_logo: z.boolean(),
     logo_url: z.union([z.string().url(), z.literal(""), z.null()]),
+    // Optional so a dashboard tab opened before this field existed still saves.
+    mascot_color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
     welcome_message: z.string().trim().min(1).max(500),
     proactive_invitation_enabled: z.boolean(),
     lead_capture_enabled: z.boolean(),
@@ -330,6 +332,7 @@ export async function GET(request: NextRequest) {
         welcomeMessage: widgetConfig.welcome_message,
         showLogo: widgetConfig.show_logo,
         logoUrl: widgetConfig.logo_url,
+        mascotColor: widgetConfig.mascot_color ?? null,
         proactiveInvitationEnabled:
           widgetConfig.proactive_invitation_enabled &&
           arePublicWidgetProactiveInvitationsEnabledForBusiness(businessId),

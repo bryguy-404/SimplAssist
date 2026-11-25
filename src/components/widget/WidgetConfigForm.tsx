@@ -19,6 +19,7 @@ import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { secondaryCtaCompactClass } from '@/lib/glass';
 import { statusSuccess, statusWarning } from '@/lib/theme-v2/theme';
 import { normalizeHostHeader } from '@/lib/branding/hostname';
+import { DEFAULT_MASCOT_COLOR, MascotColorField } from './MascotColorField';
 
 const PRESET_COLORS = [
   { name: 'Blue', value: '#3B82F6' },
@@ -37,6 +38,7 @@ export interface WidgetConfigFormValues {
   position: WidgetPosition;
   show_logo: boolean;
   logo_url: string;
+  mascot_color: string;
   welcome_message: string;
   proactive_invitation_enabled: boolean;
   lead_capture_enabled: boolean;
@@ -179,6 +181,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
       position: config.position,
       show_logo: config.show_logo,
       logo_url: config.logo_url || '',
+      mascot_color: config.mascot_color || DEFAULT_MASCOT_COLOR,
       welcome_message: config.welcome_message,
       proactive_invitation_enabled: config.proactive_invitation_enabled,
       lead_capture_enabled: config.lead_capture_enabled,
@@ -191,6 +194,8 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
 
   const brandColor = watch('brand_color');
   const showLogo = watch('show_logo');
+  const logoUrl = watch('logo_url');
+  const mascotColor = watch('mascot_color');
   const position = watch('position');
   const welcomeMessage = watch('welcome_message');
   const proactiveInvitationEnabled = watch('proactive_invitation_enabled');
@@ -239,6 +244,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
           position: data.position,
           show_logo: data.show_logo,
           logo_url: data.logo_url || null,
+          mascot_color: data.mascot_color,
           welcome_message: data.welcome_message,
           proactive_invitation_enabled: data.proactive_invitation_enabled,
           lead_capture_enabled: data.lead_capture_enabled,
@@ -371,12 +377,19 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
           {/* Logo Upload */}
           {showLogo && (
             <LogoUpload
-              currentUrl={watch('logo_url')}
+              currentUrl={logoUrl}
               businessId={config.business_id}
               onUploaded={(url) => setValue('logo_url', url)}
               onRemoved={() => setValue('logo_url', '')}
             />
           )}
+
+          {/* Dot mascot: shown in the chat header whenever no logo is */}
+          <MascotColorField
+            value={mascotColor}
+            onChange={(color) => setValue('mascot_color', color)}
+            logoShowing={showLogo && !!logoUrl}
+          />
         </div>
       </div>
 

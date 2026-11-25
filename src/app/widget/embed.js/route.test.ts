@@ -2336,4 +2336,146 @@ describe("widget embed runtime", () => {
     expect(harness.timers.pendingTimeoutDelays()).not.toContain(8_000);
     expect(harness.requests).toHaveLength(1);
   });
+
+  describe("header mascot", () => {
+    function avatarParts(harness: Awaited<ReturnType<typeof createHarness>>) {
+      const avatar = harness.document.querySelector(".sa-widget-header-avatar");
+      const pet = harness.document.querySelector(".sa-widget-pet");
+      const image = harness.document.querySelector(".sa-widget-header-avatar-img");
+      if (!avatar || !pet || !image) throw new Error("Widget avatar was not rendered");
+      return { avatar, pet, image };
+    }
+
+    it("shows a white dot with brand-coloured eyes when there is no logo", async () => {
+      const harness = await createHarness([{ status: 200, body: availableConfig }]);
+      await flushPromises();
+
+      const { avatar, pet } = avatarParts(harness);
+      expect(avatar.classList.contains("sa-has-pet")).toBe(true);
+      expect(avatar.classList.contains("sa-has-logo")).toBe(false);
+      expect(pet.getAttribute("aria-hidden")).toBe("true");
+      expect(pet.style["--sa-pet"]).toBe("#FFFFFF");
+      expect(pet.style["--sa-pet-ink"]).toBe("#0066FF");
+      expect(pet.style["--sa-pet-ring"]).toBe("rgba(255,255,255,0.85)");
+    });
+
+    it("uses the chosen dot colour and picks eyes that read against it", async () => {
+      const harness = await createHarness([
+        { status: 200, body: { ...availableConfig, mascotColor: "#F97316" } },
+      ]);
+      await flushPromises();
+
+      const { pet } = avatarParts(harness);
+      expect(pet.style["--sa-pet"]).toBe("#F97316");
+      // Blue eyes would not read on orange, so they fall back to dark.
+      expect(pet.style["--sa-pet-ink"]).toBe("#1c1917");
+    });
+
+    it("outlines a white dot on a white header so it stays visible", async () => {
+      const harness = await createHarness([
+        { status: 200, body: { ...availableConfig, brandColor: "#FFFFFF" } },
+      ]);
+      await flushPromises();
+
+      const { pet } = avatarParts(harness);
+      expect(pet.style["--sa-pet"]).toBe("#FFFFFF");
+      expect(pet.style["--sa-pet-ink"]).toBe("#1c1917");
+      expect(pet.style["--sa-pet-ring"]).toBe("rgba(0,0,0,0.2)");
+    });
+
+    it("gives a dark dot white eyes", async () => {
+      const harness = await createHarness([
+        { status: 200, body: { ...availableConfig, mascotColor: "#1F2937" } },
+      ]);
+      await flushPromises();
+
+      expect(avatarParts(harness).pet.style["--sa-pet-ink"]).toBe("#ffffff");
+    });
+
+    it("ignores a dot colour that is not a plain hex value", async () => {
+      const harness = await createHarness([
+        { status: 200, body: { ...availableConfig, mascotColor: "red;background:url(//evil.test)" } },
+      ]);
+      await flushPromises();
+
+      expect(avatarParts(harness).pet.style["--sa-pet"]).toBe("#FFFFFF");
+    });
+
+    it("gives way to an uploaded logo and returns if the logo fails to load", async () => {
+      const harness = await createHarness([
+        {
+          status: 200,
+          body: { ...availableConfig, showLogo: true, logoUrl: "https://cdn.example.test/logo.png" },
+        },
+      ]);
+      await flushPromises();
+
+      const { avatar, image } = avatarParts(harness);
+      expect(avatar.classList.contains("sa-has-logo")).toBe(true);
+      expect(avatar.classList.contains("sa-has-pet")).toBe(false);
+      expect(image.src).toBe("https://cdn.example.test/logo.png");
+
+      image.dispatch("error");
+
+      expect(avatar.classList.contains("sa-has-logo")).toBe(false);
+      expect(avatar.classList.contains("sa-has-pet")).toBe(true);
+    });
+
+    it("listens while the visitor types and thinks while a reply is on its way", async () => {
+      const harness = await createHarness([
+        { status: 200, body: availableConfig },
+        { status: 200, body: { available: true, response: "We can help with that." } },
+      ]);
+      await flushPromises();
+
+      const { pet } = avatarParts(harness);
+      const input = harness.document.querySelector(".sa-widget-input");
+      const send = harness.document.querySelector(".sa-widget-send");
+      if (!input || !send) throw new Error("Widget input controls were not rendered");
+      expect(pet.getAttribute("data-mood")).toBe("idle");
+
+      input.dispatch("focus");
+      expect(pet.getAttribute("data-mood")).toBe("listening");
+
+      input.value = "Do you mow lawns?";
+      send.dispatch("click");
+      expect(pet.getAttribute("data-mood")).toBe("thinking");
+
+      await flushPromises();
+      expect(pet.getAttribute("data-mood")).toBe("listening");
+      expect(pet.classList.contains("sa-pet-cheer")).toBe(true);
+
+      input.dispatch("blur");
+      expect(pet.getAttribute("data-mood")).toBe("idle");
+    });
+  });
+
+  describe("readable text on any brand colour", () => {
+    it.each([
+      ["a white brand colour", "#FFFFFF", "#1c1917", "#374151"],
+      ["a pale yellow brand colour", "#FDE68A", "#1c1917", "#374151"],
+      ["the default blue", "#0066FF", "#fff", "#0066FF"],
+      ["the green preset", "#22C55E", "#fff", "#22C55E"],
+      ["the orange preset", "#F97316", "#fff", "#F97316"],
+      ["the teal preset", "#14B8A6", "#fff", "#14B8A6"],
+    ])("picks text colours for %s", async (_label, brandColor, onBrand, brandInk) => {
+      const harness = await createHarness([
+        { status: 200, body: { ...availableConfig, brandColor } },
+      ]);
+      await flushPromises();
+
+      const container = harness.document.querySelector(".sa-widget-container");
+      if (!container) throw new Error("Widget container was not rendered");
+      expect(container.style["--sa-on-brand"]).toBe(onBrand);
+      expect(container.style["--sa-brand-ink"]).toBe(brandInk);
+    });
+
+    it("draws its icons in the text colour instead of fixed white", async () => {
+      const harness = await createHarness([{ status: 200, body: availableConfig }]);
+      await flushPromises();
+
+      expect(harness.script).toContain("var(--sa-on-brand,#fff)");
+      expect(harness.script).not.toContain('stroke="#fff"');
+    });
+  });
 });

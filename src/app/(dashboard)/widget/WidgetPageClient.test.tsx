@@ -38,6 +38,7 @@ const CONFIG: WidgetConfig = {
   proactive_invitation_enabled: true,
   show_logo: false,
   logo_url: null,
+  mascot_color: "#FFFFFF",
   lead_capture_enabled: true,
   lead_capture_timing: "after_3_messages",
   quick_replies: [],

@@ -412,6 +412,14 @@ body:not(.sa-homepage-widget-route)
     }
   }
 
+  /* On phones the homepage's chat button sits in the bottom corner, on top of
+     this card's buttons. Lift the card clear of it on that page. */
+  @media (max-width: 639px) {
+    body.sa-homepage-widget-route .sa-consent {
+      bottom: 5.5rem;
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .sa-consent,
     .sa-consent * {

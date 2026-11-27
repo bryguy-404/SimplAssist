@@ -98,25 +98,6 @@ const features = [
   },
 ];
 
-const trustedTechnologies = [
-  {
-    name: "Stripe",
-    logo: "/marketing/technology/stripe.svg",
-  },
-  {
-    name: "Google Calendar",
-    logo: "/marketing/technology/google-calendar.svg",
-  },
-  {
-    name: "Anthropic",
-    logo: "/marketing/technology/claude.svg",
-  },
-  {
-    name: "Cloudflare",
-    logo: "/marketing/technology/cloudflare.svg",
-  },
-] as const;
-
 /** The two dashboard views shown in the "how it works" panel — real product
  *  screenshots (public/marketing/pane-*.png), cropped from the /demo pages.
  *  `aspect` matches each crop's ratio exactly so nothing gets clipped. */
@@ -131,6 +112,7 @@ const dashboardViews = [
   },
   {
     title: "Calendar & bookings",
+    logo: "/marketing/technology/google-calendar.svg",
     description:
       "Appointments your assistant books land straight on your calendar, synced with Google Calendar.",
     base: "pane-calendar",
@@ -887,7 +869,12 @@ export default function HomePage() {
             <div className="hidden lg:grid grid-cols-2 gap-10 max-w-[720px] mb-8">
               {dashboardViews.map((view) => (
                 <div key={view.title}>
-                  <h3 className={`text-base font-bold ${ink} mb-1.5`}>{view.title}</h3>
+                  <h3 className={`flex items-center gap-2.5 text-base font-bold ${ink} mb-1.5`}>
+                    {view.logo && (
+                      <Image src={view.logo} alt="" width={24} height={24} className="h-6 w-6 shrink-0" />
+                    )}
+                    {view.title}
+                  </h3>
                   <p className={`${body} text-[15px] leading-[1.65]`}>{view.description}</p>
                 </div>
               ))}
@@ -924,7 +911,12 @@ export default function HomePage() {
           <div className="lg:hidden space-y-10">
             {dashboardViews.map((view, i) => (
               <Reveal key={view.title} delayMs={i * 90}>
-                <h3 className={`text-base font-bold ${ink} mb-1.5`}>{view.title}</h3>
+                <h3 className={`flex items-center gap-2.5 text-base font-bold ${ink} mb-1.5`}>
+                  {view.logo && (
+                    <Image src={view.logo} alt="" width={24} height={24} className="h-6 w-6 shrink-0" />
+                  )}
+                  {view.title}
+                </h3>
                 <p className={`${body} text-[15px] leading-[1.65]`}>{view.description}</p>
                 <div className="mt-4 rounded-2xl overflow-hidden p-3 pb-0 bg-[#f2eee5] border border-black/[0.03] dark:bg-white/[0.05] dark:border-white/[0.07]">
                   <div className={`relative ${view.aspect} ${paneFrame} rounded-t-xl ${cardStyles.preview}`}>
@@ -1366,37 +1358,6 @@ export default function HomePage() {
             </div>
           </section>
         </Reveal>
-
-        <section
-          aria-labelledby="trusted-technology-heading"
-          className="my-6 rounded-[28px] border border-black/[0.03] bg-[#f2eee5] px-6 py-7 sm:px-8 sm:py-8 dark:border-white/[0.07] dark:bg-white/[0.05]"
-        >
-          <h2
-            id="trusted-technology-heading"
-            className={`text-center text-[clamp(26px,3.5vw,38px)] font-extrabold leading-none tracking-[-0.035em] ${ink}`}
-          >
-            Powered <span className={accentText}>by</span>
-          </h2>
-          <ul className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {trustedTechnologies.map(({ name, logo }) => (
-              <li
-                key={name}
-                className={`flex min-h-[76px] items-center justify-center gap-3 rounded-[22px] border border-[#e8e0d5] bg-white px-3 py-4 shadow-[0_1px_2px_rgba(28,25,23,0.03)] dark:border-white/[0.10] dark:bg-white/[0.08] dark:shadow-none ${cardStyles.card}`}
-              >
-                <Image
-                  src={logo}
-                  alt={name}
-                  width={40}
-                  height={32}
-                  className={`h-8 w-10 shrink-0 object-contain ${cardStyles.art}`}
-                />
-                <span className={`text-sm font-semibold leading-tight ${ink}`}>
-                  {name}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
 
         {/* ── Footer ── */}
         <MarketingFooter />

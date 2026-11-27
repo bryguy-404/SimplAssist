@@ -219,30 +219,22 @@ describe("canonical homepage static HTML", () => {
     );
   });
 
-  it("server-renders the trusted technology strip before the footer", () => {
+  it("shows the Google Calendar logo with bookings instead of a provider strip", () => {
     const html = renderHomepage();
-    const strip = html.match(
-      /<section aria-labelledby="trusted-technology-heading"[\s\S]*?<\/section>/
+    const dashboard = html.match(
+      /<section id="how-it-works"[\s\S]*?<\/section>/
     )?.[0];
 
-    expect(strip).toBeDefined();
-    expect(visibleText(strip ?? "")).toContain("Powered by");
-    expect(strip?.match(/<img\b/g)).toHaveLength(4);
-    for (const name of [
-      "Stripe",
-      "Google Calendar",
-      "Anthropic",
-      "Cloudflare",
-    ]) {
-      expect(strip).toContain(`alt="${name}"`);
-    }
-    expect(strip).toContain("grid-cols-2");
-    expect(strip).toContain("sm:grid-cols-4");
-    expect(strip).not.toContain("grayscale");
-    expect(strip).not.toContain("group-hover");
-    expect(html.indexOf('id="trusted-technology-heading"')).toBeLessThan(
-      html.indexOf("<footer")
+    const bookingHeadings = dashboard?.match(
+      /<h3\b[^>]*><img\b[^>]*src="\/marketing\/technology\/google-calendar.svg"[^>]*\/>Calendar &amp; bookings<\/h3>/g
     );
+    // Both desktop and mobile layouts keep the integration next to its feature.
+    expect(bookingHeadings).toHaveLength(2);
+    expect(visibleText(dashboard ?? "")).toContain("synced with Google Calendar");
+    expect(html).not.toContain("trusted-technology-heading");
+    for (const logo of ["stripe.svg", "claude.svg", "cloudflare.svg"]) {
+      expect(html).not.toContain(`/marketing/technology/${logo}`);
+    }
   });
 
   it("renders three main plans without promoting the unlisted SMS-only plan", () => {
